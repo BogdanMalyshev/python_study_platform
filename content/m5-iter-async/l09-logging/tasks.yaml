@@ -1,0 +1,526 @@
+- id: q1
+  type: quiz
+  question: |
+    Логування ніде не налаштоване: ні `basicConfig`, ні handlers. Що з'явиться в терміналі?
+    ```python
+    import logging
+
+    log = logging.getLogger("formbuilder")
+    log.info("render started")
+    log.warning("cache miss")
+    ```
+  options:
+    - "`INFO:formbuilder:render started` і `WARNING:formbuilder:cache miss`"
+    - "Лише `cache miss`, без рівня й імені логера, у stderr"
+    - "Нічого: без конфігурації logging мовчить, як pino з `enabled: false`"
+    - "`WARNING:formbuilder:cache miss` у stdout"
+  answer: 1
+  explain: |
+    Root-логер за замовчуванням має рівень `WARNING`, тож `info` відсікається ще до створення
+    запису. Для `warning` handlers не знайдено ніде в ланцюжку, і logging віддає запис
+    запасному `logging.lastResort`: він пише в stderr лише текст повідомлення, без формату.
+    Варіант 1 це формат `basicConfig()` за замовчуванням, який з'являється тільки після
+    налаштування (або після виклику `logging.info()` на root, див. урок). Варіант 3 це
+    інтуїція з pino, але Python навмисно не ковтає попередження й помилки. Варіант 4
+    помиляється з потоком: logging за замовчуванням пише в stderr, а не в stdout.
+
+- id: t1
+  type: code
+  title: "Рівні з конфігу по ієрархії логерів"
+  prompt: |
+    Напишіть `configure_levels(levels)`: отримує словник `{ім'я логера: рівень}` і виставляє
+    рівні відповідним логерам. Рівні приходять зі змінних оточення, тому регістр довільний:
+    `"info"`, `"Debug"`, `"WARNING"` мають працювати однаково.
+
+    ```python
+    configure_levels({"formbuilder": "info", "formbuilder.pdf": "Debug", "httpx": "WARNING"})
+    logging.getLogger("formbuilder.pdf.fonts").getEffectiveLevel()   # 10: успадковано від formbuilder.pdf
+    logging.getLogger("formbuilder.mail").getEffectiveLevel()        # 20: успадковано від formbuilder
+    ```
+
+    Харнес налаштовує root на `WARNING` з handler у stdout і пише з кількох логерів: частина
+    записів має пройти, частина ні.
+  starter: |
+    import logging
+
+
+    def configure_levels(levels: dict[str, str]) -> None:
+        ...
+  harness: |
+    import sys
+
+    logging.basicConfig(stream=sys.stdout, level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s", force=True)
+    for _name in ("formbuilder", "formbuilder.pdf", "formbuilder.pdf.fonts", "formbuilder.mail", "httpx"):
+        logging.getLogger(_name).setLevel(logging.NOTSET)
+
+    configure_levels({"formbuilder": "info", "formbuilder.pdf": "Debug", "httpx": "WARNING"})
+    logging.getLogger("formbuilder.pdf.fonts").debug("font %s embedded", "Inter")
+    logging.getLogger("formbuilder.mail").debug("hidden: mail inherits INFO")
+    logging.getLogger("formbuilder.mail").info("receipt sent to %s", "owner")
+    logging.getLogger("httpx").info("hidden: httpx is WARNING")
+    logging.getLogger("other").info("hidden: root stays WARNING")
+    print(logging.getLogger("formbuilder.pdf.fonts").getEffectiveLevel(), logging.getLogger("formbuilder.mail").getEffectiveLevel())
+  expected: |
+    DEBUG formbuilder.pdf.fonts: font Inter embedded
+    INFO formbuilder.mail: receipt sent to owner
+    10 20
+  hints:
+    - "Логер за іменем дає `logging.getLogger(name)`, і він той самий об'єкт при кожному виклику. Рівень ставиться методом логера; нащадки його успадкують самі."
+    - "`setLevel` приймає і число, і назву рівня, але назва має бути у верхньому регістрі: `setLevel(\"info\")` кидає `ValueError: Unknown level: 'info'`."
+    - "for name, level in levels.items(): logging.getLogger(name).setLevel(level.upper())"
+  solution: |
+    import logging
+
+
+    def configure_levels(levels: dict[str, str]) -> None:
+        for name, level in levels.items():
+            logging.getLogger(name).setLevel(level.upper())
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Скільки рядків надрукує останній виклик?
+    ```python
+    import logging
+    import sys
+
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="root: %(message)s")
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("formbuilder: %(message)s"))
+    logging.getLogger("formbuilder").addHandler(handler)
+
+    logging.getLogger("formbuilder.render").info("rendered")
+    ```
+  options:
+    - "Один, `formbuilder: rendered`: спрацьовує найближчий handler, далі запис не йде"
+    - "Два: `formbuilder: rendered`, потім `root: rendered`"
+    - "Жодного: у `formbuilder.render` немає власних handlers"
+    - "Один, `root: rendered`: root налаштований через basicConfig і має пріоритет"
+  answer: 1
+  explain: |
+    Запис віддається handlers свого логера, потім кожного предка по черзі, доки не трапиться
+    логер з `propagate = False`. Тут у `formbuilder.render` handlers немає, у `formbuilder`
+    є один, у root ще один, тому два рядки, від ближчого до дальшого. Варіант 1 це інтуїція
+    "обробник зупиняє спливання"; у logging нічого не зупиняє, поки ви явно не вимкнете
+    `propagate`. Варіант 3 забуває про спливання взагалі. Варіант 4 вигадує пріоритет, якого
+    немає: root просто останній у ланцюжку.
+
+- id: t2
+  type: code
+  title: "Ліниві аргументи і extra"
+  prompt: |
+    Напишіть `log_submission(log, form_id, answers)`, яка пише два записи:
+
+    - `INFO` з шаблоном `"form %s: answers=%d"`, аргументами `form_id` і `len(answers)`;
+    - `DEBUG` з шаблоном `"answers: %s"` і самим словником `answers` як аргументом.
+
+    Обидва записи отримують поле `form_id` через `extra`. Рядки не форматувати самому:
+    ні f-рядків, ні `%` у виклику. Харнес рахує, скільки разів `answers` перетворювали на рядок:
+    поки `DEBUG` вимкнений, це має бути нуль.
+
+    ```python
+    log_submission(log, "signup", {"email": "a@b.c", "age": 30})
+    # record.msg == "form %s: answers=%d", record.args == ("signup", 2), record.form_id == "signup"
+    ```
+  starter: |
+    import logging
+
+
+    def log_submission(log: logging.Logger, form_id: str, answers: dict) -> None:
+        ...
+  harness: |
+    class _Show(logging.Handler):
+        def emit(self, record):
+            print(record.levelname, repr(record.msg), getattr(record, "form_id", "-"), "->", record.getMessage())
+
+
+    class Answers(dict):
+        formatted = 0
+
+        def __str__(self):
+            Answers.formatted += 1
+            return dict.__repr__(self)
+
+        __repr__ = __str__
+
+
+    _log = logging.getLogger("formbuilder.submissions")
+    _log.handlers[:] = [_Show()]
+    _log.propagate = False
+    _log.setLevel(logging.INFO)
+    log_submission(_log, "signup", Answers(email="a@b.c", age=30))
+    print("formatted:", Answers.formatted)
+    _log.setLevel(logging.DEBUG)
+    log_submission(_log, "survey", Answers(q1="yes"))
+    print("formatted:", Answers.formatted)
+  expected: |
+    INFO 'form %s: answers=%d' signup -> form signup: answers=2
+    formatted: 0
+    INFO 'form %s: answers=%d' survey -> form survey: answers=1
+    DEBUG 'answers: %s' survey -> answers: {'q1': 'yes'}
+    formatted: 1
+  hints:
+    - "Аргументи для `%s` передаються в `log.info` окремими позиційними аргументами після шаблону; logging підставить їх лише тоді, коли запис дійде до handler."
+    - "`extra` це іменований аргумент зі словником: його ключі стають атрибутами `LogRecord`. Той самий словник можна передати в обидва виклики."
+    - "fields = {\"form_id\": form_id}; log.info(\"form %s: answers=%d\", form_id, len(answers), extra=fields); log.debug(\"answers: %s\", answers, extra=fields)"
+  solution: |
+    import logging
+
+
+    def log_submission(log: logging.Logger, form_id: str, answers: dict) -> None:
+        fields = {"form_id": form_id}
+        log.info("form %s: answers=%d", form_id, len(answers), extra=fields)
+        log.debug("answers: %s", answers, extra=fields)
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Пакетне завантаження без падіння на поганому конфігу"
+  prompt: |
+    Напишіть `load_all(raws, log)`: розбирає кожен рядок `raws` як JSON і повертає список
+    успішно розібраних конфігів. Номер конфігу в повідомленнях рахується з 1.
+
+    - Невалідний JSON: `log.exception("config %d rejected", n)` (запис рівня ERROR зі стеком)
+      і перехід до наступного конфігу.
+    - Валідний JSON, але не об'єкт (наприклад, список): `log.warning("config %d is not an object", n)`
+      без traceback, конфіг пропускається.
+    - Об'єкт: `log.info("config %d loaded: %s", n, config.get("title"))`, конфіг іде в результат.
+
+    Харнес підставляє formatter, який замість повного traceback друкує лише його останній рядок,
+    щоб вивід не залежав від шляхів до файлів.
+  starter: |
+    import json
+    import logging
+
+
+    def load_all(raws: list[str], log: logging.Logger) -> list[dict]:
+        ...
+  harness: |
+    import sys
+    import traceback
+
+
+    class _Short(logging.Formatter):
+        def formatException(self, ei):
+            return "  " + traceback.format_exception_only(ei[1])[-1].strip()
+
+
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setFormatter(_Short("%(levelname)s %(message)s"))
+    _log = logging.getLogger("formbuilder.batch")
+    _log.handlers[:] = [_handler]
+    _log.propagate = False
+    _log.setLevel(logging.INFO)
+
+    result = load_all(['{"title": "Signup"}', '{"title": }', '[1, 2]', '{"title": "Survey"}', ''], _log)
+    print([c["title"] for c in result])
+  expected: |
+    INFO config 1 loaded: Signup
+    ERROR config 2 rejected
+      json.decoder.JSONDecodeError: Expecting value: line 1 column 11 (char 10)
+    WARNING config 3 is not an object
+    INFO config 4 loaded: Survey
+    ERROR config 5 rejected
+      json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+    ['Signup', 'Survey']
+  hints:
+    - "`log.exception` працює лише всередині `except`: там є активний виняток, і logging сам додасть його до запису. Нумерацію з 1 дає `enumerate(raws, start=1)`."
+    - "Розділіть дві гілки: `try/except json.JSONDecodeError` навколо `json.loads`, а перевірку `isinstance(config, dict)` у гілці `else` або після `try`."
+    - "for n, raw in enumerate(raws, start=1): try: config = json.loads(raw) except json.JSONDecodeError: log.exception(\"config %d rejected\", n); continue; if not isinstance(config, dict): log.warning(...); continue; log.info(...); result.append(config)"
+  solution: |
+    import json
+    import logging
+
+
+    def load_all(raws: list[str], log: logging.Logger) -> list[dict]:
+        result = []
+        for n, raw in enumerate(raws, start=1):
+            try:
+                config = json.loads(raw)
+            except json.JSONDecodeError:
+                log.exception("config %d rejected", n)
+                continue
+            if not isinstance(config, dict):
+                log.warning("config %d is not an object", n)
+                continue
+            log.info("config %d loaded: %s", n, config.get("title"))
+            result.append(config)
+        return result
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "JSON-formatter з полями extra і винятком"
+  prompt: |
+    Допишіть `JsonFormatter.format`: кожен запис стає одним рядком JSON з ключами в такому порядку:
+
+    1. `"level"`: назва рівня в нижньому регістрі;
+    2. `"logger"`: ім'я логера;
+    3. `"msg"`: повідомлення з підставленими аргументами;
+    4. усі поля з `extra` у тому порядку, в якому їх передали;
+    5. `"exc"`, лише якщо в записі є виняток: останній рядок
+       `traceback.format_exception_only(...)` без `\n`, тобто `"ConnectionError: storage unavailable"`.
+
+    Значення, які `json` не вміє серіалізувати (наприклад, `PurePosixPath`), пишуться через `str`.
+    Кирилиця лишається кирилицею, а не `\u...`. Множина `STANDARD` у стартері вже містить імена
+    стандартних атрибутів `LogRecord`: усе, чого в ній немає, прийшло з `extra`.
+  starter: |
+    import json
+    import logging
+    import traceback
+
+    STANDARD = set(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
+
+
+    class JsonFormatter(logging.Formatter):
+        def format(self, record: logging.LogRecord) -> str:
+            ...
+  harness: |
+    import sys
+    from pathlib import PurePosixPath
+
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setFormatter(JsonFormatter())
+    _log = logging.getLogger("formbuilder.storage")
+    _log.handlers[:] = [_handler]
+    _log.propagate = False
+    _log.setLevel(logging.INFO)
+
+    _log.info("published %s", "signup", extra={"form_id": "signup", "path": PurePosixPath("dist/signup/index.html")})
+    _log.warning("слот публікації зайнятий")
+    try:
+        raise ConnectionError("storage unavailable")
+    except ConnectionError:
+        _log.exception("publish failed", extra={"attempt": 3})
+    _log.debug("hidden", extra={"x": 1})
+  expected: |
+    {"level": "info", "logger": "formbuilder.storage", "msg": "published signup", "form_id": "signup", "path": "dist/signup/index.html"}
+    {"level": "warning", "logger": "formbuilder.storage", "msg": "слот публікації зайнятий"}
+    {"level": "error", "logger": "formbuilder.storage", "msg": "publish failed", "attempt": 3, "exc": "ConnectionError: storage unavailable"}
+  hints:
+    - "Атрибути запису в порядку їх появи дає `vars(record)`: спершу стандартні, потім ті, що з `extra`. Відфільтруйте ключі, яких немає в `STANDARD`. Виняток лежить у `record.exc_info` як кортеж `(тип, значення, traceback)`."
+    - "`json.dumps` має два потрібні параметри: `ensure_ascii=False` для кирилиці і `default=str` для всього, що не серіалізується. Порядок ключів у dict зберігається, тож збирайте словник у потрібній послідовності."
+    - "data = {\"level\": record.levelname.lower(), \"logger\": record.name, \"msg\": record.getMessage()}; data |= {k: v for k, v in vars(record).items() if k not in STANDARD}; if record.exc_info: data[\"exc\"] = traceback.format_exception_only(record.exc_info[1])[-1].strip()"
+  solution: |
+    import json
+    import logging
+    import traceback
+
+    STANDARD = set(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
+
+
+    class JsonFormatter(logging.Formatter):
+        def format(self, record: logging.LogRecord) -> str:
+            data = {
+                "level": record.levelname.lower(),
+                "logger": record.name,
+                "msg": record.getMessage(),
+            }
+            data |= {k: v for k, v in vars(record).items() if k not in STANDARD}
+            if record.exc_info:
+                data["exc"] = traceback.format_exception_only(record.exc_info[1])[-1].strip()
+            return json.dumps(data, ensure_ascii=False, default=str)
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Модуль `formbuilder/plugins.py` під час імпорту викликає `logging.basicConfig()` без
+    аргументів. Застосунок імпортує його першим рядком, а потім налаштовує логування сам:
+    ```python
+    import formbuilder.plugins
+    import logging
+
+    logging.basicConfig(level=logging.DEBUG, format="%(name)s | %(message)s")
+    logging.getLogger("formbuilder").debug("config loaded")
+    ```
+    Що буде з повідомленням `config loaded`?
+  options:
+    - "Надрукується у форматі `formbuilder | config loaded`: пізніший виклик перекриває ранній"
+    - "Не надрукується: другий `basicConfig` нічого не робить, і root лишається на `WARNING`"
+    - "Надрукується двічі: кожен `basicConfig` додав свій handler"
+    - "Надрукується у форматі `DEBUG:formbuilder:config loaded`: рівень з другого виклику, формат з першого"
+  answer: 1
+  explain: |
+    `basicConfig` нічого не робить, якщо root уже має handlers, і це стосується всіх його
+    аргументів, включно з `level`. Перший виклик у бібліотеці додав handler і лишив рівень
+    `WARNING`, тож `debug` відсікається ще на логері. Варіант 1 це очікування "останній
+    конфіг виграє", як з повторним `pino(...)`, але тут конфіг глобальний і одноразовий.
+    Варіант 3 був би правдою для двох `addHandler`, а не для `basicConfig`. Варіант 4
+    припускає часткове застосування, якого немає. Виправлення: `force=True` у застосунку,
+    а головне, бібліотека не має викликати `basicConfig` взагалі.
+
+- id: t5
+  type: code
+  title: "job_id у кожному записі через contextvars"
+  prompt: |
+    Воркер обробляє кілька задач одночасно, а `render_stage` нічого не знає про задачу. Потрібно,
+    щоб кожен запис мав `job_id` поточної задачі без передачі параметра вниз по викликах.
+
+    1. `JobIdFilter.filter` додає в запис атрибут `job_id` зі значенням `job_id_var` і пропускає запис.
+       Поза задачею там стоїть значення за замовчуванням `"-"`.
+    2. `run_job(job_id, stages)` ставить `job_id_var`, пише `"job started"`, по черзі чекає
+       `render_stage` для кожної пари `(stage, delay)` і пише `"job finished"`. Якщо етап
+       кинув виняток, пише `log.exception("job failed")` і завершується без винятку назовні:
+       падіння однієї задачі не має скасувати сусідні в `TaskGroup`.
+
+    Порядок записів у харнесі детермінований різними тривалостями `sleep`: етапи двох задач
+    закінчуються в різні моменти (10, 20, 30 і 40 мс).
+  starter: |
+    import asyncio
+    import contextvars
+    import logging
+
+    job_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("job_id", default="-")
+    log = logging.getLogger("formbuilder.jobs")
+
+
+    class JobIdFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            ...
+
+
+    async def render_stage(stage: str, delay: float) -> None:
+        await asyncio.sleep(delay)
+        if stage == "broken":
+            raise RuntimeError(f"stage {stage} crashed")
+        log.info("stage %s done", stage)
+
+
+    async def run_job(job_id: str, stages: list[tuple[str, float]]) -> None:
+        ...
+  harness: |
+    import sys
+    import traceback
+
+
+    class _Short(logging.Formatter):
+        def formatException(self, ei):
+            return "  " + traceback.format_exception_only(ei[1])[-1].strip()
+
+
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setFormatter(_Short("[%(job_id)s] %(levelname)s %(message)s"))
+    _handler.addFilter(JobIdFilter())
+    log.handlers[:] = [_handler]
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+    log.propagate = False
+    log.setLevel(logging.INFO)
+
+
+    async def main():
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(run_job("j-1", [("render", 0.03), ("publish", 0.01)]))
+            tg.create_task(run_job("j-2", [("render", 0.01), ("broken", 0.01)]))
+        log.info("all jobs done")
+
+
+    asyncio.run(main())
+    print(job_id_var.get())
+  expected: |
+    [j-1] INFO job started
+    [j-2] INFO job started
+    [j-2] INFO stage render done
+    [j-2] ERROR job failed
+      RuntimeError: stage broken crashed
+    [j-1] INFO stage render done
+    [j-1] INFO stage publish done
+    [j-1] INFO job finished
+    [-] INFO all jobs done
+    -
+  hints:
+    - "Фільтр може не лише відкидати записи, а й дописувати в них атрибути: `record.job_id = ...` і `return True`. Значення змінної контексту читає `job_id_var.get()`."
+    - "Кожна задача `TaskGroup` отримує копію контексту в момент створення, тому `job_id_var.set(job_id)` усередині `run_job` не зачепить ні сусідню задачу, ні `main`. Для помилки етапу потрібен `try/except Exception` навколо циклу по етапах."
+    - "job_id_var.set(job_id); log.info(\"job started\"); try: for stage, delay in stages: await render_stage(stage, delay) except Exception: log.exception(\"job failed\"); return; log.info(\"job finished\")"
+  solution: |
+    import asyncio
+    import contextvars
+    import logging
+
+    job_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("job_id", default="-")
+    log = logging.getLogger("formbuilder.jobs")
+
+
+    class JobIdFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            record.job_id = job_id_var.get()
+            return True
+
+
+    async def render_stage(stage: str, delay: float) -> None:
+        await asyncio.sleep(delay)
+        if stage == "broken":
+            raise RuntimeError(f"stage {stage} crashed")
+        log.info("stage %s done", stage)
+
+
+    async def run_job(job_id: str, stages: list[tuple[str, float]]) -> None:
+        job_id_var.set(job_id)
+        log.info("job started")
+        try:
+            for stage, delay in stages:
+                await render_stage(stage, delay)
+        except Exception:
+            log.exception("job failed")
+            return
+        log.info("job finished")
+  requires: []
+  runtime: browser
+
+- id: q4
+  type: quiz
+  question: |
+    Модуль `loader.py` пише `log.info("config %s loaded", title)` через `logging.getLogger(__name__)`.
+    Логування в тестах ніхто не налаштовував, `pyproject.toml` без опцій `log_*`. Що покаже тест?
+    ```python
+    def test_info_message(caplog):
+        load('{"title": "Signup"}')
+        assert caplog.messages == ["config Signup loaded"]
+    ```
+  options:
+    - "Пройде: `caplog` перехоплює всі записи незалежно від рівня"
+    - "Впаде з `assert [] == ['config Signup loaded']`: без `caplog.set_level(logging.INFO)` запис INFO навіть не створюється"
+    - "Впаде, бо `caplog.messages` містить рядок з префіксом `INFO loader:`"
+    - "Впаде з помилкою фікстури: `caplog` працює лише з логерами, створеними в тесті"
+  answer: 1
+  explain: |
+    Handler `caplog` висить на root і має рівень 0, але фільтр рівня логера спрацьовує раніше:
+    ефективний рівень `loader` успадкований від root, тобто `WARNING`, і `log.info` повертається,
+    не створивши запису. Варіант 1 плутає рівень handler із рівнем логера. Варіант 3 невірний,
+    бо `caplog.messages` містить лише `getMessage()`, без формату. Варіант 4 вигаданий: `caplog`
+    бачить будь-які логери, записи яких доходять до root. Виправлення: `caplog.set_level(logging.INFO)`
+    у тесті або `log_level = "INFO"` у `[tool.pytest.ini_options]`.
+
+- id: p1
+  type: project
+  title: "structlog у formbuilder: job_id, тривалість етапів, JSON у prod"
+  prompt: |
+    У репозиторії капстоуну налаштуйте логування пайплайну генерації.
+
+    1. `uv add structlog`.
+    2. Модуль `src/formbuilder/logs.py` з функцією `configure_logging(fmt=None, level=None)`.
+       Формат береться з аргументу або змінної `FORMBUILDER_LOG_FORMAT` (`json` або `console`,
+       за замовчуванням `console`), рівень з аргументу або `FORMBUILDER_LOG_LEVEL` (за замовчуванням
+       `INFO`). structlog працює поверх stdlib: `LoggerFactory`, `ProcessorFormatter` на одному
+       handler у stdout, `foreign_pre_chain` для записів сторонніх бібліотек, `httpx` на `WARNING`,
+       `logging.captureWarnings(True)`. Повторний виклик не дублює handlers.
+    3. Декоратор `@timed(stage)` з m5-l04 переведіть на structlog: після кожного виклику, і успішного,
+       і з винятком, запис `"stage finished"` з полями `stage`, `status` (`ok`/`error`), `duration_ms`.
+    4. Воркер з m5-l05/m5-l06 обгортає обробку кожної задачі в `bound_contextvars(job_id=job.id)`,
+       щоб `job_id` був у кожному записі, включно із записами з `@timed`, і не перетікав у наступну задачу.
+    5. `configure_logging()` викликається один раз у точці входу (`__main__` або `cli.main`), а не при імпорті модулів.
+  checklist:
+    - "`configure_logging(fmt=\"json\")` дає в stdout рядки, кожен з яких розбирає `json.loads`, з ключами `event`, `level`, `logger`, `timestamp`"
+    - "Запис зі stdlib-логера (наприклад, `logging.getLogger(\"uvicorn.error\").info(...)`) виходить у тому самому форматі, що й записи structlog"
+    - "Два виклики `configure_logging()` поспіль лишають на root рівно один handler"
+    - "`@timed` пише `stage finished` з `status=\"error\"` і передає виняток далі; тест через `structlog.testing.capture_logs()`"
+    - "Дві задачі, оброблені одним воркером послідовно, мають кожна свій `job_id`, а запис після обох без `job_id`"
+    - "Модулі пакета створюють логери через `structlog.get_logger(__name__)` і не викликають `configure_logging` при імпорті"
+    - "`uv run mypy src` і `uv run ruff check --select G,LOG src` проходять без помилок"
+  verify: "cd capstone && uv run pytest tests/test_logs.py -q"

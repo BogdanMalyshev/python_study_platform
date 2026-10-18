@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Python для Senior Frontend-розробника</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <button class="iconbtn menu-btn" id="menuBtn" aria-label="Відкрити список уроків" aria-controls="left" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <a class="brand" href="#" id="brand"><span class="mark" aria-hidden="true">&gt;_</span><span id="courseTitle">Курс Python</span></a>
+    <div class="spacer"></div>
+    <div class="progress-wrap" title="Виконано завдань у всьому курсі">
+      <span id="globalText">0 / 0</span><span class="progress-word">завдань</span>
+      <div class="bar" role="progressbar" aria-label="Прогрес курсу" id="globalBarWrap"><i id="globalBar"></i></div>
+    </div>
+    <div class="io">
+      <button class="btn small" id="themeBtn" title="Тема: як у системі / світла / темна" aria-label="Перемкнути тему">Тема: система</button>
+      <button class="btn small" id="exportBtn" title="Зберегти прогрес у файл pycourse-progress.json">Експорт</button>
+      <button class="btn small" id="importBtn" title="Відновити прогрес із файлу">Імпорт</button>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    </div>
+  </header>
+  <div class="shell">
+    <nav class="left" id="left" aria-label="Модулі й уроки"></nav>
+    <div class="overlay" id="overlay"></div>
+    <main class="center" id="center">
+      <article class="lesson" id="lesson"><p class="loading">Завантажую курс…</p></article>
+    </main>
+    <aside class="right" id="right" aria-label="Навігація по уроку"></aside>
+  </div>
+</div>
+<script src="vendor/marked/marked.umd.js"></script>
+<script src="vendor/hljs/highlight.min.js"></script>
+<script src="vendor/hljs/languages/typescript.min.js"></script>
+<script src="vendor/hljs/languages/python.min.js"></script>
+<script src="vendor/hljs/languages/bash.min.js"></script>
+<script src="vendor/hljs/languages/json.min.js"></script>
+<script src="vendor/hljs/languages/yaml.min.js"></script>
+<script src="vendor/hljs/languages/ini.min.js"></script>
+<script src="vendor/hljs/languages/dockerfile.min.js"></script>
+<script src="vendor/hljs/languages/plaintext.min.js"></script>
+<script src="vendor/ace/ace.js"></script>
+<script src="runner.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

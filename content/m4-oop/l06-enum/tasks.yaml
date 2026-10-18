@@ -1,0 +1,381 @@
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from enum import Enum
+
+    class Color(Enum):
+        RED = "red"
+
+    print(Color.RED == "red", Color("red") is Color.RED)
+    ```
+  options: ["False True", "True True", "True False", "KeyError: 'red'"]
+  answer: 0
+  explain: |
+    Член звичайного `Enum` це окремий об'єкт типу `Color`, а не рядок, тому `Color.RED == "red"` дає `False`
+    (рядок лежить у `Color.RED.value`). `Color("red")` не конструктор, а пошук члена за значенням, і він
+    повертає той самий єдиний об'єкт, тож `is` дає `True`. Варіант "True True" це інтуїція з TS, де рядковий
+    enum у рантаймі і є рядком; так поводиться `StrEnum`. `KeyError` був би для `Color["red"]`: квадратні
+    дужки шукають за ім'ям, а виклик за значенням.
+
+- id: t1
+  type: code
+  title: "Розбір статусу за значенням або ім'ям"
+  prompt: |
+    Статус приходить ззовні рядком: іноді значенням (`"published"`), іноді ім'ям у довільному регістрі
+    (`"PUBLISHED"`, `"Published"`). Напишіть `parse_status(raw)`, яка повертає члена `Status`.
+
+    - Спершу шукати за значенням, потім за ім'ям (ім'я порівнювати у верхньому регістрі).
+    - Якщо не знайдено ні так, ні так, кинути `ValueError` з текстом
+      `unknown status '<raw>', expected one of: draft, published, archived`. Список значень не писати
+      вручну, а зібрати з класу.
+
+    ```python
+    parse_status("draft")       # Status.DRAFT
+    parse_status("Archived")    # Status.ARCHIVED
+    parse_status("deleted")     # ValueError
+    ```
+  starter: |
+    from enum import Enum
+
+    class Status(Enum):
+        DRAFT = "draft"
+        PUBLISHED = "published"
+        ARCHIVED = "archived"
+
+    def parse_status(raw: str) -> Status:
+        ...
+  harness: |
+    print(parse_status("draft"))
+    print(parse_status("PUBLISHED"))
+    print(parse_status("Archived") is Status.ARCHIVED)
+    try:
+        parse_status("deleted")
+    except ValueError as e:
+        print("ValueError:", e)
+  expected: |
+    Status.DRAFT
+    Status.PUBLISHED
+    True
+    ValueError: unknown status 'deleted', expected one of: draft, published, archived
+  hints:
+    - "Виклик класу шукає за значенням і кидає ValueError, квадратні дужки шукають за ім'ям і кидають KeyError. Клас iterable, з нього можна зібрати список значень."
+    - "try: return Status(raw) except ValueError: pass; далі try: return Status[raw.upper()] except KeyError: ... і ', '.join(s.value for s in Status) для повідомлення."
+  solution: |
+    from enum import Enum
+
+    class Status(Enum):
+        DRAFT = "draft"
+        PUBLISHED = "published"
+        ARCHIVED = "archived"
+
+    def parse_status(raw: str) -> Status:
+        try:
+            return Status(raw)
+        except ValueError:
+            pass
+        try:
+            return Status[raw.upper()]
+        except KeyError:
+            allowed = ", ".join(s.value for s in Status)
+            raise ValueError(f"unknown status {raw!r}, expected one of: {allowed}") from None
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Python 3.12. Що надрукує цей код?
+    ```python
+    from enum import Enum, StrEnum
+
+    class A(str, Enum):
+        DONE = "done"
+
+    class B(StrEnum):
+        DONE = "done"
+
+    print(f"{A.DONE}/{B.DONE}", A.DONE == B.DONE)
+    ```
+  options: ["done/done True", "A.DONE/done True", "A.DONE/B.DONE False", "done/done False"]
+  answer: 1
+  explain: |
+    Обидва класи наслідують `str`, тому порівняння йде через `str.__eq__` і порівнює рядки: `True`, хоча
+    класи різні. Різниця у форматуванні: з 3.11 f-рядок для `(str, Enum)` дає те саме, що `str()`, тобто
+    `A.DONE`, а `StrEnum` явно перевизначає `__str__` і `__format__` на значення. "done/done" була поведінка
+    `(str, Enum)` до 3.11, через що старий код ламається при оновленні. "False" було б для двох звичайних
+    `Enum`, які порівнюються лише за identity.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from enum import Enum, StrEnum, auto
+
+    class Step(Enum):
+        START = auto()
+
+    class Kind(StrEnum):
+        INPUT = auto()
+        BLOCK = "container"
+        TEXT = auto()
+
+    print(Step.START.value, Kind.TEXT.value)
+    ```
+  options: ["1 text", "0 text", "1 container", "START TEXT"]
+  answer: 0
+  explain: |
+    `auto()` делегує `_generate_next_value_` класу. У `Enum` він рахує з 1, а не з 0, як числовий enum у TS.
+    У `StrEnum` він повертає ім'я члена малими літерами і не дивиться на попереднє значення, тому явний
+    `"container"` перед `TEXT` нічого не змінює. "START TEXT" був би, якби бралося ім'я без зміни регістру.
+
+- id: t2
+  type: code
+  title: "Лічильник типів елементів у JSON"
+  prompt: |
+    Оголосіть `ElementType(StrEnum)` з членами `INPUT`, `TEXT`, `BUTTON`, `BLOCK`, значення через `auto()`
+    (мають вийти `"input"`, `"text"`, `"button"`, `"block"`).
+
+    Напишіть `count_types(elements)`: на вході список словників з ключем `"type"`, на виході словник
+    `{ElementType: кількість}` з усіма типами в порядку оголошення, включно з нулями. Невідомий тип має
+    кинути `ValueError`; перевіряти вручну не потрібно, це вже робить пошук за значенням.
+
+    Результат має без жодних перетворень іти в `json.dumps` і читатися як за членом, так і за рядком.
+
+    ```python
+    counts = count_types([{"type": "input"}, {"type": "block"}])
+    json.dumps(counts)   # '{"input": 1, "text": 0, "button": 0, "block": 1}'
+    counts["input"]      # 1
+    ```
+  starter: |
+    import json
+    from enum import StrEnum, auto
+
+    class ElementType(StrEnum):
+        ...
+
+    def count_types(elements: list[dict]) -> dict[ElementType, int]:
+        ...
+  harness: |
+    print([t.value for t in ElementType])
+    counts = count_types([{"type": "input"}, {"type": "block"}, {"type": "input"}])
+    print(json.dumps(counts))
+    print(counts["input"], counts[ElementType.BLOCK])
+    print(json.dumps(count_types([])))
+    try:
+        count_types([{"type": "slider"}])
+    except ValueError as e:
+        print("ValueError:", e)
+  expected: |
+    ['input', 'text', 'button', 'block']
+    {"input": 2, "text": 0, "button": 0, "block": 1}
+    2 1
+    {"input": 0, "text": 0, "button": 0, "block": 0}
+    ValueError: 'slider' is not a valid ElementType
+  hints:
+    - "StrEnum з auto() сам дає ім'я малими літерами. Член StrEnum є рядком, тому json.dumps і пошук за рядковим ключем працюють без .value."
+    - "counts = {t: 0 for t in ElementType}, далі для кожного елемента counts[ElementType(element[\"type\"])] += 1."
+  solution: |
+    import json
+    from enum import StrEnum, auto
+
+    class ElementType(StrEnum):
+        INPUT = auto()
+        TEXT = auto()
+        BUTTON = auto()
+        BLOCK = auto()
+
+    def count_types(elements: list[dict]) -> dict[ElementType, int]:
+        counts = {t: 0 for t in ElementType}
+        for element in elements:
+            counts[ElementType(element["type"])] += 1
+        return counts
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "JobStatus з таблицею переходів"
+  prompt: |
+    Статус задачі рендеру. Дозволені переходи:
+
+    - `queued` → `running`, `failed`
+    - `running` → `done`, `failed`
+    - `failed` → `queued` (повторна спроба)
+    - `done` → нікуди
+
+    Допишіть:
+
+    - `_TRANSITIONS`: словник `{JobStatus: frozenset[JobStatus]}` на рівні модуля (не в тілі класу:
+      там він став би членом).
+    - метод `can_transition_to(target)`: `True`, якщо перехід дозволений. `target` може бути і членом, і
+      рядком `"running"`.
+    - властивість `is_terminal`: `True`, якщо з цього статусу переходів немає. Не перелічувати такі статуси
+      вручну, а вивести з таблиці.
+
+    ```python
+    JobStatus.QUEUED.can_transition_to(JobStatus.RUNNING)   # True
+    JobStatus.FAILED.can_transition_to("queued")            # True
+    JobStatus.DONE.is_terminal                              # True
+    ```
+  starter: |
+    from enum import StrEnum
+
+    class JobStatus(StrEnum):
+        QUEUED = "queued"
+        RUNNING = "running"
+        DONE = "done"
+        FAILED = "failed"
+
+        @property
+        def is_terminal(self) -> bool:
+            ...
+
+        def can_transition_to(self, target: "JobStatus | str") -> bool:
+            ...
+
+    _TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {}
+  harness: |
+    print(JobStatus.QUEUED.can_transition_to(JobStatus.RUNNING))
+    print(JobStatus.RUNNING.can_transition_to(JobStatus.QUEUED))
+    print(JobStatus.FAILED.can_transition_to("queued"))
+    print(JobStatus.DONE.can_transition_to("queued"))
+    print([s.value for s in JobStatus if s.is_terminal])
+    print(len(JobStatus))
+  expected: |
+    True
+    False
+    True
+    False
+    ['done']
+    4
+  hints:
+    - "Метод викликається вже після того, як модуль виконано повністю, тож він бачить _TRANSITIONS, оголошений нижче класу. Член StrEnum хешується і порівнюється як його рядок, тому рядок можна шукати у frozenset з членів."
+    - "return target in _TRANSITIONS[self] для переходу і return not _TRANSITIONS[self] для is_terminal; DONE у таблиці має frozenset()."
+  solution: |
+    from enum import StrEnum
+
+    class JobStatus(StrEnum):
+        QUEUED = "queued"
+        RUNNING = "running"
+        DONE = "done"
+        FAILED = "failed"
+
+        @property
+        def is_terminal(self) -> bool:
+            return not _TRANSITIONS[self]
+
+        def can_transition_to(self, target: "JobStatus | str") -> bool:
+            return target in _TRANSITIONS[self]
+
+    _TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
+        JobStatus.QUEUED: frozenset({JobStatus.RUNNING, JobStatus.FAILED}),
+        JobStatus.RUNNING: frozenset({JobStatus.DONE, JobStatus.FAILED}),
+        JobStatus.DONE: frozenset(),
+        JobStatus.FAILED: frozenset({JobStatus.QUEUED}),
+    }
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Перехід статусу задачі через Pydantic"
+  prompt: |
+    Воркер отримує задачу як JSON і цільовий статус рядком. `JobStatus` з попереднього завдання вже є в
+    стартовому коді.
+
+    1. Опишіть `Job(BaseModel)`: `id: str`, `status: JobStatus` зі значенням за замовчуванням `QUEUED`.
+    2. Напишіть `advance(job_json, target)`:
+       - валідує `job_json` у `Job` (невалідний статус у JSON дає `ValidationError`, перехоплювати не треба);
+       - перетворює `target` на `JobStatus` (невідомий дає `ValueError` з пошуку за значенням);
+       - якщо перехід заборонений, кидає `ValueError(f"cannot move {job.status} -> {target}")`;
+       - повертає JSON оновленої задачі, де статус записаний значенням.
+
+    Вихідну модель не змінювати: поверніть копію з новим статусом.
+
+    ```python
+    advance('{"id": "j1"}', "running")   # '{"id":"j1","status":"running"}'
+    ```
+  starter: |
+    from enum import StrEnum
+    from pydantic import BaseModel, ValidationError
+
+    class JobStatus(StrEnum):
+        QUEUED = "queued"
+        RUNNING = "running"
+        DONE = "done"
+        FAILED = "failed"
+
+        def can_transition_to(self, target: "JobStatus | str") -> bool:
+            return target in _TRANSITIONS[self]
+
+    _TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
+        JobStatus.QUEUED: frozenset({JobStatus.RUNNING, JobStatus.FAILED}),
+        JobStatus.RUNNING: frozenset({JobStatus.DONE, JobStatus.FAILED}),
+        JobStatus.DONE: frozenset(),
+        JobStatus.FAILED: frozenset({JobStatus.QUEUED}),
+    }
+
+    class Job(BaseModel):
+        ...
+
+    def advance(job_json: str, target: str) -> str:
+        ...
+  harness: |
+    print(advance('{"id": "j1"}', "running"))
+    print(advance('{"id": "j1", "status": "running"}', "done"))
+    print(advance('{"id": "j1", "status": "failed"}', "queued"))
+    for job_json, target in [('{"id": "j1", "status": "done"}', "queued"), ('{"id": "j1"}', "paused")]:
+        try:
+            advance(job_json, target)
+        except ValueError as e:
+            print("ValueError:", e)
+    try:
+        advance('{"id": "j1", "status": "RUNNING"}', "done")
+    except ValidationError as e:
+        err = e.errors(include_url=False)[0]
+        print(err["type"], "|", err["msg"])
+  expected: |
+    {"id":"j1","status":"running"}
+    {"id":"j1","status":"done"}
+    {"id":"j1","status":"queued"}
+    ValueError: cannot move done -> queued
+    ValueError: 'paused' is not a valid JobStatus
+    enum | Input should be 'queued', 'running', 'done' or 'failed'
+  hints:
+    - "Job.model_validate_json приймає рядок JSON і валідує статус за значенням. JobStatus(target) робить те саме для цільового статусу. Копію з одним зміненим полем дає метод моделі model_copy."
+    - "job = Job.model_validate_json(job_json); new = JobStatus(target); якщо not job.status.can_transition_to(new): raise ...; return job.model_copy(update={\"status\": new}).model_dump_json()."
+  solution: |
+    from enum import StrEnum
+    from pydantic import BaseModel, ValidationError
+
+    class JobStatus(StrEnum):
+        QUEUED = "queued"
+        RUNNING = "running"
+        DONE = "done"
+        FAILED = "failed"
+
+        def can_transition_to(self, target: "JobStatus | str") -> bool:
+            return target in _TRANSITIONS[self]
+
+    _TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
+        JobStatus.QUEUED: frozenset({JobStatus.RUNNING, JobStatus.FAILED}),
+        JobStatus.RUNNING: frozenset({JobStatus.DONE, JobStatus.FAILED}),
+        JobStatus.DONE: frozenset(),
+        JobStatus.FAILED: frozenset({JobStatus.QUEUED}),
+    }
+
+    class Job(BaseModel):
+        id: str
+        status: JobStatus = JobStatus.QUEUED
+
+    def advance(job_json: str, target: str) -> str:
+        job = Job.model_validate_json(job_json)
+        new_status = JobStatus(target)
+        if not job.status.can_transition_to(new_status):
+            raise ValueError(f"cannot move {job.status} -> {target}")
+        return job.model_copy(update={"status": new_status}).model_dump_json()
+  requires: [pydantic]
+  runtime: browser

@@ -1,0 +1,513 @@
+- id: q1
+  type: quiz
+  question: |
+    Два файли в одній папці, запуск `python main.py`. Що надрукує програма?
+    ```python
+    # settings.py
+    DEBUG = False
+    ```
+    ```python
+    # main.py
+    import settings
+    from settings import DEBUG
+
+    settings.DEBUG = True
+    print(DEBUG, settings.DEBUG)
+    ```
+  options: ["False True", "True True", "False False", "ImportError: cannot import name 'DEBUG'"]
+  answer: 0
+  explain: |
+    `from settings import DEBUG` у момент імпорту створює в `main` нове ім'я, прив'язане до того самого об'єкта `False`.
+    `settings.DEBUG = True` перепризначає атрибут модуля, а ваша копія імені про це не дізнається: `False True`.
+    `True True` це інтуїція ESM, де імпорт є live binding і завжди показує поточне значення експорту.
+    `False False` вийшло б, якби модуль імпортувався двічі в різні об'єкти, але `sys.modules` віддає той самий об'єкт,
+    тож `settings.DEBUG` змінився. `ImportError` тут немає: обидва імпорти беруть уже виконаний модуль з кешу.
+
+- id: q2
+  type: quiz
+  question: |
+    Структура проєкту й запуск `python main.py` з кореня:
+    ```text
+    shop/__init__.py     # порожній
+    shop/cart.py         # ITEMS = []
+    main.py
+    ```
+    ```python
+    # main.py
+    import shop
+
+    print(shop.cart.ITEMS)
+    ```
+    Що станеться?
+  options: ["Надрукує []", "AttributeError: module 'shop' has no attribute 'cart'", "ModuleNotFoundError: No module named 'shop.cart'", "ImportError: cannot import name 'cart' from 'shop'"]
+  answer: 1
+  explain: |
+    Імпорт пакета виконує лише його `__init__.py`; підмодулі він не імпортує. Атрибут `cart` з'являється на пакеті
+    тільки після `import shop.cart` (або `from shop import cart`) будь-де в процесі, а тут такого рядка немає.
+    `[]` це інтуїція barrel-файлу: у JS `index.ts` реекспортує сусідів, але порожній `__init__.py` нічого не реекспортує.
+    `ModuleNotFoundError` неправильний, бо модуль `shop.cart` існує, його просто ніхто не імпортував.
+    `ImportError: cannot import name` з'являється лише у формі `from ... import`, а тут звичайне звернення до атрибута.
+
+- id: q3
+  type: quiz
+  question: |
+    У проєкті `app/__init__.py` (порожній), `app/config.py` і `app/main.py`, який починається з
+    `from .config import load`. Яка з команд, запущених з кореня проєкту, виконає `main.py` без помилки?
+  options: ["python app/main.py", "cd app && python main.py", "python -m app.main", "python -m app/main.py"]
+  answer: 2
+  explain: |
+    Відносний імпорт рахує від `__package__`. `python -m app.main` спершу імпортує пакет `app` і запускає модуль
+    з `__package__ == "app"`, тож `.config` означає `app.config`.
+    Запуск за шляхом, і з кореня, і з папки `app/`, робить файл модулем `__main__` без пакета:
+    `ImportError: attempted relative import with no known parent package`. Те, що файл фізично лежить у папці
+    з `__init__.py`, значення не має: пакетом його робить спосіб імпорту, а не розташування.
+    `python -m app/main.py` змішує дві форми: `-m` приймає ім'я модуля з крапками, а не шлях, і падає ще на пошуку модуля.
+
+- id: q4
+  type: quiz
+  question: |
+    Два модулі в одній папці:
+    ```python
+    # a.py
+    import b
+
+    X = 1
+    ```
+    ```python
+    # b.py
+    from a import X
+
+    print("b sees X =", X)
+    ```
+    Що дадуть команди `python -c "import a"` і `python -c "import b"`?
+  options: ["Обидві падають з ImportError про partially initialized module", "Падає лише import a; import b друкує b sees X = 1", "Падає лише import b; import a працює", "Обидві падають з RecursionError"]
+  answer: 1
+  explain: |
+    `import a`: модуль `a` реєструється в `sys.modules` і зупиняється на `import b`; `b` просить `X` з `a`, а `a`
+    ще не дійшов до рядка `X = 1`, звідси `ImportError: cannot import name 'X' from partially initialized module 'a'`.
+    `import b`: `b` зупиняється на `from a import X`, `a` виконується, його `import b` бере недовиконаний `b`
+    з `sys.modules` без звернення до атрибутів і не падає, далі `X = 1`, `a` завершено, і `b` отримує `X`.
+    Тому "обидві падають" неправильне: результат циклу залежить від того, хто імпортований першим.
+    `RecursionError` не буває, бо модуль потрапляє в `sys.modules` до виконання, і повторний імпорт не входить у файл знову.
+
+- id: t1
+  type: code
+  title: "Що з пакета вже завантажено"
+  prompt: |
+    Напишіть `loaded(package)`, яка повертає відсортований список імен модулів пакета, що вже є в `sys.modules`:
+    сам пакет і всі його підмодулі будь-якої глибини. Нічого не імпортуйте, лише читайте кеш.
+
+    Харнес створює в тимчасовій папці пакет `m3l01_shop`, чий `__init__.py` імпортує `cart`, а `payments` лишає
+    без імпорту, і поруч окремий модуль `m3l01_shopify`. Зверніть увагу на останній: це не підмодуль `m3l01_shop`,
+    хоча ім'я з тих самих літер.
+
+    ```python
+    loaded("m3l01_shop")   # [] до імпорту
+    import m3l01_shop
+    loaded("m3l01_shop")   # ['m3l01_shop', 'm3l01_shop.cart']
+    ```
+  starter: |
+    import sys
+
+
+    def loaded(package: str) -> list[str]:
+        ...
+  harness: |
+    import importlib
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    root = Path(tempfile.mkdtemp())
+    pkg = root / "m3l01_shop"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("from m3l01_shop import cart\n")
+    (pkg / "cart.py").write_text("ITEMS = []\n")
+    (pkg / "payments.py").write_text("PROVIDER = 'test'\n")
+    (root / "m3l01_shopify.py").write_text("")
+    sys.path.insert(0, str(root))
+    importlib.invalidate_caches()
+
+    print(loaded("m3l01_shop"))
+    import m3l01_shop
+
+    print(loaded("m3l01_shop"))
+    import m3l01_shop.payments
+    import m3l01_shopify
+
+    print(loaded("m3l01_shop"))
+    print(loaded("m3l01_sho"))
+  expected: |
+    []
+    ['m3l01_shop', 'm3l01_shop.cart']
+    ['m3l01_shop', 'm3l01_shop.cart', 'm3l01_shop.payments']
+    []
+  hints:
+    - "sys.modules це звичайний словник, ключі якого повні імена з крапками. Підмодуль пакета відрізняється від сусіда зі схожим іменем крапкою після імені пакета."
+    - "Умова для ключа: name == package or name.startswith(package + \".\"); результат через sorted(...)."
+  solution: |
+    import sys
+
+
+    def loaded(package: str) -> list[str]:
+        return sorted(
+            name for name in sys.modules if name == package or name.startswith(package + ".")
+        )
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Імпорт лише для анотацій"
+  prompt: |
+    Функції нижче анотовані типами з капстоуну. У браузері пакета `formbuilder` немає, тож стартовий код падає
+    з `ModuleNotFoundError` на першому ж рядку. Зробіть імпорти видимими лише для type checker і доведіть функції:
+
+    - `describe(element)` повертає `"<name>: <label>"`;
+    - `render_all(elements, renderer)` повертає список `renderer.render(element)` для кожного елемента.
+
+    Анотації мають лишитися типами `Element` і `Renderer`, а не `object` чи `Any`: харнес друкує, що в них записано.
+    Пам'ятайте, що в 3.12 анотація параметра обчислюється в момент виконання `def`.
+  starter: |
+    from formbuilder.domain import Element
+    from formbuilder.renderers import Renderer
+
+
+    def describe(element: Element) -> str:
+        ...
+
+
+    def render_all(elements: list[Element], renderer: Renderer) -> list[str]:
+        ...
+  harness: |
+    import sys
+    from types import SimpleNamespace
+
+
+    class Upper:
+        def render(self, element):
+            return element.label.upper()
+
+
+    email = SimpleNamespace(name="email", label="Email")
+    age = SimpleNamespace(name="age", label="Age")
+    print(describe(email))
+    print(render_all([email, age], Upper()))
+    print("formbuilder" in sys.modules)
+    print(describe.__annotations__["element"], render_all.__annotations__["renderer"])
+  expected: |
+    email: Email
+    ['EMAIL', 'AGE']
+    False
+    Element Renderer
+  hints:
+    - "Під час виконання typing.TYPE_CHECKING дорівнює False, а mypy вважає його True. Блок під цією умовою інтерпретатор пропускає."
+    - "Після перенесення імпортів у if TYPE_CHECKING: імена Element і Renderer під час виконання не існують. Анотація без лапок дасть NameError ще при def."
+    - "Або анотації рядками: element: \"Element\", renderer: \"Renderer\"; або перший рядок файлу from __future__ import annotations."
+  solution: |
+    from typing import TYPE_CHECKING
+
+    if TYPE_CHECKING:
+        from formbuilder.domain import Element
+        from formbuilder.renderers import Renderer
+
+
+    def describe(element: "Element") -> str:
+        return f"{element.name}: {element.label}"
+
+
+    def render_all(elements: "list[Element]", renderer: "Renderer") -> list[str]:
+        return [renderer.render(element) for element in elements]
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Об'єкт за рядком module:attr"
+  prompt: |
+    Рядок виду `"formbuilder.cli:main"` ви вже бачили в `[project.scripts]`: ім'я модуля, двокрапка, шлях до атрибута.
+    Напишіть `resolve(target)`, яка імпортує модуль за таким рядком і повертає об'єкт.
+
+    - Шлях атрибута може мати крапки: `"collections:OrderedDict.fromkeys"`.
+    - Немає двокрапки, порожній модуль або порожній атрибут: `ValueError("expected 'module:attribute', got '<target>'")`.
+    - Модуля немає: `ModuleNotFoundError` від імпорту пропускається без змін.
+    - Атрибута немає: `ImportError("cannot resolve '<target>': no attribute '<attr>'")`, де `attr` перше ім'я,
+      якого не знайшлося; ланцюжок з `AttributeError` прибрати через `from None`.
+
+    ```python
+    resolve("json:dumps")({"ok": True})   # '{"ok": true}'
+    resolve("json:loadz")                 # ImportError: cannot resolve 'json:loadz': no attribute 'loadz'
+    ```
+  starter: |
+    import importlib
+
+
+    def resolve(target: str) -> object:
+        ...
+  harness: |
+    print(resolve("json:dumps")({"ok": True}))
+    print(resolve("os.path:join")("forms", "signup.json"))
+    print(resolve("collections:OrderedDict.fromkeys")("ab"))
+    print(resolve("html:escape") is resolve("html:escape"))
+    for bad in ["json", "json:", "json:loadz", "os.path:join.nope", "no_such_module:main"]:
+        try:
+            resolve(bad)
+        except (ValueError, ImportError) as e:
+            print(f"{type(e).__name__}: {e}")
+  expected: |
+    {"ok": true}
+    forms/signup.json
+    OrderedDict({'a': None, 'b': None})
+    True
+    ValueError: expected 'module:attribute', got 'json'
+    ValueError: expected 'module:attribute', got 'json:'
+    ImportError: cannot resolve 'json:loadz': no attribute 'loadz'
+    ImportError: cannot resolve 'os.path:join.nope': no attribute 'nope'
+    ModuleNotFoundError: No module named 'no_such_module'
+  hints:
+    - "Рядок ділиться на дві частини по першій двокрапці; модуль імпортується за іменем-рядком, а далі атрибути беруться по одному, як obj.a.b."
+    - "str.partition(\":\") дає (module, sep, attrs); importlib.import_module(module); потім цикл getattr(obj, name) по attrs.split(\".\")."
+    - "AttributeError у getattr перетворюється на raise ImportError(...) from None. ModuleNotFoundError уже підклас ImportError, тож його просто не ловіть."
+  solution: |
+    import importlib
+
+
+    def resolve(target: str) -> object:
+        module_name, sep, attr_path = target.partition(":")
+        if not sep or not module_name or not attr_path:
+            raise ValueError(f"expected 'module:attribute', got {target!r}")
+        obj: object = importlib.import_module(module_name)
+        for attr in attr_path.split("."):
+            try:
+                obj = getattr(obj, attr)
+            except AttributeError:
+                raise ImportError(f"cannot resolve {target!r}: no attribute {attr!r}") from None
+        return obj
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Реєстр рендерерів за іменем модуля"
+  prompt: |
+    Модель реєстру з капстоуну. Харнес створює в тимчасовій папці пакет `m3l01_renderers`: модулі `html.py` і `text.py`
+    з функцією `render(label) -> str`, службовий `_shared.py` і `pdf.py`, який імпортує невстановлений `weasyprint`.
+    Напишіть дві функції.
+
+    `available(package)` повертає відсортовані імена модулів пакета без тих, що починаються з `_`.
+    Жоден з цих модулів при цьому не має імпортуватися: список береться з файлів у `__path__` пакета.
+
+    `load_renderer(package, name)` імпортує `<package>.<name>` і повертає його функцію `render`. Якщо такого модуля
+    немає, кидає `LookupError` з текстом `unknown renderer '<name>'; available: <імена через кому й пробіл>`.
+    Якщо модуль є, але всередині нього бракує залежності, `ModuleNotFoundError` пропускається без змін:
+    "немає формату" і "зламаний плагін" це різні помилки.
+
+    ```python
+    available("m3l01_renderers")                        # ['html', 'pdf', 'text']
+    load_renderer("m3l01_renderers", "text")("Email")   # '[Email]'
+    load_renderer("m3l01_renderers", "yaml")            # LookupError: unknown renderer 'yaml'; available: html, pdf, text
+    load_renderer("m3l01_renderers", "pdf")             # ModuleNotFoundError: No module named 'weasyprint'
+    ```
+  starter: |
+    import importlib
+    import pkgutil
+    from collections.abc import Callable
+
+
+    def available(package: str) -> list[str]:
+        ...
+
+
+    def load_renderer(package: str, name: str) -> Callable[[str], str]:
+        ...
+  harness: |
+    import importlib
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    root = Path(tempfile.mkdtemp())
+    pkg = root / "m3l01_renderers"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "html.py").write_text(
+        "from html import escape\n\n"
+        "def render(label):\n    return f'<label>{escape(label)}</label>'\n"
+    )
+    (pkg / "text.py").write_text("def render(label):\n    return f'[{label}]'\n")
+    (pkg / "pdf.py").write_text("import weasyprint\n\ndef render(label):\n    return label\n")
+    (pkg / "_shared.py").write_text("")
+    sys.path.insert(0, str(root))
+    importlib.invalidate_caches()
+
+    print(available("m3l01_renderers"))
+    print([m for m in sys.modules if m.startswith("m3l01_renderers.")])
+    print(load_renderer("m3l01_renderers", "html")("Email & login"))
+    print(load_renderer("m3l01_renderers", "text")("Email"))
+    print(load_renderer("m3l01_renderers", "text") is sys.modules["m3l01_renderers.text"].render)
+    for name in ["yaml", "pdf"]:
+        try:
+            load_renderer("m3l01_renderers", name)
+        except LookupError as e:
+            print("LookupError:", e)
+        except ModuleNotFoundError as e:
+            print("ModuleNotFoundError:", e.name)
+  expected: |
+    ['html', 'pdf', 'text']
+    []
+    <label>Email &amp; login</label>
+    [Email]
+    True
+    LookupError: unknown renderer 'yaml'; available: html, pdf, text
+    ModuleNotFoundError: weasyprint
+  hints:
+    - "Пакет треба імпортувати, щоб отримати його __path__, а pkgutil уміє перелічити модулі в каталогах, нічого не виконуючи. Для другої функції подумайте, що саме каже атрибут name у ModuleNotFoundError."
+    - "pkgutil.iter_modules(importlib.import_module(package).__path__) дає об'єкти з полем name. У load_renderer порівняйте e.name з f\"{package}.{name}\"."
+    - "except ModuleNotFoundError as e: if e.name != module_name: raise; далі raise LookupError(...) from None. Успішний шлях: return importlib.import_module(module_name).render."
+  solution: |
+    import importlib
+    import pkgutil
+    from collections.abc import Callable
+
+
+    def available(package: str) -> list[str]:
+        pkg = importlib.import_module(package)
+        return sorted(
+            info.name for info in pkgutil.iter_modules(pkg.__path__) if not info.name.startswith("_")
+        )
+
+
+    def load_renderer(package: str, name: str) -> Callable[[str], str]:
+        module_name = f"{package}.{name}"
+        try:
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError as e:
+            if e.name != module_name:
+                raise
+            raise LookupError(
+                f"unknown renderer {name!r}; available: {', '.join(available(package))}"
+            ) from None
+        return module.render
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "Шари пакета formbuilder: config, domain, renderers/, cli"
+  prompt: |
+    Зафіксуйте шари пакета капстоуну так, як у розділі "Для капстоуну". Файли вже на своїх місцях з модуля 2
+    (`domain.py` з m2-l05, `config.py` з m2-l06 і m2-l09, пакет `renderers/` з m2-l07), нічого не перейменовується:
+    завдання в тому, хто кого імпортує. Ця розкладка далі не змінюється, наступні уроки лише додають модулі в неї.
+
+    ```text
+    src/formbuilder/
+    ├── __init__.py          # докстрінг і __version__, без реекспорту підмодулів
+    ├── __main__.py
+    ├── cli.py               # верхній шар
+    ├── config.py            # вхідна межа: JSON → Pydantic → domain
+    ├── domain.py            # нижній шар
+    └── renderers/
+        ├── __init__.py      # RENDERERS і register() з m2-l07 (до p2)
+        ├── base.py          # Protocol Renderer
+        ├── html.py          # HtmlRenderer і renderer = HtmlRenderer()
+        └── text.py          # TextRenderer і renderer = TextRenderer()
+    tests/
+    └── test_layers.py
+    ```
+
+    Що додати:
+
+    1. `domain.py` з m2-l05 лишається на місці. Додайте метод `FormConfig.render(self, renderer: Renderer) -> str`,
+       який рендерить усі елементи дерева й склеює результат. `Renderer` імпортуйте лише під `if TYPE_CHECKING:`;
+       анотації рядком або `from __future__ import annotations`.
+    2. У `config.py` (Pydantic-моделі й `to_domain` з m2-l09) додайте `parse_config(text: str) -> domain.FormConfig`:
+       `FormConfig.model_validate_json` і `to_domain`, тобто Pydantic перевіряє JSON, а назовні виходять
+       domain-об'єкти. Читання файлу з `ConfigError` додасть m3-l03.
+    3. У `renderers/html.py` і `renderers/text.py` з m2-l07 додайте об'єкти рівня модуля `renderer = HtmlRenderer()`
+       і `renderer = TextRenderer()`. Словник `RENDERERS` і `register()` у `renderers/__init__.py` поки лишаються:
+       у p2 їх замінить реєстр, який не імпортує формати наперед.
+    4. `cli.py` отримує команду `formbuilder render CONFIG`: читає файл, `parse_config` і рендер через `HtmlRenderer`.
+       Це єдиний модуль, що імпортує і `config`, і `renderers`.
+    5. У `pyproject.toml` додайте `"TID"` у `extend-select` і блок
+       `[tool.ruff.lint.flake8-tidy-imports]` з `ban-relative-imports = "all"`.
+    6. Додайте `tests/test_layers.py`. Він імпортує кожен шар у свіжому інтерпретаторі, бо в процесі pytest
+       `sys.modules` уже заповнений іншими тестами:
+
+    ```python
+    import subprocess
+    import sys
+
+
+    def loaded_after(module: str) -> set[str]:
+        """Import `module` in a fresh interpreter and return everything it pulled in."""
+        code = f"import sys, {module}; print(*sys.modules, sep=chr(10))"
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, check=True
+        )
+        return set(result.stdout.split())
+
+
+    def test_domain_imports_no_upper_layer() -> None:
+        loaded = loaded_after("formbuilder.domain")
+        upper = {"formbuilder.config", "formbuilder.renderers", "formbuilder.cli"}
+        assert loaded & upper == set()
+        assert "pydantic" not in loaded
+
+
+    def test_config_and_renderers_do_not_import_each_other() -> None:
+        assert not any(
+            m.startswith("formbuilder.renderers")
+            for m in loaded_after("formbuilder.config")
+        )
+        assert "formbuilder.config" not in loaded_after("formbuilder.renderers")
+    ```
+
+    Перевірте сам механізм: тимчасово замініть блок `TYPE_CHECKING` у `domain.py` прямим імпортом і запустіть
+    `uv run python -c "import formbuilder.domain"`. Має з'явитися `ImportError ... partially initialized module`
+    з петлею `domain.py` → `renderers/__init__.py` → `base.py`. Поверніть `TYPE_CHECKING`.
+  checklist:
+    - "Розкладка файлів збігається з деревом вище; файли модуля 2 не перейменовувались"
+    - "`formbuilder/__init__.py` не імпортує жодного підмодуля"
+    - "`domain.py` під час виконання не імпортує нічого з `formbuilder` і нічого стороннього; `Renderer` лише під `TYPE_CHECKING`"
+    - "`config` і `renderers` не імпортують один одного; обидва імпортують `domain`; `cli` єдиний імпортує обидва"
+    - "У `src/` немає жодного відносного імпорту, `uv run ruff check` з `ban-relative-imports = \"all\"` проходить"
+    - "Ручна перевірка: прямий імпорт `Renderer` у `domain.py` дає `partially initialized module`, і `test_layers.py` на ньому падає"
+    - "`uv run formbuilder render <ваш конфіг з tests/fixtures>` друкує HTML"
+    - "`uv run mypy src` без помилок, `uv run pytest -q` зелений"
+  verify: "cd capstone && uv run python -c \"import formbuilder.config, formbuilder.domain, formbuilder.renderers, formbuilder.cli\" && uv run pytest tests/test_layers.py -q && uv run ruff check && uv run mypy src"
+
+- id: p2
+  type: project
+  title: "Динамічний реєстр форматів у formbuilder.renderers"
+  prompt: |
+    Замініть у `renderers/__init__.py` словник `RENDERERS` і `register()` з m2-l07 двома функціями з розділу
+    "Для капстоуну": після цього пакет не імпортує формати наперед, а новий формат це один файл.
+
+    - `available_formats() -> list[str]`: відсортовані імена модулів пакета з `pkgutil.iter_modules(__path__)`,
+      без `base` і без імен з `_` на початку. Нічого не імпортує.
+    - `get_renderer(fmt: str) -> Renderer`: `importlib.import_module(f"{__name__}.{fmt}")`, потім об'єкт `renderer`
+      з модуля. Невідомий формат: `LookupError` зі списком доступних. `ModuleNotFoundError` залежності всередині
+      модуля формату пропускається без змін (порівняння `e.name`). Модуль без об'єкта `renderer` або з об'єктом,
+      що не задовольняє протокол: `TypeError`; для перевірки `isinstance` протокол має бути `@runtime_checkable`.
+    - Тести `register()` з `tests/test_renderers.py` (m2-l07) приберіть разом з функцією; тести рендерингу лишаються.
+    - У `tests/test_layers.py` з p1 додайте третій тест:
+      `assert "formbuilder.renderers.html" not in loaded_after("formbuilder.renderers")`.
+    - `cli.py`: `formbuilder render CONFIG [FORMAT]`, формат за замовчуванням `html`, рендерер через `get_renderer`.
+      Після цього `cli` більше не імпортує `formbuilder.renderers.html` напряму.
+
+    Додайте `tests/test_registry.py` з тестами: список форматів дорівнює `["html", "text"]`; `get_renderer("text")`
+    задовольняє `Renderer` і рендерить форму; два виклики `get_renderer("html")` повертають той самий об'єкт
+    (кеш `sys.modules`, без власного словника); невідомий формат дає `LookupError`, у тексті якого є
+    `available: html, text` (`pytest.raises(LookupError, match=...)`).
+
+    Ручна перевірка поведінки з поламаним плагіном: створіть `renderers/pdf.py` з одним рядком `import weasyprint`,
+    переконайтеся, що `get_renderer("pdf")` дає `ModuleNotFoundError: No module named 'weasyprint'`, а не
+    `unknown format`, і видаліть файл.
+  checklist:
+    - "`import formbuilder.renderers` не імпортує жодного модуля формату (третій тест у `test_layers.py` це перевіряє)"
+    - "Новий формат додається одним файлом у `renderers/` без правок у `__init__.py` чи `cli.py`"
+    - "`get_renderer` не має власного кешу: повторний виклик повертає той самий об'єкт завдяки `sys.modules`"
+    - "Невідомий формат і поламаний плагін дають різні винятки; ручна перевірка з `pdf.py` виконана"
+    - "`uv run formbuilder render <конфіг> text` друкує текстовий рендер, `... pdf` завершується `LookupError` зі списком форматів"
+    - "`uv run mypy src tests` і `uv run ruff check` без помилок"
+  verify: "cd capstone && uv run python -c \"from formbuilder.renderers import available_formats, get_renderer; print(available_formats(), type(get_renderer('html')).__name__)\" && uv run pytest tests/test_registry.py tests/test_layers.py -q"

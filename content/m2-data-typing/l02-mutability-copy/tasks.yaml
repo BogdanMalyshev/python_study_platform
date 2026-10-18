@@ -1,0 +1,419 @@
+- id: t1
+  type: code
+  title: "Групування без спільних списків"
+  prompt: |
+    Напишіть `group_by_type(elements, types)`, яка повертає словник `{type: [id, ...]}`.
+    Ключі це всі типи з `types` у тому самому порядку, навіть ті, для яких елементів немає (тоді список порожній).
+    Елементи з типом поза `types` ігноруються. Кожен список має бути окремим об'єктом:
+    `dict.fromkeys(types, [])` тут саме та пастка з уроку.
+
+    ```python
+    elements = [{"id": "email", "type": "input"}, {"id": "send", "type": "button"}]
+    group_by_type(elements, ["input", "text"])   # {'input': ['email'], 'text': []}
+    ```
+  starter: |
+    def group_by_type(elements: list[dict], types: list[str]) -> dict[str, list[str]]:
+        ...
+  harness: |
+    elements = [
+        {"id": "email", "type": "input"},
+        {"id": "intro", "type": "text"},
+        {"id": "phone", "type": "input"},
+        {"id": "send", "type": "button"},
+    ]
+    groups = group_by_type(elements, ["input", "text", "select"])
+    print(groups)
+    print(groups["text"] is groups["select"])
+    groups["select"].append("x")
+    print(groups["text"])
+    print(group_by_type([], ["input"]))
+  expected: |
+    {'input': ['email', 'phone'], 'text': ['intro'], 'select': []}
+    False
+    ['intro']
+    {'input': []}
+  hints:
+    - "Порожній список для кожного ключа має створюватися окремим обчисленням виразу `[]`, а не одним на всіх."
+    - "groups = {t: [] for t in types}, потім цикл по elements і append, якщо element['type'] in groups."
+  solution: |
+    def group_by_type(elements: list[dict], types: list[str]) -> dict[str, list[str]]:
+        groups: dict[str, list[str]] = {t: [] for t in types}
+        for element in elements:
+            if element["type"] in groups:
+                groups[element["type"]].append(element["id"])
+        return groups
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Мутувати або повертати: дві версії дедуплікації"
+  prompt: |
+    Напишіть дві функції з однаковою логікою і різним контрактом.
+
+    - `deduped(items)` повертає новий список без дублікатів, зберігаючи порядок першої появи. Вхідний список не змінюється.
+    - `dedupe_in_place(items)` прибирає дублікати з того самого списку і повертає `None`. Зміну мають побачити всі імена,
+      що дивляться на цей список, тож `items = ...` усередині функції не підходить.
+
+    ```python
+    tags = ["a", "b", "a"]
+    deduped(tags)          # ['a', 'b'], tags лишився ['a', 'b', 'a']
+    dedupe_in_place(tags)  # None, тепер tags == ['a', 'b']
+    ```
+  starter: |
+    def deduped(items: list[str]) -> list[str]:
+        ...
+
+
+    def dedupe_in_place(items: list[str]) -> None:
+        ...
+  harness: |
+    tags = ["a", "b", "a", "c", "b"]
+    alias = tags
+    result = deduped(tags)
+    print(result, tags, result is tags)
+    print(dedupe_in_place(tags))
+    print(alias, alias is tags)
+    empty: list[str] = []
+    dedupe_in_place(empty)
+    print(empty, deduped([]))
+  expected: |
+    ['a', 'b', 'c'] ['a', 'b', 'a', 'c', 'b'] False
+    None
+    ['a', 'b', 'c'] True
+    [] []
+  hints:
+    - "Для чистої версії згадайте спосіб дедуплікації зі збереженням порядку з m2-l01. Для мутуючої потрібно замінити вміст об'єкта, а не перев'язати локальне ім'я."
+    - "deduped: return list(dict.fromkeys(items)). dedupe_in_place: items[:] = deduped(items)."
+  solution: |
+    def deduped(items: list[str]) -> list[str]:
+        return list(dict.fromkeys(items))
+
+
+    def dedupe_in_place(items: list[str]) -> None:
+        items[:] = deduped(items)
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Оновлення за шляхом зі structural sharing"
+  prompt: |
+    Напишіть `set_in(data, path, value)`: повертає новий словник, у якому за шляхом ключів `path` стоїть `value`.
+    Це `{...state, theme: {...state.theme, color}}` з Redux, але для шляху довільної довжини.
+
+    Вимоги:
+    - оригінал `data` не змінюється ні на якому рівні;
+    - копіюються лише словники вздовж шляху; усе, що поза шляхом, у результаті той самий об'єкт, що в оригіналі (`is`).
+      Тому `copy.deepcopy` тут не підходить: він скопіює все;
+    - якщо проміжного ключа немає, створюється новий словник;
+    - `path` завжди непорожній, проміжні значення на шляху (якщо є) це словники.
+
+    ```python
+    config = {"theme": {"color": "#333"}, "elements": []}
+    new = set_in(config, ["theme", "color"], "#000")
+    new["theme"]["color"], config["theme"]["color"]   # ('#000', '#333')
+    new["elements"] is config["elements"]              # True
+    set_in({}, ["meta", "version"], 2)                 # {'meta': {'version': 2}}
+    ```
+  starter: |
+    def set_in(data: dict, path: list[str], value: object) -> dict:
+        ...
+  harness: |
+    config = {
+        "theme": {"color": "#333", "font": {"family": "Inter", "size": 14}},
+        "elements": [{"id": "email"}],
+    }
+    updated = set_in(config, ["theme", "font", "size"], 16)
+    print(config["theme"]["font"]["size"], updated["theme"]["font"]["size"])
+    print(updated is config, updated["theme"] is config["theme"], updated["theme"]["font"] is config["theme"]["font"])
+    print(updated["elements"] is config["elements"])
+    print(updated["theme"]["color"], updated["theme"]["font"]["family"])
+    print(set_in({}, ["meta", "version"], 2))
+    print(set_in({"a": 1}, ["b"], 2))
+    print(config)
+  expected: |
+    14 16
+    False False False
+    True
+    #333 Inter
+    {'meta': {'version': 2}}
+    {'a': 1, 'b': 2}
+    {'theme': {'color': '#333', 'font': {'family': 'Inter', 'size': 14}}, 'elements': [{'id': 'email'}]}
+  hints:
+    - "Рекурсія по шляху: на кожному рівні поверхнева копія поточного словника, а в неї під перший ключ кладеться результат рекурсивного виклику для решти шляху."
+    - "result = dict(data); якщо len(path) == 1: result[path[0]] = value; інакше result[path[0]] = set_in(data.get(path[0], {}), path[1:], value)."
+  solution: |
+    def set_in(data: dict, path: list[str], value: object) -> dict:
+        key = path[0]
+        result = dict(data)
+        if len(path) == 1:
+            result[key] = value
+        else:
+            result[key] = set_in(data.get(key, {}), path[1:], value)
+        return result
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Глибока заморозка"
+  prompt: |
+    `tuple`, `frozenset` і `MappingProxyType` неглибокі. Напишіть `deep_freeze(obj)`, яка повертає глибоко незмінну версію:
+
+    - `dict` стає `types.MappingProxyType` над **новим** словником, де кожне значення заморожене рекурсивно;
+    - `list` і `tuple` стають `tuple` із заморожених елементів;
+    - `set` і `frozenset` стають `frozenset` із заморожених елементів;
+    - усе інше (числа, рядки, `None`) повертається як є.
+
+    Результат не повинен залежати від оригіналу: якщо після заморозки змінити вхідний словник чи список,
+    заморожена версія лишається такою ж. Тому проксі над самим вхідним словником не підходить.
+
+    ```python
+    frozen = deep_freeze({"tags": ["a"], "theme": {"fonts": ["Inter"]}})
+    frozen["tags"]                   # ('a',)
+    frozen["theme"]["fonts"]         # ('Inter',)
+    frozen["theme"]["size"] = 16     # TypeError
+    ```
+  starter: |
+    from types import MappingProxyType
+
+
+    def deep_freeze(obj: object) -> object:
+        ...
+  harness: |
+    source = {
+        "id": "signup",
+        "tags": ["a", "b"],
+        "theme": {"fonts": ["Inter"], "size": 14},
+        "pages": [{"fields": ["email"]}],
+        "required": {"email"},
+    }
+    frozen = deep_freeze(source)
+    print(frozen["tags"], frozen["theme"]["fonts"], frozen["pages"][0]["fields"])
+    print(
+        type(frozen).__name__,
+        type(frozen["theme"]).__name__,
+        type(frozen["pages"]).__name__,
+        type(frozen["pages"][0]).__name__,
+        type(frozen["required"]).__name__,
+    )
+    source["theme"]["fonts"].append("Roboto")
+    source["id"] = "changed"
+    print(frozen["theme"]["fonts"], frozen["id"])
+    try:
+        frozen["theme"]["size"] = 16
+    except TypeError as e:
+        print("TypeError:", e)
+    print(deep_freeze([1, [2, [3]]]), deep_freeze("text"), deep_freeze(None))
+    print(hash(deep_freeze([1, [2, {3}]])) == hash((1, (2, frozenset({3})))))
+  expected: |
+    ('a', 'b') ('Inter',) ('email',)
+    mappingproxy mappingproxy tuple mappingproxy frozenset
+    ('Inter',) signup
+    TypeError: 'mappingproxy' object does not support item assignment
+    (1, (2, (3,))) text None
+    True
+  hints:
+    - "Рекурсивна функція з розгалуженням за типом: isinstance(obj, dict), isinstance(obj, (list, tuple)), isinstance(obj, (set, frozenset)). Для словника спершу збирається новий dict із заморожених значень, і вже над ним проксі."
+    - "dict: MappingProxyType({k: deep_freeze(v) for k, v in obj.items()}); list/tuple: tuple(deep_freeze(x) for x in obj); set: frozenset(deep_freeze(x) for x in obj); інакше return obj."
+  solution: |
+    from types import MappingProxyType
+
+
+    def deep_freeze(obj: object) -> object:
+        if isinstance(obj, dict):
+            return MappingProxyType({key: deep_freeze(value) for key, value in obj.items()})
+        if isinstance(obj, (list, tuple)):
+            return tuple(deep_freeze(item) for item in obj)
+        if isinstance(obj, (set, frozenset)):
+            return frozenset(deep_freeze(item) for item in obj)
+        return obj
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Нормалізація дерева конфігу без псування входу"
+  prompt: |
+    Конфіг форми: `{"id": ..., "elements": [...], ...}`. Елемент має `type`; елемент `"block"` має `children`
+    з такими самими елементами (вкладеність довільна). Напишіть `prepare_config(config)`, яка повертає нормалізовану версію:
+
+    - у кожного елемента з `type == "input"` на будь-якій глибині `name` очищений від пробілів по краях і в нижньому регістрі;
+    - якщо в input немає ключа `required`, він додається в кінець зі значенням `False`; наявне значення не чіпається;
+    - решта ключів і елементів переносяться без змін, порядок ключів зберігається.
+
+    Головна вимога: вхідний `config` не змінюється ні на якому рівні, і результат не ділить з ним **жодного**
+    змінюваного об'єкта (`dict` чи `list`). Викликач має право мутувати результат далі, не боячись зіпсувати вхід.
+    Харнес перевіряє це, збираючи `id` усіх словників і списків в обох деревах.
+
+    ```python
+    config = {"id": "f", "elements": [{"type": "input", "name": " Email "}]}
+    prepare_config(config)["elements"][0]   # {'type': 'input', 'name': 'email', 'required': False}
+    config["elements"][0]["name"]           # ' Email '
+    ```
+  starter: |
+    def prepare_config(config: dict) -> dict:
+        ...
+  harness: |
+    import json
+
+    raw = {
+        "id": "signup",
+        "theme": {"color": "#333", "fonts": ["Inter"]},
+        "elements": [
+            {"type": "input", "name": " Email "},
+            {
+                "type": "block",
+                "children": [
+                    {"type": "input", "name": "PHONE", "required": True},
+                    {"type": "text", "content": "Hi"},
+                    {"type": "block", "children": [{"type": "input", "name": " Age"}]},
+                ],
+            },
+        ],
+    }
+    snapshot = json.dumps(raw, sort_keys=True)
+    result = prepare_config(raw)
+    print(json.dumps(raw, sort_keys=True) == snapshot)
+    print(result["elements"][0])
+    print(result["elements"][1]["children"][0])
+    print(result["elements"][1]["children"][1])
+    print(result["elements"][1]["children"][2]["children"][0])
+    print(result["theme"])
+
+
+    def mutable_ids(obj: object, acc: set[int]) -> set[int]:
+        if isinstance(obj, (dict, list)):
+            acc.add(id(obj))
+            for value in obj.values() if isinstance(obj, dict) else obj:
+                mutable_ids(value, acc)
+        return acc
+
+
+    print(mutable_ids(raw, set()).isdisjoint(mutable_ids(result, set())))
+    print(prepare_config({"id": "x", "elements": []}))
+  expected: |
+    True
+    {'type': 'input', 'name': 'email', 'required': False}
+    {'type': 'input', 'name': 'phone', 'required': True}
+    {'type': 'text', 'content': 'Hi'}
+    {'type': 'input', 'name': 'age', 'required': False}
+    {'color': '#333', 'fonts': ['Inter']}
+    True
+    {'id': 'x', 'elements': []}
+  hints:
+    - "Найпростіше дотриматися вимоги «жодного спільного змінюваного об'єкта» так: одна глибока копія на вході, а далі звичайна рекурсивна мутація вже власної копії."
+    - "result = copy.deepcopy(config); внутрішня функція fix(elements) іде по списку: для input element['name'] = element['name'].strip().lower() і element.setdefault('required', False), для block рекурсивно fix(element['children']). Повернути result."
+  solution: |
+    import copy
+
+
+    def prepare_config(config: dict) -> dict:
+        result = copy.deepcopy(config)
+
+        def fix(elements: list[dict]) -> None:
+            for element in elements:
+                if element["type"] == "input":
+                    element["name"] = element["name"].strip().lower()
+                    element.setdefault("required", False)
+                elif element["type"] == "block":
+                    fix(element["children"])
+
+        fix(result["elements"])
+        return result
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    a = [1, 2]
+    b = a
+    a = a + [3]
+    b.append(4)
+    print(a, b)
+    ```
+  options:
+    - "[1, 2, 3] [1, 2, 4]"
+    - "[1, 2, 3, 4] [1, 2, 3, 4]"
+    - "[1, 2, 3] [1, 2, 3, 4]"
+    - "[1, 2, 4, 3] [1, 2, 4]"
+  answer: 0
+  explain: |
+    `b = a` прив'язує друге ім'я до того самого списку. `a = a + [3]` будує новий список і перев'язує на нього лише `a`;
+    `b` лишається на старому, тож `append(4)` змінює старий список, якого `a` вже не бачить.
+    `[1, 2, 3, 4] [1, 2, 3, 4]` це інтуїція, ніби `+` мутує, як `+=`: з `a += [3]` відповідь була б саме такою.
+    `[1, 2, 3] [1, 2, 3, 4]` уявляє, що `b` "стежить" за змінною `a`, а не за об'єктом.
+    `[1, 2, 4, 3]` уявляє, що `+` обчислюється ліниво після `append`.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    t = ([1], 2)
+    try:
+        t[0] += [3]
+    except TypeError:
+        print("error")
+    print(t)
+    ```
+  options:
+    - "error, потім ([1, 3], 2)"
+    - "error, потім ([1], 2)"
+    - "лише ([1, 3], 2), помилки немає"
+    - "лише ([1], 2), помилки немає"
+  answer: 0
+  explain: |
+    `t[0] += [3]` це два кроки: `t[0].__iadd__([3])` розширює список на місці і проходить успішно, потім `t[0] = результат`
+    намагається записати в кортеж і кидає `TypeError`. Мутація на першому кроці вже сталась, і Python її не відкочує.
+    `([1], 2)` після помилки це інтуїція транзакції "впало, отже нічого не змінилось".
+    Варіанти без помилки уявляють, що Python помітить "це той самий список" і пропустить присвоєння, але другий крок
+    `+=` виконується завжди.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    groups = dict.fromkeys(["input", "text"], [])
+    groups["input"] += ["email"]
+    print(groups["text"])
+    ```
+  options: ["['email']", "[]", "KeyError: 'text'", "TypeError"]
+  answer: 0
+  explain: |
+    `dict.fromkeys` кладе під обидва ключі один і той самий список, бо аргумент `[]` обчислюється один раз до виклику.
+    `+=` на списку мутує його на місці через `__iadd__`, а потім присвоює той самий об'єкт назад під ключ `"input"`.
+    Тому `groups["text"]` бачить `['email']`.
+    `[]` це інтуїція з `Object.fromEntries(keys.map(k => [k, []]))`, де callback створює новий масив на кожен ключ.
+    Цікаво, що з `groups["input"] = groups["input"] + ["email"]` відповідь була б `[]`: `+` будує новий список і
+    перев'язує лише ключ `"input"`. `KeyError` і `TypeError` не виникають: обидва ключі існують, а `+=` для списку легальний.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    import copy
+
+    config = {"title": "A", "tags": ["x"]}
+    c = copy.copy(config)
+    c["title"] = "B"
+    c["tags"].append("y")
+    print(config)
+    ```
+  options:
+    - "{'title': 'A', 'tags': ['x', 'y']}"
+    - "{'title': 'A', 'tags': ['x']}"
+    - "{'title': 'B', 'tags': ['x', 'y']}"
+    - "{'title': 'B', 'tags': ['x']}"
+  answer: 0
+  explain: |
+    `copy.copy` для словника це поверхнева копія, як `{...obj}` у JS: новий словник з тими самими посиланнями.
+    Переприсвоєння ключа `title` у копії оригіналу не стосується, а мутація списку `tags` стосується, бо список один на обидва словники.
+    `['x']` у тегах очікує глибоку копію, тобто `deepcopy` чи `structuredClone`.
+    `'B'` у заголовку уявляє, що `copy.copy` повернула той самий словник, як `c = config`.

@@ -1,0 +1,541 @@
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    def total(prices: list[int]) -> int:
+        return sum(prices)
+
+    print(total([1.5, 2.5]))
+    ```
+  options:
+    - "4.0"
+    - "TypeError: expected list[int], got list[float]"
+    - "4"
+    - "Нічого: файл не запуститься, доки є помилка типів"
+  answer: 0
+  explain: |
+    Інтерпретатор не перевіряє анотації: `list[int]` лежить у `total.__annotations__` і більше ні на що
+    не впливає, тому `sum` спокійно додає float і повертає `4.0`. `TypeError` такого виду ніхто не генерує:
+    для цього потрібна бібліотека на кшталт Pydantic, яка читає анотації сама. `4` міг би з'явитися лише
+    за неявного приведення до `-> int`, а повернення теж не перевіряється. Варіант "не запуститься" це
+    інтуїція з `tsc`, де помилка зупиняє збірку; mypy тут знайде помилку, але це окрема програма, і її
+    вердикт на запуск не впливає.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    def label(field_id: str, text: str | None) -> str:
+        return text or field_id
+
+    print(label("email"))
+    ```
+  options:
+    - "email"
+    - "None"
+    - "TypeError: label() missing 1 required positional argument: 'text'"
+    - "Порожній рядок"
+  answer: 2
+  explain: |
+    `str | None` лише розширює тип значення, а необов'язковим параметр робить тільки значення за
+    замовчуванням. Тут його немає, тому виклик з одним аргументом падає ще до входу в тіло. `email`
+    вийшло б з `text: str | None = None`; це і є TS-інтуїція, де `text?: string` одночасно дозволяє
+    пропустити аргумент. `None` і порожній рядок вимагали б, щоб Python підставив значення сам, а
+    `undefined` у мові немає.
+
+- id: t1
+  type: code
+  title: "Підпис поля: None проти порожнього рядка"
+  prompt: |
+    Напишіть `display_label(field_id, label=None)`, яка повертає підпис поля для UI:
+
+    - якщо `label` не передано або передано `None`, підпис будується з `field_id`: підкреслення стають
+      пробілами, перша літера велика (`"first_name"` дає `"First name"`);
+    - якщо `label` це рядок, він повертається як є, **навіть порожній**: `""` у конфігу означає
+      "підпис свідомо приховано", а не "підпису немає".
+
+    Анотуйте функцію: `field_id` це рядок, `label` рядок або `None` і необов'язковий, результат рядок.
+    Перевірка читає анотації через `get_type_hints`, тож вони мають бути саме такими.
+
+    ```python
+    display_label("first_name")        # 'First name'
+    display_label("email", "E-mail")   # 'E-mail'
+    display_label("email", "")         # ''
+    ```
+  starter: |
+    def display_label(field_id, label=None):
+        ...
+  asserts: |
+    import inspect
+    from typing import get_type_hints
+
+    assert display_label("email") == "Email", "без label: id з великої літери"
+    assert display_label("first_name") == "First name", "підкреслення мають стати пробілами"
+    assert display_label("email", None) == "Email", "None означає 'підпису немає', будуємо з id"
+    assert display_label("email", "E-mail") == "E-mail", "переданий label повертається як є"
+    assert display_label("email", "") == "", "порожній рядок це свідомо прихований підпис: перевіряйте `is None`, а не truthiness"
+    hints = get_type_hints(display_label)
+    assert hints == {"field_id": str, "label": str | None, "return": str}, f"анотації мають бути field_id: str, label: str | None, -> str; зараз {hints}"
+    assert inspect.signature(display_label).parameters["label"].default is None, "label має бути необов'язковим: `= None`"
+  hints:
+    - "Порожній рядок і None обидва хибні, тому перевірка `if not label` їх не розрізнить. Потрібна перевірка саме на None."
+    - "`if label is None:` і всередині `field_id.replace(\"_\", \" \").capitalize()`; анотація параметра `label: str | None = None`."
+  solution: |
+    def display_label(field_id: str, label: str | None = None) -> str:
+        if label is None:
+            return field_id.replace("_", " ").capitalize()
+        return label
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Pydantic у мініатюрі: перевірка аргументів за анотаціями"
+  prompt: |
+    Напишіть `type_errors(func, values)`: вона читає анотації функції `func` через `typing.get_type_hints`
+    і перевіряє словник `values` (ім'я параметра → значення) так, як це зробила б рантаймова бібліотека.
+
+    - Ключі з `values`, для яких у `func` немає анотації, пропускаються.
+    - Якщо анотація це `Literal[...]` (`typing.get_origin(hint) is Literal`), значення має бути одним
+      з `typing.get_args(hint)`.
+    - Інакше перевірка через `isinstance(value, hint)`: вона працює для звичайних класів і для `X | Y`.
+    - Повертається список повідомлень у порядку ключів `values`, формат
+      `"<ім'я>: unexpected <назва типу значення> <repr значення>"`.
+
+    ```python
+    def make_field(field_id: str, kind: Literal["input", "text"]) -> None: ...
+    type_errors(make_field, {"field_id": 42, "kind": "input"})
+    # ['field_id: unexpected int 42']
+    ```
+  starter: |
+    from collections.abc import Callable
+    from typing import Literal, get_args, get_origin, get_type_hints
+
+    def type_errors(func: Callable[..., object], values: dict[str, object]) -> list[str]:
+        ...
+  harness: |
+    def make_field(field_id: str, kind: Literal["input", "text"], max_length: int | None = None, note="") -> None:
+        pass
+
+    print(type_errors(make_field, {"field_id": "email", "kind": "input", "max_length": 255}))
+    print(type_errors(make_field, {"field_id": 42, "kind": "checkbox", "max_length": "255"}))
+    print(type_errors(make_field, {"max_length": None, "note": 3, "extra": 1}))
+    print(make_field(42, "checkbox"))
+  expected: |
+    []
+    ['field_id: unexpected int 42', "kind: unexpected str 'checkbox'", "max_length: unexpected str '255'"]
+    []
+    None
+  hints:
+    - "Спершу отримайте словник анотацій. Для кожної пари з values: немає анотації → далі; Literal → перевірка входження; решта → isinstance."
+    - "`hints = get_type_hints(func)`; `hint = hints.get(name)`; для Literal `ok = value in get_args(hint)`, інакше `ok = isinstance(value, hint)`; повідомлення `f\"{name}: unexpected {type(value).__name__} {value!r}\"`."
+  solution: |
+    from collections.abc import Callable
+    from typing import Literal, get_args, get_origin, get_type_hints
+
+    def type_errors(func: Callable[..., object], values: dict[str, object]) -> list[str]:
+        hints = get_type_hints(func)
+        errors: list[str] = []
+        for name, value in values.items():
+            if name not in hints:
+                continue
+            hint = hints[name]
+            if get_origin(hint) is Literal:
+                ok = value in get_args(hint)
+            else:
+                ok = isinstance(value, hint)
+            if not ok:
+                errors.append(f"{name}: unexpected {type(value).__name__} {value!r}")
+        return errors
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from typing import TypedDict
+
+    class FieldConfig(TypedDict):
+        id: str
+        required: bool
+
+    cfg = FieldConfig(id="email", required="yes")
+    print(type(cfg).__name__, cfg["required"])
+    ```
+  options:
+    - "dict yes"
+    - "FieldConfig yes"
+    - "FieldConfig True"
+    - "TypeError: required must be bool"
+  answer: 0
+  explain: |
+    TypedDict не створює класу в рантаймі: виклик `FieldConfig(...)` повертає звичайний `dict` з тими
+    самими ключами й значеннями, без перевірки й без перетворення. Тому тип `dict`, а `"yes"` лишається
+    рядком. `FieldConfig` як назва типу це очікування від dataclass чи TS-класу. `True` означало б
+    коерцію в стилі Pydantic lax-режиму, а `TypeError` рантаймову валідацію; ні того, ні іншого TypedDict
+    не робить. mypy на цьому рядку дав би помилку, але запуск від цього не залежить.
+
+- id: t3
+  type: code
+  title: "Сирий JSON елемента в TypedDict з Literal"
+  prompt: |
+    Елемент форми приходить з `json.loads` як `dict[str, object]`. Напишіть `parse_element(raw)`, яка
+    перевіряє його вручну й повертає `ElementConfig` (TypedDict зі стартера):
+
+    - `id` має бути непорожнім рядком, інакше `ValueError("id: expected non-empty string")`;
+    - `type` має бути одним з типів `ElementType`, інакше `ValueError(f"type: unknown element type {value!r}")`;
+    - `label` необов'язковий; якщо ключ є, значення має бути рядком, інакше `ValueError("label: expected string")`;
+    - інші ключі відкидаються; результат це новий dict лише з `id`, `type` і, якщо був, `label`.
+
+    `ELEMENT_TYPES` зберіть з `ElementType` через `get_args`, не переписуючи значення вдруге.
+    Для звуження `object` до `ElementType` напишіть предикат з `TypeGuard` (у 3.12 `TypeIs` ще немає
+    в `typing`). Платформа не запускає mypy, перевіряється поведінка; локально рішення має проходити
+    `.venv/bin/mypy --strict` без `cast`.
+
+    ```python
+    parse_element({"id": "bio", "type": "text", "label": "About", "max": 500})
+    # {'id': 'bio', 'type': 'text', 'label': 'About'}
+    ```
+  starter: |
+    from typing import Literal, NotRequired, TypedDict, TypeGuard, get_args
+
+    type ElementType = Literal["input", "text", "select"]
+
+    class ElementConfig(TypedDict):
+        id: str
+        type: ElementType
+        label: NotRequired[str]
+
+    ELEMENT_TYPES: tuple[str, ...] = ()  # зберіть з ElementType
+
+    def is_element_type(value: object) -> TypeGuard[ElementType]:
+        ...
+
+    def parse_element(raw: dict[str, object]) -> ElementConfig:
+        ...
+  harness: |
+    print(ELEMENT_TYPES)
+    print(parse_element({"id": "email", "type": "input"}))
+    print(parse_element({"id": "bio", "type": "text", "label": "About", "max": 500}))
+    bad: list[dict[str, object]] = [
+        {"id": "", "type": "input"},
+        {"type": "input"},
+        {"id": "x", "type": "checkbox"},
+        {"id": "x", "type": ["input"]},
+        {"id": "x", "type": "select", "label": 5},
+    ]
+    for raw in bad:
+        try:
+            parse_element(raw)
+        except ValueError as e:
+            print("ValueError:", e)
+    print(type(parse_element({"id": "a", "type": "select", "label": ""})).__name__)
+  expected: |
+    ('input', 'text', 'select')
+    {'id': 'email', 'type': 'input'}
+    {'id': 'bio', 'type': 'text', 'label': 'About'}
+    ValueError: id: expected non-empty string
+    ValueError: id: expected non-empty string
+    ValueError: type: unknown element type 'checkbox'
+    ValueError: type: unknown element type ['input']
+    ValueError: label: expected string
+    dict
+  hints:
+    - "Значення alias, створеного через `type`, лежить в атрибуті `__value__`, і саме з нього `get_args` дістає літерали. Кожне поле перевіряйте через isinstance або предикат, а результат збирайте в новий словник."
+    - "`ELEMENT_TYPES = get_args(ElementType.__value__)`; предикат `return value in ELEMENT_TYPES`; для id `if not isinstance(field_id, str) or not field_id: raise ...`."
+    - "Збирайте результат як `result: ElementConfig = {\"id\": field_id, \"type\": kind}` і лише потім, якщо `\"label\" in raw` і значення рядок, `result[\"label\"] = label`."
+  solution: |
+    from typing import Literal, NotRequired, TypedDict, TypeGuard, get_args
+
+    type ElementType = Literal["input", "text", "select"]
+
+    class ElementConfig(TypedDict):
+        id: str
+        type: ElementType
+        label: NotRequired[str]
+
+    ELEMENT_TYPES: tuple[str, ...] = get_args(ElementType.__value__)
+
+    def is_element_type(value: object) -> TypeGuard[ElementType]:
+        return value in ELEMENT_TYPES
+
+    def parse_element(raw: dict[str, object]) -> ElementConfig:
+        field_id = raw.get("id")
+        if not isinstance(field_id, str) or not field_id:
+            raise ValueError("id: expected non-empty string")
+        kind = raw.get("type")
+        if not is_element_type(kind):
+            raise ValueError(f"type: unknown element type {kind!r}")
+        result: ElementConfig = {"id": field_id, "type": kind}
+        if "label" in raw:
+            label = raw["label"]
+            if not isinstance(label, str):
+                raise ValueError("label: expected string")
+            result["label"] = label
+        return result
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Реєстр рендерерів і функція, що повертає функцію"
+  prompt: |
+    Рендерер це функція `ElementConfig -> str`, у стартері це alias `Renderer`. Напишіть дві функції.
+
+    1. `with_label(render)` повертає **новий** рендерер: якщо в елемента є ключ `label`, результат
+       це `<label for="<id>"><label></label>` і одразу за ним те, що повернув `render`; якщо ключа
+       немає, результат `render` без змін.
+    2. `render_all(elements, registry)` рендерить кожен елемент рендерером з `registry` за його `type`
+       і повертає список рядків. Якщо рендерера для типу немає, замість винятку в список іде
+       `<!-- no renderer: <type> -->`. `elements` може бути будь-яким iterable, зокрема генератором.
+
+    ```python
+    render_input = lambda el: f'<input name="{el["id"]}">'
+    with_label(render_input)({"id": "email", "type": "input", "label": "E-mail"})
+    # '<label for="email">E-mail</label><input name="email">'
+    ```
+  starter: |
+    from collections.abc import Callable, Iterable, Mapping
+    from typing import Literal, NotRequired, TypedDict
+
+    type ElementType = Literal["input", "text", "select"]
+
+    class ElementConfig(TypedDict):
+        id: str
+        type: ElementType
+        label: NotRequired[str]
+
+    type Renderer = Callable[[ElementConfig], str]
+
+    def with_label(render: Renderer) -> Renderer:
+        ...
+
+    def render_all(elements: Iterable[ElementConfig], registry: Mapping[ElementType, Renderer]) -> list[str]:
+        ...
+  harness: |
+    def render_input(el: ElementConfig) -> str:
+        return f'<input name="{el["id"]}">'
+
+    def render_text(el: ElementConfig) -> str:
+        return f'<textarea name="{el["id"]}"></textarea>'
+
+    registry: dict[ElementType, Renderer] = {"input": with_label(render_input), "text": render_text}
+    elements: list[ElementConfig] = [
+        {"id": "email", "type": "input", "label": "E-mail"},
+        {"id": "phone", "type": "input"},
+        {"id": "bio", "type": "text", "label": "About"},
+        {"id": "country", "type": "select"},
+    ]
+    for html in render_all(elements, registry):
+        print(html)
+    print(render_all((), registry))
+    print(render_all((el for el in elements if el["type"] == "text"), {"text": with_label(render_text)}))
+    print(with_label(render_input) is render_input)
+  expected: |
+    <label for="email">E-mail</label><input name="email">
+    <input name="phone">
+    <textarea name="bio"></textarea>
+    <!-- no renderer: select -->
+    []
+    ['<label for="bio">About</label><textarea name="bio"></textarea>']
+    False
+  hints:
+    - "with_label визначає всередині себе нову функцію з тією самою сигнатурою, що й Renderer, і повертає її, не викликаючи. Вона бачить `render` через замикання."
+    - "Усередині: `label = el.get(\"label\")`; якщо `label is None`, повернути `render(el)`, інакше префікс з `<label>`. У render_all: `renderer = registry.get(el[\"type\"])` і перевірка на None."
+  solution: |
+    from collections.abc import Callable, Iterable, Mapping
+    from typing import Literal, NotRequired, TypedDict
+
+    type ElementType = Literal["input", "text", "select"]
+
+    class ElementConfig(TypedDict):
+        id: str
+        type: ElementType
+        label: NotRequired[str]
+
+    type Renderer = Callable[[ElementConfig], str]
+
+    def with_label(render: Renderer) -> Renderer:
+        def wrapped(el: ElementConfig) -> str:
+            label = el.get("label")
+            if label is None:
+                return render(el)
+            return f'<label for="{el["id"]}">{label}</label>' + render(el)
+        return wrapped
+
+    def render_all(elements: Iterable[ElementConfig], registry: Mapping[ElementType, Renderer]) -> list[str]:
+        result: list[str] = []
+        for el in elements:
+            renderer = registry.get(el["type"])
+            if renderer is None:
+                result.append(f"<!-- no renderer: {el['type']} -->")
+            else:
+                result.append(renderer(el))
+        return result
+  requires: []
+  runtime: browser
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from typing import cast
+
+    raw: object = "42"
+    n = cast(int, raw)
+    print(n + 1)
+    ```
+  options:
+    - "43"
+    - "TypeError: can only concatenate str (not \"int\") to str"
+    - "421"
+    - "ValueError: invalid literal for int() with base 10: '42'"
+  answer: 1
+  explain: |
+    `cast` у рантаймі повертає свій другий аргумент без змін, як `as` у TS: `n` лишається рядком
+    `"42"`, а `"42" + 1` дає `TypeError`. `43` вийшло б з `int(raw)`, тобто з перетворення, якого `cast`
+    не робить. `421` це JS-коерція `"42" + 1`, Python рядок з числом не складає. `ValueError` з'явився б
+    лише тоді, якби `cast` намагався викликати `int(...)`, а він не викликає нічого.
+
+- id: t5
+  type: code
+  title: "Generic tree_map для дерева елементів"
+  prompt: |
+    Дерево у стартері описане generic TypedDict `Node[T]`: значення вузла й список дочірніх вузлів.
+    `to_tree` перетворює вкладений конфіг на `Node[ElementConfig]`. Напишіть і анотуйте синтаксисом 3.12
+    (параметри типу в квадратних дужках після імені функції):
+
+    - `tree_map(node, fn)`: нове дерево тієї самої форми, де кожне значення замінене на `fn(value)`;
+      `Node[T]` і `Callable[[T], U]` дають `Node[U]`; вихідне дерево не змінюється;
+    - `flatten(node)`: список значень обходом у глибину, батько перед дітьми, діти зліва направо;
+    - `count_by_type(tree)`: для `Node[ElementConfig]` словник `{тип: кількість}` у порядку першої появи
+      типу при обході. Зберіть його з `tree_map` і `flatten`, без власної рекурсії.
+
+    Платформа перевіряє поведінку й кількість параметрів типу (`tree_map.__type_params__` має два
+    елементи, `flatten.__type_params__` один). Повну перевірку анотацій дає лише mypy, це в p1.
+
+    ```python
+    ids = tree_map(tree, lambda el: el["id"])
+    flatten(ids)   # ['signup', 'email', 'contacts', 'phone', 'country', 'bio']
+    ```
+  starter: |
+    from collections.abc import Callable
+    from typing import Literal, NotRequired, TypedDict
+
+    type ElementType = Literal["form", "input", "text", "select"]
+
+    class ElementConfig(TypedDict):
+        id: str
+        type: ElementType
+        children: NotRequired[list["ElementConfig"]]
+
+    class Node[T](TypedDict):
+        value: T
+        children: list["Node[T]"]
+
+    def to_tree(el: ElementConfig) -> Node[ElementConfig]:
+        return {"value": el, "children": [to_tree(c) for c in el.get("children", [])]}
+
+    def tree_map(node, fn):
+        ...
+
+    def flatten(node):
+        ...
+
+    def count_by_type(tree):
+        ...
+  harness: |
+    config: ElementConfig = {
+        "id": "signup",
+        "type": "form",
+        "children": [
+            {"id": "email", "type": "input"},
+            {"id": "contacts", "type": "form", "children": [
+                {"id": "phone", "type": "input"},
+                {"id": "country", "type": "select"},
+            ]},
+            {"id": "bio", "type": "text"},
+        ],
+    }
+    tree = to_tree(config)
+    ids = tree_map(tree, lambda el: el["id"])
+    print(ids["value"], [c["value"] for c in ids["children"]])
+    print(flatten(ids))
+    print(flatten(tree_map(ids, len)))
+    print(count_by_type(tree))
+    print(flatten({"value": 1, "children": []}))
+    print(tree["value"]["id"], type(tree["value"]).__name__)
+    print(len(tree_map.__type_params__), len(flatten.__type_params__))
+  expected: |
+    signup ['email', 'contacts', 'bio']
+    ['signup', 'email', 'contacts', 'phone', 'country', 'bio']
+    [6, 5, 8, 5, 7, 3]
+    {'form': 2, 'input': 2, 'select': 1, 'text': 1}
+    [1]
+    signup dict
+    2 1
+  hints:
+    - "tree_map і flatten рекурсивні: результат для вузла складається з результату для значення й результатів для кожної дитини. Сигнатури: `def tree_map[T, U](node: Node[T], fn: Callable[[T], U]) -> Node[U]` і `def flatten[T](node: Node[T]) -> list[T]`."
+    - "`return {\"value\": fn(node[\"value\"]), \"children\": [tree_map(c, fn) for c in node[\"children\"]]}`; у flatten `result = [node[\"value\"]]` і `result.extend(flatten(c))` для кожної дитини."
+    - "count_by_type: `for kind in flatten(tree_map(tree, lambda el: el[\"type\"])): counts[kind] = counts.get(kind, 0) + 1`, де `counts: dict[ElementType, int] = {}`."
+  solution: |
+    from collections.abc import Callable
+    from typing import Literal, NotRequired, TypedDict
+
+    type ElementType = Literal["form", "input", "text", "select"]
+
+    class ElementConfig(TypedDict):
+        id: str
+        type: ElementType
+        children: NotRequired[list["ElementConfig"]]
+
+    class Node[T](TypedDict):
+        value: T
+        children: list["Node[T]"]
+
+    def to_tree(el: ElementConfig) -> Node[ElementConfig]:
+        return {"value": el, "children": [to_tree(c) for c in el.get("children", [])]}
+
+    def tree_map[T, U](node: Node[T], fn: Callable[[T], U]) -> Node[U]:
+        return {"value": fn(node["value"]), "children": [tree_map(c, fn) for c in node["children"]]}
+
+    def flatten[T](node: Node[T]) -> list[T]:
+        result = [node["value"]]
+        for child in node["children"]:
+            result.extend(flatten(child))
+        return result
+
+    def count_by_type(tree: Node[ElementConfig]) -> dict[ElementType, int]:
+        counts: dict[ElementType, int] = {}
+        for kind in flatten(tree_map(tree, lambda el: el["type"])):
+            counts[kind] = counts.get(kind, 0) + 1
+        return counts
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "Типи сирого конфігу FormBuilder у капстоуні"
+  prompt: |
+    У репозиторії капстоуну створіть `src/formbuilder/config.py`: статичний опис сирого JSON-конфігу
+    форми до валідації, тобто того, що повертає `json.loads`. Беріть не навчальну схему з уроку, а свій
+    реальний контракт FormBuilder: ті типи елементів, ті необов'язкові ключі й ті `null`, які були у вашому
+    фронтенді. Ім'я файлу остаточне: у m2-l09 ці TypedDict у тому самому `config.py` замінять Pydantic-моделі,
+    тож тут важливо точно передати форму JSON. `Renderer`, `REGISTRY` і `missing_renderers` живуть тут
+    тимчасово: у m2-l07 рендеринг переїде в пакет `src/formbuilder/renderers/` з Protocol замість `Callable`,
+    і тоді їх із `config.py` приберіть.
+
+    Платформа mypy не запускає: перевірка локальна, командою з `verify`.
+  checklist:
+    - "`ElementType` це `type`-alias на `Literal` з усіма типами елементів вашого FormBuilder, а рантаймовий кортеж типів отримується через `get_args(ElementType.__value__)`, без дублювання значень"
+    - "`ElementConfig` і `FormConfig` це TypedDict: відсутні ключі через `NotRequired`, ключі зі значенням `null` через `| None`, рівно як у JSON-контракті; вкладені елементи через рядкову анотацію `list[\"ElementConfig\"]`"
+    - "`Renderer = Callable[[ElementConfig, list[str]], str]` і `REGISTRY: dict[ElementType, Renderer]`; функція `missing_renderers() -> list[str]` повертає типи з `Literal`, для яких рендерера немає, і на вашому реєстрі повертає `[]`"
+    - "Generic `Node[T]`, `to_tree`, `tree_map[T, U]` і `flatten[T]` у синтаксисі 3.12, без `TypeVar`"
+    - "Параметри, які лише читаються, анотовані `Iterable` / `Sequence` / `Mapping`, результати конкретними типами"
+    - "`mypy --strict` проходить без `Any`, `cast` і `type: ignore`"
+  verify: "cd capstone && uv run mypy --strict src/formbuilder/config.py"

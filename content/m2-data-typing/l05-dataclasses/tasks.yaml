@@ -1,0 +1,587 @@
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from dataclasses import dataclass
+
+    @dataclass
+    class InputField:
+        name: str
+
+    @dataclass
+    class HiddenField:
+        name: str
+
+    print(InputField("email") == HiddenField("email"))
+    ```
+  options: ["True", "False", "TypeError: '==' not supported between instances of 'InputField' and 'HiddenField'", "NotImplemented"]
+  answer: 1
+  explain: |
+    Згенерований `__eq__` спершу перевіряє `other.__class__ is self.__class__` і для чужого класу повертає
+    `NotImplemented`. Python тоді пробує дзеркальний `HiddenField.__eq__`, отримує те саме і для `==` падає
+    назад на порівняння identity, а це `False`.
+    `True` це інтуїція структурної типізації з TS, де однакова форма означає сумісність; dataclass порівнює
+    поля лише між екземплярами одного класу. `TypeError` буває для `<` і `>` без `order=True`, але `==` ніколи
+    не кидає через `NotImplemented`. Саме `NotImplemented` це внутрішній сигнал для інтерпретатора, і як
+    результат `==` він назовні не потрапляє.
+
+- id: t1
+  type: code
+  title: "Опції select як dataclass"
+  prompt: |
+    Оголосіть dataclass `Choice` для опції випадного списку з полями в такому порядку:
+    `value: str`, `label: str`, `disabled: bool = False` і `tags: list[str]`, який за замовчуванням
+    порожній і в кожного екземпляра свій.
+
+    Потім напишіть `make_choices(values)`, яка з кожного рядка робить `Choice` з `label`, рівним `value.upper()`.
+
+    ```python
+    make_choices(["ua"])        # [Choice(value='ua', label='UA', disabled=False, tags=[])]
+    Choice("ua", "UA") == make_choices(["ua"])[0]   # True
+    ```
+  starter: |
+    from dataclasses import dataclass, field
+
+    class Choice:
+        ...
+
+    def make_choices(values: list[str]) -> list[Choice]:
+        ...
+  harness: |
+    choices = make_choices(["ua", "pl"])
+    print(choices)
+    choices[0].tags.append("default")
+    print(choices[0].tags, choices[1].tags)
+    print(Choice("ua", "UA") == choices[0], Choice("ua", "UA", tags=["default"]) == choices[0])
+    print(Choice("de", "Germany", disabled=True))
+    print(make_choices([]))
+  expected: |
+    [Choice(value='ua', label='UA', disabled=False, tags=[]), Choice(value='pl', label='PL', disabled=False, tags=[])]
+    ['default'] []
+    False True
+    Choice(value='de', label='Germany', disabled=True, tags=[])
+    []
+  hints:
+    - "Декоратор `@dataclass` над класом і анотовані поля в тілі; для списку значення за замовчуванням не можна задати як `= []`."
+    - "`tags: list[str] = field(default_factory=list)`, а `make_choices` це `[Choice(v, v.upper()) for v in values]`."
+  solution: |
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class Choice:
+        value: str
+        label: str
+        disabled: bool = False
+        tags: list[str] = field(default_factory=list)
+
+    def make_choices(values: list[str]) -> list[Choice]:
+        return [Choice(value, value.upper()) for value in values]
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from dataclasses import dataclass
+
+    @dataclass
+    class Theme:
+        mode: str
+
+    themes = [Theme("dark"), Theme("dark"), Theme("light")]
+    print(len(set(themes)))
+    ```
+  options: ["3", "2", "TypeError: unhashable type: 'Theme'", "1"]
+  answer: 2
+  explain: |
+    Звичайний dataclass генерує `__eq__` за полями і через це ставить `__hash__ = None`: об'єкт, рівність якого
+    залежить від змінюваних полів, не може мати стабільного хешу. Тому `set(...)` падає з `TypeError`.
+    `3` це інтуїція JS `Set`, який порівнює об'єкти за identity; у Python set спирається на `__hash__` і `__eq__`.
+    `2` був би правильною відповіддю для `@dataclass(frozen=True)`: тоді хеш обчислюється з полів, і два
+    `Theme("dark")` зливаються в один елемент. `1` не вийде за жодних налаштувань, бо `"dark"` і `"light"` різні.
+
+- id: t2
+  type: code
+  title: "Frozen-тема як ключ словника"
+  prompt: |
+    Перетворіть `Theme` на незмінний hashable dataclass з полями `mode`, `primary_color`, `radius: int = 8`
+    і напишіть дві функції. В обох використовуйте `set` або `dict` для пошуку вже побаченого, а не пошук у списку.
+
+    - `unique_themes(themes)` повертає теми без повторів у порядку першої появи.
+    - `dark_map(themes)` повертає словник: для кожної унікальної теми з `mode == "light"` ключ це сама тема,
+      значення це її копія з `mode="dark"`, решта полів без змін. Темні теми пропускаються.
+
+    Присвоєння `theme.mode = ...` має кидати `FrozenInstanceError`.
+
+    ```python
+    a = Theme("light", "#2563eb")
+    dark_map([a, a])   # {Theme(mode='light', ...): Theme(mode='dark', primary_color='#2563eb', radius=8)}
+    ```
+  starter: |
+    from dataclasses import FrozenInstanceError, dataclass, replace
+    from typing import Literal
+
+    class Theme:
+        mode: Literal["light", "dark"]
+        primary_color: str
+        radius: int = 8
+
+    def unique_themes(themes: list[Theme]) -> list[Theme]:
+        ...
+
+    def dark_map(themes: list[Theme]) -> dict[Theme, Theme]:
+        ...
+  harness: |
+    a = Theme("light", "#2563eb")
+    b = Theme("light", "#2563eb")
+    c = Theme("dark", "#111827")
+    d = Theme("light", "#16a34a", radius=0)
+    print(unique_themes([a, b, c, d, c]))
+    mapping = dark_map([a, b, c, d])
+    for light, dark in mapping.items():
+        print(light.primary_color, "->", dark)
+    print(mapping[Theme("light", "#2563eb")].mode)
+    try:
+        a.mode = "dark"
+    except FrozenInstanceError as e:
+        print("FrozenInstanceError:", e)
+    print(a.mode)
+  expected: |
+    [Theme(mode='light', primary_color='#2563eb', radius=8), Theme(mode='dark', primary_color='#111827', radius=8), Theme(mode='light', primary_color='#16a34a', radius=0)]
+    #2563eb -> Theme(mode='dark', primary_color='#2563eb', radius=8)
+    #16a34a -> Theme(mode='dark', primary_color='#16a34a', radius=0)
+    dark
+    FrozenInstanceError: cannot assign to field 'mode'
+    light
+  hints:
+    - "Одне слово в декораторі робить екземпляр незмінним і водночас дає хеш з полів. Для порядку першої появи потрібні і `set` побачених, і список результату."
+    - "`@dataclass(frozen=True)`. У `dark_map`: `for t in unique_themes(themes): if t.mode == \"light\": result[t] = replace(t, mode=\"dark\")`."
+  solution: |
+    from dataclasses import FrozenInstanceError, dataclass, replace
+    from typing import Literal
+
+    @dataclass(frozen=True)
+    class Theme:
+        mode: Literal["light", "dark"]
+        primary_color: str
+        radius: int = 8
+
+    def unique_themes(themes: list[Theme]) -> list[Theme]:
+        seen: set[Theme] = set()
+        result: list[Theme] = []
+        for theme in themes:
+            if theme not in seen:
+                seen.add(theme)
+                result.append(theme)
+        return result
+
+    def dark_map(themes: list[Theme]) -> dict[Theme, Theme]:
+        result: dict[Theme, Theme] = {}
+        for theme in unique_themes(themes):
+            if theme.mode == "light":
+                result[theme] = replace(theme, mode="dark")
+        return result
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Інваріанти умови видимості в __post_init__"
+  prompt: |
+    `Condition` описує правило `visible_if` елемента форми. Допишіть `__post_init__`, який стереже інваріанти
+    в такому порядку:
+
+    1. `operator` не з `OPERATORS`: `ValueError("unknown operator 'between'")`.
+    2. Для `"in"` значення має бути списком або кортежем. Список нормалізується в кортеж, щоб запис лишався
+       hashable. Інше: `ValueError("operator 'in' needs a list of values, got str")`.
+    3. Для `"gt"` і `"lt"` значення має бути `int`, причому `bool` не рахується:
+       `ValueError("operator 'gt' needs an int, got bool")`.
+
+    Клас frozen, тож звичайне присвоєння в `__post_init__` не спрацює.
+
+    ```python
+    Condition("country", "in", ["UA", "PL"])   # Condition(field='country', operator='in', value=('UA', 'PL'))
+    ```
+  starter: |
+    from dataclasses import dataclass
+
+    OPERATORS = ("eq", "neq", "in", "gt", "lt")
+
+    @dataclass(frozen=True)
+    class Condition:
+        field: str
+        operator: str
+        value: str | int | bool | tuple[str, ...]
+
+        def __post_init__(self) -> None:
+            ...
+  harness: |
+    c = Condition("country", "in", ["UA", "PL"])
+    print(c)
+    print(hash(c) == hash(Condition("country", "in", ("UA", "PL"))))
+    print(Condition("age", "gt", 17))
+    print(Condition("email", "neq", ""))
+    for args in [("age", "between", 1), ("age", "gt", "18"), ("age", "lt", True), ("country", "in", "UA")]:
+        try:
+            Condition(*args)
+        except ValueError as e:
+            print("ValueError:", e)
+  expected: |
+    Condition(field='country', operator='in', value=('UA', 'PL'))
+    True
+    Condition(field='age', operator='gt', value=17)
+    Condition(field='email', operator='neq', value='')
+    ValueError: unknown operator 'between'
+    ValueError: operator 'gt' needs an int, got str
+    ValueError: operator 'lt' needs an int, got bool
+    ValueError: operator 'in' needs a list of values, got str
+  hints:
+    - "Перевірки йдуть після того, як згенерований `__init__` уже присвоїв поля. Для нормалізації у frozen-класі потрібен обхід забороненого `__setattr__`; для `bool` згадайте, що це підклас `int`."
+    - "`object.__setattr__(self, \"value\", tuple(self.value))` для списку; `isinstance(self.value, int) and not isinstance(self.value, bool)` для `gt`/`lt`; ім'я типу через `type(self.value).__name__`."
+  solution: |
+    from dataclasses import dataclass
+
+    OPERATORS = ("eq", "neq", "in", "gt", "lt")
+
+    @dataclass(frozen=True)
+    class Condition:
+        field: str
+        operator: str
+        value: str | int | bool | tuple[str, ...]
+
+        def __post_init__(self) -> None:
+            if self.operator not in OPERATORS:
+                raise ValueError(f"unknown operator {self.operator!r}")
+            kind = type(self.value).__name__
+            if self.operator == "in":
+                if not isinstance(self.value, (list, tuple)):
+                    raise ValueError(f"operator 'in' needs a list of values, got {kind}")
+                object.__setattr__(self, "value", tuple(self.value))
+            is_int = isinstance(self.value, int) and not isinstance(self.value, bool)
+            if self.operator in ("gt", "lt") and not is_int:
+                raise ValueError(f"operator {self.operator!r} needs an int, got {kind}")
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from dataclasses import dataclass
+
+    @dataclass(order=True)
+    class Item:
+        label: str
+        position: int
+
+    items = [Item("Phone", 1), Item("Email", 2), Item("Age", 3)]
+    print([item.position for item in sorted(items)])
+    ```
+  options: ["[3, 2, 1]", "[1, 2, 3]", "TypeError: '<' not supported between instances of 'Item' and 'Item'", "[1, 2, 3] або інший порядок: для об'єктів він не визначений"]
+  answer: 0
+  explain: |
+    `order=True` генерує `__lt__` та інші порівняння як порівняння кортежів полів у порядку оголошення:
+    `("Age", 3) < ("Email", 2) < ("Phone", 1)`. Першим іде `label`, тому сортування алфавітне за ним, а `position`
+    вирішує лише при однакових `label`. `[1, 2, 3]` це очікування, що сортування піде за "числовим" полем;
+    для цього потрібен `sorted(items, key=lambda i: i.position)`. `TypeError` був би без `order=True`.
+    Порядок `sorted` у Python завжди визначений і стабільний, на відміну від сортування об'єктів без компаратора в JS.
+
+- id: t4
+  type: code
+  title: "Рендер дерева через match"
+  prompt: |
+    Напишіть `render(el, depth=0)`, яка повертає список рядків HTML для елемента та його нащадків.
+    Відступ кожного рядка: два пробіли на рівень `depth`. Розбір робіть через `match` з class patterns.
+
+    - `input`: `<input name="email" aria-label="Email">`; якщо є `visible_if`, перед `>` додається
+      ` data-visible-if="plan eq business"` (поле, оператор і значення через пробіл).
+    - `text`: `<p>Contact us</p>` з `label`.
+    - `button`: `<button>Send</button>` з `label`.
+    - `block`: `<div id="b1">`, далі діти з `depth + 1`, далі `</div>`.
+    - Будь-який інший `type`: `ValueError("unknown element type 'image'")`.
+  starter: |
+    from dataclasses import dataclass
+
+    @dataclass(frozen=True)
+    class Condition:
+        field: str
+        operator: str
+        value: object
+
+    @dataclass(frozen=True)
+    class Element:
+        type: str
+        id: str
+        name: str | None = None
+        label: str = ""
+        children: tuple["Element", ...] = ()
+        visible_if: Condition | None = None
+
+    def render(el: Element, depth: int = 0) -> list[str]:
+        ...
+  harness: |
+    form = Element("block", "root", children=(
+        Element("text", "t1", label="Contact us"),
+        Element("input", "e1", name="email", label="Email"),
+        Element("block", "b1", children=(
+            Element("input", "e2", name="company", label="Company",
+                    visible_if=Condition("plan", "eq", "business")),
+        )),
+        Element("button", "s1", label="Send"),
+    ))
+    print("\n".join(render(form)))
+    print(render(Element("text", "t2", label="Hi"), depth=2))
+    print(render(Element("block", "empty")))
+    try:
+        render(Element("image", "i1"))
+    except ValueError as e:
+        print("ValueError:", e)
+  expected: |
+    <div id="root">
+      <p>Contact us</p>
+      <input name="email" aria-label="Email">
+      <div id="b1">
+        <input name="company" aria-label="Company" data-visible-if="plan eq business">
+      </div>
+      <button>Send</button>
+    </div>
+    ['    <p>Hi</p>']
+    ['<div id="empty">', '</div>']
+    ValueError: unknown element type 'image'
+  hints:
+    - "Окремий `case` на кожен тип; для інпута з умовою потрібен окремий, вищий `case`, бо перший збіг виграє. Блок рекурсивно викликає `render` для дітей."
+    - "`case Element(\"input\", name=name, label=label, visible_if=Condition(field, op, value)):` вище за `case Element(\"input\", name=name, label=label):`; для блоку `case Element(\"block\", block_id, children=children):`, а останнім `case Element(type=kind):` з `raise`."
+  solution: |
+    from dataclasses import dataclass
+
+    @dataclass(frozen=True)
+    class Condition:
+        field: str
+        operator: str
+        value: object
+
+    @dataclass(frozen=True)
+    class Element:
+        type: str
+        id: str
+        name: str | None = None
+        label: str = ""
+        children: tuple["Element", ...] = ()
+        visible_if: Condition | None = None
+
+    def render(el: Element, depth: int = 0) -> list[str]:
+        pad = "  " * depth
+        match el:
+            case Element("input", name=name, label=label, visible_if=Condition(field, op, value)):
+                return [f'{pad}<input name="{name}" aria-label="{label}" data-visible-if="{field} {op} {value}">']
+            case Element("input", name=name, label=label):
+                return [f'{pad}<input name="{name}" aria-label="{label}">']
+            case Element("text", label=label):
+                return [f"{pad}<p>{label}</p>"]
+            case Element("button", label=label):
+                return [f"{pad}<button>{label}</button>"]
+            case Element("block", block_id, children=children):
+                lines = [f'{pad}<div id="{block_id}">']
+                for child in children:
+                    lines.extend(render(child, depth + 1))
+                lines.append(f"{pad}</div>")
+                return lines
+            case Element(type=kind):
+                raise ValueError(f"unknown element type {kind!r}")
+        raise TypeError(f"not an Element: {el!r}")
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Перейменування поля в незмінному дереві"
+  prompt: |
+    Напишіть `rename_field(form, old, new)`, яка повертає новий `FormConfig`, де інпут з `name == old`
+    називається `new`, а кожна умова `visible_if` з `field == old` посилається на `new`. Оригінал не змінюється
+    (класи frozen, тож інакше й не вийде).
+
+    - Якщо інпута `old` немає: `ValueError("unknown field 'fax'")`.
+    - Якщо `new` уже зайняте іншим інпутом: `ValueError("field 'company' already exists")`.
+    - Structural sharing, як в immutable-оновленнях стану в React: елемент, у якому й у нащадках якого нічого
+      не змінилось, повертається тим самим об'єктом (`is`), а не копією. Змінені елементи й усі їхні предки
+      створюються заново через `replace`.
+
+    ```python
+    renamed = rename_field(form, "email", "work_email")
+    renamed.elements[2] is form.elements[2]   # True, у цьому блоці email не згадується
+    ```
+  starter: |
+    from __future__ import annotations
+
+    from dataclasses import dataclass, replace
+    from typing import Literal
+
+    @dataclass(frozen=True, slots=True)
+    class Theme:
+        mode: Literal["light", "dark"] = "light"
+        primary_color: str = "#2563eb"
+
+    @dataclass(frozen=True, slots=True)
+    class Condition:
+        field: str
+        operator: str
+        value: str | int | bool | tuple[str, ...]
+
+    @dataclass(frozen=True, slots=True, kw_only=True)
+    class Element:
+        type: Literal["input", "text", "button", "block"]
+        id: str
+        name: str | None = None
+        label: str = ""
+        children: tuple[Element, ...] = ()
+        visible_if: Condition | None = None
+
+    @dataclass(frozen=True, slots=True, kw_only=True)
+    class FormConfig:
+        id: str
+        title: str
+        theme: Theme = Theme()
+        elements: tuple[Element, ...] = ()
+
+    def walk(elements: tuple[Element, ...]) -> list[Element]:
+        result: list[Element] = []
+        for el in elements:
+            result.append(el)
+            result.extend(walk(el.children))
+        return result
+
+    def rename_field(form: FormConfig, old: str, new: str) -> FormConfig:
+        ...
+  harness: |
+    form = FormConfig(id="signup", title="Sign up", elements=(
+        Element(type="input", id="e1", name="email", label="Email"),
+        Element(type="block", id="b1", children=(
+            Element(type="input", id="e2", name="company", label="Company",
+                    visible_if=Condition("email", "neq", "")),
+            Element(type="text", id="t1", label="Thanks"),
+        )),
+        Element(type="block", id="b2", children=(
+            Element(type="input", id="e3", name="phone", label="Phone"),
+        )),
+        Element(type="button", id="s1", label="Send"),
+    ))
+    renamed = rename_field(form, "email", "work_email")
+    print([el.name for el in walk(renamed.elements) if el.type == "input"])
+    print(renamed.elements[1].children[0].visible_if)
+    print([el.name for el in walk(form.elements) if el.type == "input"])
+    print(form.elements[1].children[0].visible_if.field)
+    print(renamed.elements[2] is form.elements[2], renamed.elements[3] is form.elements[3])
+    print(renamed.elements[1].children[1] is form.elements[1].children[1])
+    print(renamed.elements[1] is form.elements[1], renamed.elements[0] is form.elements[0])
+    print(renamed.theme is form.theme, renamed.title)
+    print(rename_field(renamed, "work_email", "email") == form)
+    for old, new in [("fax", "phone2"), ("phone", "company")]:
+        try:
+            rename_field(form, old, new)
+        except ValueError as e:
+            print("ValueError:", e)
+  expected: |
+    ['work_email', 'company', 'phone']
+    Condition(field='work_email', operator='neq', value='')
+    ['email', 'company', 'phone']
+    email
+    True True
+    True
+    False False
+    True Sign up
+    True
+    ValueError: unknown field 'fax'
+    ValueError: field 'company' already exists
+  hints:
+    - "Рекурсивна функція для одного елемента: спершу обробити дітей, потім вирішити, чи змінився сам елемент або хоч одна дитина. Якщо ні, повернути `el` без змін."
+    - "Зберіть зміни в словник `changes`: `name`, `visible_if` через `replace(el.visible_if, field=new)`, `children`, якщо `any(c is not o for c, o in zip(new_children, el.children))`. Наприкінці `replace(el, **changes) if changes else el`."
+    - "Імена інпутів для перевірок: `[el.name for el in walk(form.elements) if el.type == \"input\"]`; результат: `replace(form, elements=tuple(rename_element(el, old, new) for el in form.elements))`."
+  solution: |
+    from __future__ import annotations
+
+    from dataclasses import dataclass, replace
+    from typing import Literal
+
+    @dataclass(frozen=True, slots=True)
+    class Theme:
+        mode: Literal["light", "dark"] = "light"
+        primary_color: str = "#2563eb"
+
+    @dataclass(frozen=True, slots=True)
+    class Condition:
+        field: str
+        operator: str
+        value: str | int | bool | tuple[str, ...]
+
+    @dataclass(frozen=True, slots=True, kw_only=True)
+    class Element:
+        type: Literal["input", "text", "button", "block"]
+        id: str
+        name: str | None = None
+        label: str = ""
+        children: tuple[Element, ...] = ()
+        visible_if: Condition | None = None
+
+    @dataclass(frozen=True, slots=True, kw_only=True)
+    class FormConfig:
+        id: str
+        title: str
+        theme: Theme = Theme()
+        elements: tuple[Element, ...] = ()
+
+    def walk(elements: tuple[Element, ...]) -> list[Element]:
+        result: list[Element] = []
+        for el in elements:
+            result.append(el)
+            result.extend(walk(el.children))
+        return result
+
+    def rename_element(el: Element, old: str, new: str) -> Element:
+        children = tuple(rename_element(child, old, new) for child in el.children)
+        changes: dict[str, object] = {}
+        if el.type == "input" and el.name == old:
+            changes["name"] = new
+        if el.visible_if is not None and el.visible_if.field == old:
+            changes["visible_if"] = replace(el.visible_if, field=new)
+        if any(child is not orig for child, orig in zip(children, el.children)):
+            changes["children"] = children
+        return replace(el, **changes) if changes else el
+
+    def rename_field(form: FormConfig, old: str, new: str) -> FormConfig:
+        names = [el.name for el in walk(form.elements) if el.type == "input"]
+        if old not in names:
+            raise ValueError(f"unknown field {old!r}")
+        if new in names:
+            raise ValueError(f"field {new!r} already exists")
+        return replace(form, elements=tuple(rename_element(el, old, new) for el in form.elements))
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "Внутрішня модель конфігу в капстоуні"
+  prompt: |
+    У репозиторії капстоуну (`capstone/`, скелет з m0-l06) створіть `src/formbuilder/domain.py` з внутрішнім
+    представленням конфігу форми: `Theme`, `Condition`, `Element`, `FormConfig` як frozen dataclass з розділу
+    "Для капстоуну" цього уроку, і функції `walk(elements)`, `field_names(form)` та `rename_field(form, old, new)`
+    з завдання t5.
+
+    Додайте `tests/test_domain.py`. Тести пишуться так само, як smoke-тест з m0-l06: функції `test_*` і голий
+    `assert`; для очікуваного винятку `with pytest.raises(ValueError):` (детально pytest у m3-l03).
+
+    Модуль не імпортує Pydantic. У m2-l09 вхідні моделі з'являться окремо в `config.py`, а перехід від
+    перевіреної моделі до domain-об'єктів стане однією функцією `to_domain` (m2-l09, t6).
+  checklist:
+    - "Усі чотири класи `@dataclass(frozen=True, slots=True)`, `Element` і `FormConfig` ще й `kw_only=True`; колекції всередині лише `tuple`"
+    - "`Element.__post_init__` кидає `ValueError`, якщо `name` є не в `input` (або його немає в `input`) чи `children` не в `block`; тест на обидва випадки"
+    - "Тест: `walk` повертає елементи в порядку обходу в глибину на дереві з вкладеним блоком"
+    - "Тест: присвоєння полю кидає `dataclasses.FrozenInstanceError`, а `replace` повертає новий об'єкт і не змінює оригінал"
+    - "Тест: дві окремо зібрані однакові форми рівні й дають один ключ у словнику"
+    - "Тест: `rename_field` повертає незмінені піддерева тими самими об'єктами (`is`)"
+    - "Тест: `json.loads(json.dumps(asdict(form)))` дає словник, у якому `children` це списки"
+    - "`uv run ruff check` проходить без зауважень"
+  verify: "cd capstone && uv run pytest tests/test_domain.py -q"

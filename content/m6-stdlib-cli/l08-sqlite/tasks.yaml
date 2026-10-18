@@ -1,0 +1,1082 @@
+- id: t1
+  type: code
+  title: "Перші запити: fetchall, fetchone і порожня таблиця"
+  prompt: |
+    Харнес створює з'єднання з таблицею `forms (slug TEXT PRIMARY KEY, title TEXT)` і передає його у ваші функції.
+    Параметрів у запитах тут не потрібно.
+
+    - `form_titles(conn)` повертає список заголовків, відсортованих за `slug` (сортує SQL, а не Python).
+    - `count_forms(conn)` повертає кількість рядків як `int`.
+    - `first_slug(conn)` повертає найменший за алфавітом `slug` або `None`, якщо таблиця порожня.
+
+    Рядки результату за замовчуванням це кортежі, тож значення з них треба дістати.
+
+    ```python
+    form_titles(conn)   # ['Contact us', 'Sign up', 'Survey']
+    count_forms(conn)   # 3
+    first_slug(empty)   # None
+    ```
+  starter: |
+    import sqlite3
+
+
+    def form_titles(conn: sqlite3.Connection) -> list[str]:
+        ...
+
+
+    def count_forms(conn: sqlite3.Connection) -> int:
+        ...
+
+
+    def first_slug(conn: sqlite3.Connection) -> str | None:
+        ...
+  harness: |
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE forms (slug TEXT PRIMARY KEY, title TEXT)")
+    conn.execute(
+        "INSERT INTO forms VALUES ('survey', 'Survey'), ('contact', 'Contact us'), ('signup', 'Sign up')"
+    )
+    conn.commit()
+    print(form_titles(conn))
+    print(count_forms(conn))
+    print(first_slug(conn))
+
+    empty = sqlite3.connect(":memory:")
+    empty.execute("CREATE TABLE forms (slug TEXT PRIMARY KEY, title TEXT)")
+    print(form_titles(empty), count_forms(empty), first_slug(empty))
+  expected: |
+    ['Contact us', 'Sign up', 'Survey']
+    3
+    contact
+    [] 0 None
+  hints:
+    - "`conn.execute(...)` повертає курсор; `fetchall()` дає список кортежів, `fetchone()` один кортеж або None. Агрегат `count(*)` завжди повертає рядок, а пошук першого slug може не повернути нічого."
+    - "`[title for (title,) in conn.execute(\"SELECT title FROM forms ORDER BY slug\")]`; для першого slug `row = ....fetchone()` і `return None if row is None else row[0]`."
+  solution: |
+    import sqlite3
+
+
+    def form_titles(conn: sqlite3.Connection) -> list[str]:
+        return [title for (title,) in conn.execute("SELECT title FROM forms ORDER BY slug")]
+
+
+    def count_forms(conn: sqlite3.Connection) -> int:
+        return conn.execute("SELECT count(*) FROM forms").fetchone()[0]
+
+
+    def first_slug(conn: sqlite3.Connection) -> str | None:
+        row = conn.execute("SELECT slug FROM forms ORDER BY slug LIMIT 1").fetchone()
+        return None if row is None else row[0]
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Параметри, executemany і білий список колонок"
+  prompt: |
+    Таблиця `forms (slug TEXT, title TEXT, status TEXT)` уже створена харнесом. Жодне значення не потрапляє в
+    SQL через f-рядок.
+
+    - `add_forms(conn, forms)` вставляє список словників з ключами `slug`, `title`, `status` одним
+      `executemany` з іменованими плейсхолдерами, комітить (через `with conn:`) і повертає кількість вставлених рядків.
+    - `find_by_status(conn, status)` повертає список `slug` з цим статусом, відсортований за `slug`.
+    - `list_sorted(conn, order_by)` повертає всі `slug`, відсортовані за колонкою `order_by`. Дозволені лише
+      `"slug"` і `"title"`; для будь-чого іншого `ValueError(f"cannot sort by {order_by!r}")`.
+
+    ```python
+    find_by_status(conn, "x' OR '1'='1")   # [] , а не всі рядки
+    list_sorted(conn, "title")             # ["o'brien", 'contact', 'signup']
+    ```
+  starter: |
+    import sqlite3
+
+
+    def add_forms(conn: sqlite3.Connection, forms: list[dict[str, str]]) -> int:
+        ...
+
+
+    def find_by_status(conn: sqlite3.Connection, status: str) -> list[str]:
+        ...
+
+
+    def list_sorted(conn: sqlite3.Connection, order_by: str) -> list[str]:
+        ...
+  harness: |
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE forms (slug TEXT, title TEXT, status TEXT)")
+    print(add_forms(conn, [
+        {"slug": "signup", "title": "Sign up", "status": "published"},
+        {"slug": "o'brien", "title": "Apostrophe", "status": "draft"},
+        {"slug": "contact", "title": "Contact", "status": "published"},
+    ]))
+    print(conn.in_transaction)
+    print(find_by_status(conn, "published"))
+    print(find_by_status(conn, "draft"))
+    print(find_by_status(conn, "x' OR '1'='1"))
+    print(list_sorted(conn, "slug"))
+    print(list_sorted(conn, "title"))
+    try:
+        list_sorted(conn, "title; DROP TABLE forms")
+    except ValueError as e:
+        print("ValueError:", e)
+  expected: |
+    3
+    False
+    ['contact', 'signup']
+    ["o'brien"]
+    []
+    ['contact', "o'brien", 'signup']
+    ["o'brien", 'contact', 'signup']
+    ValueError: cannot sort by 'title; DROP TABLE forms'
+  hints:
+    - "Значення йдуть другим аргументом `execute`: кортеж для `?`, словник для `:name`. Один параметр це кортеж з комою. Ім'я колонки плейсхолдером не передати, тож його перевіряють за множиною дозволених."
+    - "`with conn: cur = conn.executemany(\"INSERT INTO forms VALUES (:slug, :title, :status)\", forms)` і `return cur.rowcount`; пошук: `conn.execute(\"SELECT slug FROM forms WHERE status = ? ORDER BY slug\", (status,))`."
+    - "Для сортування: `if order_by not in {\"slug\", \"title\"}: raise ValueError(...)`, і лише після перевірки `f\"SELECT slug FROM forms ORDER BY {order_by}\"`."
+  solution: |
+    import sqlite3
+
+    SORTABLE = frozenset({"slug", "title"})
+
+
+    def add_forms(conn: sqlite3.Connection, forms: list[dict[str, str]]) -> int:
+        with conn:
+            cur = conn.executemany("INSERT INTO forms VALUES (:slug, :title, :status)", forms)
+        return cur.rowcount
+
+
+    def find_by_status(conn: sqlite3.Connection, status: str) -> list[str]:
+        rows = conn.execute("SELECT slug FROM forms WHERE status = ? ORDER BY slug", (status,))
+        return [slug for (slug,) in rows]
+
+
+    def list_sorted(conn: sqlite3.Connection, order_by: str) -> list[str]:
+        if order_by not in SORTABLE:
+            raise ValueError(f"cannot sort by {order_by!r}")
+        return [slug for (slug,) in conn.execute(f"SELECT slug FROM forms ORDER BY {order_by}")]
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "sqlite3.Row і dataclass на межі сховища"
+  prompt: |
+    Напишіть маленьке сховище задач.
+
+    - `open_store()` відкриває базу в пам'яті, вмикає `sqlite3.Row` як фабрику рядків, створює таблицю
+      і повертає з'єднання:
+      `CREATE TABLE jobs (id INTEGER PRIMARY KEY, form_id TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, error TEXT)`.
+    - `job_from_row(row)` збирає `Job` з рядка, звертаючись до колонок за іменем; `created_at` у базі це ISO-рядок,
+      у `Job` має бути aware `datetime`.
+    - `get_job(conn, job_id)` повертає `Job` або `None`.
+    - `jobs_with_status(conn, status)` повертає список `Job`, відсортований за `created_at` (у базі всі дати в UTC,
+      тож рядкове сортування SQL правильне).
+
+    `Job(**row)` тут не спрацює, і не лише через тип дати.
+  starter: |
+    import sqlite3
+    from dataclasses import dataclass
+    from datetime import datetime
+
+
+    @dataclass(frozen=True)
+    class Job:
+        id: int
+        form_id: str
+        status: str
+        attempts: int
+        created_at: datetime
+        error: str | None
+
+
+    def open_store() -> sqlite3.Connection:
+        ...
+
+
+    def job_from_row(row: sqlite3.Row) -> Job:
+        ...
+
+
+    def get_job(conn: sqlite3.Connection, job_id: int) -> Job | None:
+        ...
+
+
+    def jobs_with_status(conn: sqlite3.Connection, status: str) -> list[Job]:
+        ...
+  harness: |
+    conn = open_store()
+    print(conn.row_factory is sqlite3.Row)
+    with conn:
+        conn.executemany(
+            "INSERT INTO jobs (form_id, status, attempts, created_at, error) VALUES (?, ?, ?, ?, ?)",
+            [
+                ("signup", "failed", 3, "2026-10-18T12:05:00+00:00", "render error"),
+                ("contact", "queued", 0, "2026-10-18T12:01:00+00:00", None),
+                ("survey", "queued", 1, "2026-10-18T11:59:00+00:00", None),
+            ],
+        )
+    job = get_job(conn, 1)
+    print(type(job).__name__, job.form_id, job.status, job.attempts, job.error)
+    print(job.created_at.isoformat(), job.created_at.tzinfo)
+    print(get_job(conn, 42))
+    print([(j.id, j.form_id) for j in jobs_with_status(conn, "queued")])
+    print(jobs_with_status(conn, "done"))
+  expected: |
+    True
+    Job signup failed 3 render error
+    2026-10-18T12:05:00+00:00 UTC
+    None
+    [(3, 'survey'), (2, 'contact')]
+    []
+  hints:
+    - "Фабрику ставлять на з'єднання атрибутом `row_factory`. `Row` індексується за іменем колонки, а дату з рядка повертає `datetime.fromisoformat`."
+    - "`Job(id=row[\"id\"], ..., created_at=datetime.fromisoformat(row[\"created_at\"]), error=row[\"error\"])`; у `get_job` перевірте `fetchone()` на `None` до виклику `job_from_row`."
+  solution: |
+    import sqlite3
+    from dataclasses import dataclass
+    from datetime import datetime
+
+
+    @dataclass(frozen=True)
+    class Job:
+        id: int
+        form_id: str
+        status: str
+        attempts: int
+        created_at: datetime
+        error: str | None
+
+
+    def open_store() -> sqlite3.Connection:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE jobs (id INTEGER PRIMARY KEY, form_id TEXT NOT NULL, status TEXT NOT NULL,"
+            " attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, error TEXT)"
+        )
+        return conn
+
+
+    def job_from_row(row: sqlite3.Row) -> Job:
+        return Job(
+            id=row["id"],
+            form_id=row["form_id"],
+            status=row["status"],
+            attempts=row["attempts"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            error=row["error"],
+        )
+
+
+    def get_job(conn: sqlite3.Connection, job_id: int) -> Job | None:
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        return None if row is None else job_from_row(row)
+
+
+    def jobs_with_status(conn: sqlite3.Connection, status: str) -> list[Job]:
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE status = ? ORDER BY created_at", (status,)
+        ).fetchall()
+        return [job_from_row(row) for row in rows]
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "JSON, bool і дати туди й назад"
+  prompt: |
+    Відповіді на форму зберігаються в таблиці (харнес створює її з `SCHEMA`). З'єднання звичайне, рядки це кортежі.
+
+    - `save_submission(conn, form_id, answers, is_test, received_at)` зберігає відповіді як JSON-рядок, `is_test`
+      як `0`/`1`, `received_at` як ISO-рядок **в UTC**, комітить і повертає `id` нового рядка. Naive-дата
+      (без `tzinfo`) це помилка: `ValueError("received_at must be timezone-aware")`.
+    - `load_submission(conn, submission_id)` повертає `None` або словник
+      `{"form_id": str, "answers": dict, "is_test": bool, "received_at": datetime}` з нормальними Python-типами.
+    - `count_with_answer(conn, form_id, field)` рахує відповіді на форму, у яких є ключ `field`, через
+      `json_extract` у SQL, не завантажуючи JSON у Python. Шлях JSON це теж значення, тож він іде параметром.
+
+    ```python
+    save_submission(conn, "signup", {"age": 30}, False, datetime(2026, 10, 18, 15, 0, tzinfo=kyiv))
+    # у базі: ('{"age": 30}', 0, '2026-10-18T12:00:00+00:00')
+    ```
+  starter: |
+    import json
+    import sqlite3
+    from datetime import UTC, datetime, timedelta, timezone
+
+    SCHEMA = (
+        "CREATE TABLE submissions (id INTEGER PRIMARY KEY, form_id TEXT NOT NULL,"
+        " answers TEXT NOT NULL, is_test INTEGER NOT NULL, received_at TEXT NOT NULL)"
+    )
+
+
+    def save_submission(
+        conn: sqlite3.Connection,
+        form_id: str,
+        answers: dict[str, object],
+        is_test: bool,
+        received_at: datetime,
+    ) -> int:
+        ...
+
+
+    def load_submission(conn: sqlite3.Connection, submission_id: int) -> dict[str, object] | None:
+        ...
+
+
+    def count_with_answer(conn: sqlite3.Connection, form_id: str, field: str) -> int:
+        ...
+  harness: |
+    conn = sqlite3.connect(":memory:")
+    conn.execute(SCHEMA)
+    kyiv = timezone(timedelta(hours=3))
+    a = save_submission(conn, "signup", {"email": "a@b.c", "age": 30}, False,
+                        datetime(2026, 10, 18, 15, 0, tzinfo=kyiv))
+    b = save_submission(conn, "signup", {"email": "test@b.c"}, True,
+                        datetime(2026, 10, 18, 12, 30, tzinfo=UTC))
+    print(a, b, conn.in_transaction)
+    print(conn.execute("SELECT answers, is_test, received_at FROM submissions WHERE id = ?", (a,)).fetchone())
+    sub = load_submission(conn, a)
+    print(sub["form_id"], sub["answers"]["age"], sub["is_test"] is False, sub["received_at"].isoformat())
+    print(load_submission(conn, b)["is_test"] is True)
+    print(load_submission(conn, 99))
+    print(count_with_answer(conn, "signup", "email"), count_with_answer(conn, "signup", "age"),
+          count_with_answer(conn, "contact", "email"))
+    try:
+        save_submission(conn, "signup", {}, False, datetime(2026, 10, 18, 12, 0))
+    except ValueError as e:
+        print("ValueError:", e)
+  expected: |
+    1 2 False
+    ('{"email": "a@b.c", "age": 30}', 0, '2026-10-18T12:00:00+00:00')
+    signup 30 True 2026-10-18T12:00:00+00:00
+    True
+    None
+    2 1 0
+    ValueError: received_at must be timezone-aware
+  hints:
+    - "На запис: `json.dumps`, `int(is_test)` (або просто `is_test`, sqlite3 сам зробить 1/0), `received_at.astimezone(UTC).isoformat()`. На читання навпаки: `json.loads`, `bool(...)`, `datetime.fromisoformat`."
+    - "`id` нового рядка лежить у `cursor.lastrowid`. Для підрахунку: `SELECT count(*) FROM submissions WHERE form_id = ? AND json_extract(answers, ?) IS NOT NULL` з параметрами `(form_id, f\"$.{field}\")`."
+  solution: |
+    import json
+    import sqlite3
+    from datetime import UTC, datetime, timedelta, timezone
+
+    SCHEMA = (
+        "CREATE TABLE submissions (id INTEGER PRIMARY KEY, form_id TEXT NOT NULL,"
+        " answers TEXT NOT NULL, is_test INTEGER NOT NULL, received_at TEXT NOT NULL)"
+    )
+
+
+    def save_submission(
+        conn: sqlite3.Connection,
+        form_id: str,
+        answers: dict[str, object],
+        is_test: bool,
+        received_at: datetime,
+    ) -> int:
+        if received_at.tzinfo is None:
+            raise ValueError("received_at must be timezone-aware")
+        with conn:
+            cur = conn.execute(
+                "INSERT INTO submissions (form_id, answers, is_test, received_at) VALUES (?, ?, ?, ?)",
+                (form_id, json.dumps(answers), int(is_test), received_at.astimezone(UTC).isoformat()),
+            )
+        assert cur.lastrowid is not None
+        return cur.lastrowid
+
+
+    def load_submission(conn: sqlite3.Connection, submission_id: int) -> dict[str, object] | None:
+        row = conn.execute(
+            "SELECT form_id, answers, is_test, received_at FROM submissions WHERE id = ?",
+            (submission_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        form_id, answers, is_test, received_at = row
+        return {
+            "form_id": form_id,
+            "answers": json.loads(answers),
+            "is_test": bool(is_test),
+            "received_at": datetime.fromisoformat(received_at),
+        }
+
+
+    def count_with_answer(conn: sqlite3.Connection, form_id: str, field: str) -> int:
+        row = conn.execute(
+            "SELECT count(*) FROM submissions WHERE form_id = ? AND json_extract(answers, ?) IS NOT NULL",
+            (form_id, f"$.{field}"),
+        ).fetchone()
+        return row[0]
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "migrate через PRAGMA user_version"
+  prompt: |
+    Напишіть міграції для одного застосунку.
+
+    - `schema_version(conn)` повертає `PRAGMA user_version` як `int`.
+    - `migrate(conn, migrations=MIGRATIONS)` застосовує лише ті кроки, яких база ще не бачила. Крок з індексом `i`
+      у списку переводить базу у версію `i + 1`. Кожен крок (усі його запити плюс запис нового `user_version`)
+      виконується в одному `with conn:`, щоб падіння посеред кроку не лишило ні половини схеми, ні нового номера.
+      Повертає список застосованих версій.
+
+    Харнес відкриває з'єднання з `autocommit=False`, тож DDL теж потрапляє в транзакцію. Останній сценарій
+    харнесу підсовує зламаний крок: після нього версія й колонки мають лишитися як були.
+  starter: |
+    import sqlite3
+
+    MIGRATIONS: list[list[str]] = [
+        [
+            "CREATE TABLE configs (id TEXT NOT NULL, version INTEGER NOT NULL, json TEXT NOT NULL,"
+            " created_at TEXT NOT NULL, PRIMARY KEY (id, version))",
+        ],
+        ["CREATE TABLE jobs (id INTEGER PRIMARY KEY, config_id TEXT NOT NULL, status TEXT NOT NULL)"],
+        ["ALTER TABLE jobs ADD COLUMN error TEXT"],
+    ]
+
+
+    def schema_version(conn: sqlite3.Connection) -> int:
+        ...
+
+
+    def migrate(conn: sqlite3.Connection, migrations: list[list[str]] = MIGRATIONS) -> list[int]:
+        ...
+  harness: |
+    def columns(conn, table):
+        return [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+
+    conn = sqlite3.connect(":memory:", autocommit=False)
+    print(schema_version(conn))
+    print(migrate(conn))
+    print(migrate(conn))
+    print(schema_version(conn), columns(conn, "jobs"))
+
+    old = sqlite3.connect(":memory:", autocommit=False)
+    print(migrate(old, MIGRATIONS[:1]), schema_version(old))
+    print(migrate(old))
+
+    broken = MIGRATIONS + [["ALTER TABLE jobs ADD COLUMN url TEXT", "ALTER TABLE jobs ADD COLUMN url TEXT"]]
+    try:
+        migrate(conn, broken)
+    except sqlite3.OperationalError as e:
+        print("OperationalError:", e)
+    print(schema_version(conn), columns(conn, "jobs"))
+  expected: |
+    0
+    [1, 2, 3]
+    []
+    3 ['id', 'config_id', 'status', 'error']
+    [1] 1
+    [2, 3]
+    OperationalError: duplicate column name: url
+    3 ['id', 'config_id', 'status', 'error']
+  hints:
+    - "Поточна версія визначає, з якого індексу списку почати; `enumerate(..., start=...)` дасть номер версії для кожного кроку. PRAGMA не приймає `?`, але номер версії це ваш `int`, тож f-рядок тут безпечний."
+    - "`current = schema_version(conn)`; `for version, statements in enumerate(migrations[current:], start=current + 1):` далі `with conn:` з циклом `conn.execute(sql)` і `conn.execute(f\"PRAGMA user_version = {version}\")`, номер додати в результат."
+  solution: |
+    import sqlite3
+
+    MIGRATIONS: list[list[str]] = [
+        [
+            "CREATE TABLE configs (id TEXT NOT NULL, version INTEGER NOT NULL, json TEXT NOT NULL,"
+            " created_at TEXT NOT NULL, PRIMARY KEY (id, version))",
+        ],
+        ["CREATE TABLE jobs (id INTEGER PRIMARY KEY, config_id TEXT NOT NULL, status TEXT NOT NULL)"],
+        ["ALTER TABLE jobs ADD COLUMN error TEXT"],
+    ]
+
+
+    def schema_version(conn: sqlite3.Connection) -> int:
+        return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+    def migrate(conn: sqlite3.Connection, migrations: list[list[str]] = MIGRATIONS) -> list[int]:
+        current = schema_version(conn)
+        applied = []
+        for version, statements in enumerate(migrations[current:], start=current + 1):
+            with conn:
+                for sql in statements:
+                    conn.execute(sql)
+                conn.execute(f"PRAGMA user_version = {version}")
+            applied.append(version)
+        return applied
+  requires: []
+  runtime: browser
+
+- id: t6
+  type: code
+  title: "JobStore для капстоуну: done, failed з повтором, повернення running"
+  prompt: |
+    Це сховище з розділу "Для капстоуну". Допишіть у `SqliteJobStore` три методи; кожен це рівно один
+    `with self._conn:`, а час береться лише з `self._clock()`.
+
+    - `mark_done(job_id)`: лише для задачі в статусі `running`. Статус `done`, `finished_at` поточний час,
+      `error` очищується. Інакше `ValueError(f"job {job_id} is not running")`.
+    - `mark_failed(job_id, error)`: лише з `running` (та сама помилка). Якщо `attempts < self.MAX_ATTEMPTS`,
+      задача повертається в `queued` із записаним `error`, `finished_at` лишається порожнім. Інакше статус
+      `failed`, записуються `error` і `finished_at`. Ліміт читайте через `self`, щоб його можна було перевизначити
+      для екземпляра.
+    - `requeue_running()`: усі задачі в `running` повертаються в `queued` (так застосунок відновлюється після
+      падіння); повертає кількість таких задач.
+
+    Харнес використовує `StepClock`: кожен виклик годинника на хвилину пізніше, починаючи з 12:00 UTC.
+  starter: |
+    import json
+    import sqlite3
+    from collections.abc import Callable, Mapping
+    from dataclasses import dataclass
+    from datetime import UTC, datetime, timedelta
+    from enum import StrEnum
+    from typing import Any, Protocol
+
+    Clock = Callable[[], datetime]
+
+
+    def utc_now() -> datetime:
+        return datetime.now(UTC)
+
+
+    class JobStatus(StrEnum):
+        QUEUED = "queued"
+        RUNNING = "running"
+        DONE = "done"
+        FAILED = "failed"
+
+
+    @dataclass(frozen=True)
+    class Job:
+        id: int
+        config_id: str
+        config_version: int
+        status: JobStatus
+        attempts: int
+        created_at: datetime
+        finished_at: datetime | None
+        error: str | None
+
+
+    class JobStore(Protocol):
+        def save_config(self, config_id: str, config: Mapping[str, Any]) -> int: ...
+        def enqueue(self, config_id: str, version: int) -> int: ...
+        def next_pending(self) -> Job | None: ...
+        def mark_done(self, job_id: int) -> None: ...
+        def mark_failed(self, job_id: int, error: str) -> None: ...
+        def history(self, config_id: str) -> list[Job]: ...
+        def requeue_running(self) -> int: ...
+
+
+    MIGRATIONS: list[list[str]] = [
+        [
+            """CREATE TABLE configs (
+                   id TEXT NOT NULL,
+                   version INTEGER NOT NULL,
+                   json TEXT NOT NULL,
+                   created_at TEXT NOT NULL,
+                   PRIMARY KEY (id, version))""",
+            """CREATE TABLE jobs (
+                   id INTEGER PRIMARY KEY,
+                   config_id TEXT NOT NULL,
+                   config_version INTEGER NOT NULL,
+                   status TEXT NOT NULL,
+                   attempts INTEGER NOT NULL DEFAULT 0,
+                   created_at TEXT NOT NULL,
+                   finished_at TEXT,
+                   error TEXT)""",
+        ],
+    ]
+
+
+    def migrate(conn: sqlite3.Connection) -> int:
+        (current,) = conn.execute("PRAGMA user_version").fetchone()
+        for version, statements in enumerate(MIGRATIONS[current:], start=current + 1):
+            with conn:
+                for sql in statements:
+                    conn.execute(sql)
+                conn.execute(f"PRAGMA user_version = {version}")
+        return len(MIGRATIONS)
+
+
+    def connect(path: str) -> sqlite3.Connection:
+        conn = sqlite3.connect(path, autocommit=True, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")   # лише поза транзакцією
+        conn.autocommit = False                   # далі PEP 249: завжди в транзакції
+        conn.row_factory = sqlite3.Row
+        migrate(conn)
+        return conn
+
+
+    def _iso(moment: datetime) -> str:
+        return moment.astimezone(UTC).isoformat()
+
+
+    def job_from_row(row: sqlite3.Row) -> Job:
+        finished = row["finished_at"]
+        return Job(
+            id=row["id"],
+            config_id=row["config_id"],
+            config_version=row["config_version"],
+            status=JobStatus(row["status"]),
+            attempts=row["attempts"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            finished_at=datetime.fromisoformat(finished) if finished else None,
+            error=row["error"],
+        )
+
+
+    class SqliteJobStore:
+        MAX_ATTEMPTS = 3
+
+        def __init__(self, conn: sqlite3.Connection, clock: Clock = utc_now) -> None:
+            self._conn = conn
+            self._clock = clock
+
+        def save_config(self, config_id: str, config: Mapping[str, Any]) -> int:
+            with self._conn:
+                version: int = self._conn.execute(
+                    "SELECT coalesce(max(version), 0) + 1 FROM configs WHERE id = ?",
+                    (config_id,),
+                ).fetchone()[0]
+                self._conn.execute(
+                    "INSERT INTO configs (id, version, json, created_at) VALUES (?, ?, ?, ?)",
+                    (config_id, version, json.dumps(config), _iso(self._clock())),
+                )
+            return version
+
+        def enqueue(self, config_id: str, version: int) -> int:
+            with self._conn:
+                cur = self._conn.execute(
+                    "INSERT INTO jobs (config_id, config_version, status, created_at)"
+                    " VALUES (?, ?, ?, ?)",
+                    (config_id, version, JobStatus.QUEUED, _iso(self._clock())),
+                )
+            assert cur.lastrowid is not None
+            return cur.lastrowid
+
+        def next_pending(self) -> Job | None:
+            with self._conn:
+                row = self._conn.execute(
+                    "SELECT id FROM jobs WHERE status = ? ORDER BY id LIMIT 1",
+                    (JobStatus.QUEUED,),
+                ).fetchone()
+                if row is None:
+                    return None
+                self._conn.execute(
+                    "UPDATE jobs SET status = ?, attempts = attempts + 1 WHERE id = ?",
+                    (JobStatus.RUNNING, row["id"]),
+                )
+                return self._get(row["id"])
+
+        def history(self, config_id: str) -> list[Job]:
+            with self._conn:
+                rows = self._conn.execute(
+                    "SELECT * FROM jobs WHERE config_id = ? ORDER BY id", (config_id,)
+                ).fetchall()
+            return [job_from_row(row) for row in rows]
+
+        def _get(self, job_id: int) -> Job:
+            row = self._conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            return job_from_row(row)
+
+        def mark_done(self, job_id: int) -> None:
+            ...
+
+        def mark_failed(self, job_id: int, error: str) -> None:
+            ...
+
+        def requeue_running(self) -> int:
+            ...
+
+    class StepClock:
+        """Fake-годинник: кожен виклик на хвилину пізніше."""
+
+        def __init__(self, start: datetime) -> None:
+            self._now = start
+
+        def __call__(self) -> datetime:
+            current = self._now
+            self._now += timedelta(minutes=1)
+            return current
+  harness: |
+    def show(job):
+        finished = f"{job.finished_at:%H:%M}" if job.finished_at else "-"
+        return f"#{job.id} {job.status} attempts={job.attempts} finished={finished} error={job.error!r}"
+
+    store = SqliteJobStore(connect(":memory:"), clock=StepClock(datetime(2026, 10, 18, 12, 0, tzinfo=UTC)))
+    v = store.save_config("signup", {"id": "signup", "elements": []})
+    store.enqueue("signup", v)
+    store.enqueue("signup", v)
+
+    job = store.next_pending()
+    store.mark_done(job.id)
+    for action in (lambda: store.mark_done(job.id), lambda: store.mark_failed(job.id, "late")):
+        try:
+            action()
+        except ValueError as e:
+            print("ValueError:", e)
+
+    store.MAX_ATTEMPTS = 2
+    job = store.next_pending()
+    store.mark_failed(job.id, "render timeout")
+    print(show(store.history("signup")[1]))
+    job = store.next_pending()
+    store.mark_failed(job.id, "render timeout again")
+    print(store.next_pending())
+
+    store.enqueue("signup", v)
+    store.next_pending()
+    print(store.requeue_running(), store.requeue_running())
+    for job in store.history("signup"):
+        print(show(job))
+  expected: |
+    ValueError: job 1 is not running
+    ValueError: job 1 is not running
+    #2 queued attempts=1 finished=- error='render timeout'
+    None
+    1 0
+    #1 done attempts=1 finished=12:03 error=None
+    #2 failed attempts=2 finished=12:05 error='render timeout again'
+    #3 queued attempts=1 finished=- error=None
+  hints:
+    - "`UPDATE ... WHERE id = ? AND status = ?` змінює рядок лише в потрібному статусі, а `cursor.rowcount` скаже, чи щось змінилось. Для `mark_failed` спершу прочитайте задачу (`self._get`), бо рішення залежить від `attempts`."
+    - "`mark_done`: `cur = self._conn.execute(\"UPDATE jobs SET status = ?, finished_at = ?, error = NULL WHERE id = ? AND status = ?\", (JobStatus.DONE, _iso(self._clock()), job_id, JobStatus.RUNNING))`, і `if cur.rowcount == 0: raise ValueError(...)` усередині `with`."
+    - "`mark_failed`: `job = self._get(job_id)`; якщо `job.status is not JobStatus.RUNNING` помилка; далі одна з двох гілок `UPDATE`. `requeue_running`: `UPDATE jobs SET status = ? WHERE status = ?` і `return cur.rowcount`."
+  solution: |
+    import json
+    import sqlite3
+    from collections.abc import Callable, Mapping
+    from dataclasses import dataclass
+    from datetime import UTC, datetime, timedelta
+    from enum import StrEnum
+    from typing import Any, Protocol
+
+    Clock = Callable[[], datetime]
+
+
+    def utc_now() -> datetime:
+        return datetime.now(UTC)
+
+
+    class JobStatus(StrEnum):
+        QUEUED = "queued"
+        RUNNING = "running"
+        DONE = "done"
+        FAILED = "failed"
+
+
+    @dataclass(frozen=True)
+    class Job:
+        id: int
+        config_id: str
+        config_version: int
+        status: JobStatus
+        attempts: int
+        created_at: datetime
+        finished_at: datetime | None
+        error: str | None
+
+
+    class JobStore(Protocol):
+        def save_config(self, config_id: str, config: Mapping[str, Any]) -> int: ...
+        def enqueue(self, config_id: str, version: int) -> int: ...
+        def next_pending(self) -> Job | None: ...
+        def mark_done(self, job_id: int) -> None: ...
+        def mark_failed(self, job_id: int, error: str) -> None: ...
+        def history(self, config_id: str) -> list[Job]: ...
+        def requeue_running(self) -> int: ...
+
+
+    MIGRATIONS: list[list[str]] = [
+        [
+            """CREATE TABLE configs (
+                   id TEXT NOT NULL,
+                   version INTEGER NOT NULL,
+                   json TEXT NOT NULL,
+                   created_at TEXT NOT NULL,
+                   PRIMARY KEY (id, version))""",
+            """CREATE TABLE jobs (
+                   id INTEGER PRIMARY KEY,
+                   config_id TEXT NOT NULL,
+                   config_version INTEGER NOT NULL,
+                   status TEXT NOT NULL,
+                   attempts INTEGER NOT NULL DEFAULT 0,
+                   created_at TEXT NOT NULL,
+                   finished_at TEXT,
+                   error TEXT)""",
+        ],
+    ]
+
+
+    def migrate(conn: sqlite3.Connection) -> int:
+        (current,) = conn.execute("PRAGMA user_version").fetchone()
+        for version, statements in enumerate(MIGRATIONS[current:], start=current + 1):
+            with conn:
+                for sql in statements:
+                    conn.execute(sql)
+                conn.execute(f"PRAGMA user_version = {version}")
+        return len(MIGRATIONS)
+
+
+    def connect(path: str) -> sqlite3.Connection:
+        conn = sqlite3.connect(path, autocommit=True, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")   # лише поза транзакцією
+        conn.autocommit = False                   # далі PEP 249: завжди в транзакції
+        conn.row_factory = sqlite3.Row
+        migrate(conn)
+        return conn
+
+
+    def _iso(moment: datetime) -> str:
+        return moment.astimezone(UTC).isoformat()
+
+
+    def job_from_row(row: sqlite3.Row) -> Job:
+        finished = row["finished_at"]
+        return Job(
+            id=row["id"],
+            config_id=row["config_id"],
+            config_version=row["config_version"],
+            status=JobStatus(row["status"]),
+            attempts=row["attempts"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            finished_at=datetime.fromisoformat(finished) if finished else None,
+            error=row["error"],
+        )
+
+
+    class SqliteJobStore:
+        MAX_ATTEMPTS = 3
+
+        def __init__(self, conn: sqlite3.Connection, clock: Clock = utc_now) -> None:
+            self._conn = conn
+            self._clock = clock
+
+        def save_config(self, config_id: str, config: Mapping[str, Any]) -> int:
+            with self._conn:
+                version: int = self._conn.execute(
+                    "SELECT coalesce(max(version), 0) + 1 FROM configs WHERE id = ?",
+                    (config_id,),
+                ).fetchone()[0]
+                self._conn.execute(
+                    "INSERT INTO configs (id, version, json, created_at) VALUES (?, ?, ?, ?)",
+                    (config_id, version, json.dumps(config), _iso(self._clock())),
+                )
+            return version
+
+        def enqueue(self, config_id: str, version: int) -> int:
+            with self._conn:
+                cur = self._conn.execute(
+                    "INSERT INTO jobs (config_id, config_version, status, created_at)"
+                    " VALUES (?, ?, ?, ?)",
+                    (config_id, version, JobStatus.QUEUED, _iso(self._clock())),
+                )
+            assert cur.lastrowid is not None
+            return cur.lastrowid
+
+        def next_pending(self) -> Job | None:
+            with self._conn:
+                row = self._conn.execute(
+                    "SELECT id FROM jobs WHERE status = ? ORDER BY id LIMIT 1",
+                    (JobStatus.QUEUED,),
+                ).fetchone()
+                if row is None:
+                    return None
+                self._conn.execute(
+                    "UPDATE jobs SET status = ?, attempts = attempts + 1 WHERE id = ?",
+                    (JobStatus.RUNNING, row["id"]),
+                )
+                return self._get(row["id"])
+
+        def history(self, config_id: str) -> list[Job]:
+            with self._conn:
+                rows = self._conn.execute(
+                    "SELECT * FROM jobs WHERE config_id = ? ORDER BY id", (config_id,)
+                ).fetchall()
+            return [job_from_row(row) for row in rows]
+
+        def _get(self, job_id: int) -> Job:
+            row = self._conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            return job_from_row(row)
+
+        def mark_done(self, job_id: int) -> None:
+            with self._conn:
+                cur = self._conn.execute(
+                    "UPDATE jobs SET status = ?, finished_at = ?, error = NULL"
+                    " WHERE id = ? AND status = ?",
+                    (JobStatus.DONE, _iso(self._clock()), job_id, JobStatus.RUNNING),
+                )
+                if cur.rowcount == 0:
+                    raise ValueError(f"job {job_id} is not running")
+
+        def mark_failed(self, job_id: int, error: str) -> None:
+            with self._conn:
+                job = self._get(job_id)
+                if job.status is not JobStatus.RUNNING:
+                    raise ValueError(f"job {job_id} is not running")
+                if job.attempts < self.MAX_ATTEMPTS:
+                    self._conn.execute(
+                        "UPDATE jobs SET status = ?, error = ? WHERE id = ?",
+                        (JobStatus.QUEUED, error, job_id),
+                    )
+                else:
+                    self._conn.execute(
+                        "UPDATE jobs SET status = ?, error = ?, finished_at = ? WHERE id = ?",
+                        (JobStatus.FAILED, error, _iso(self._clock()), job_id),
+                    )
+
+        def requeue_running(self) -> int:
+            with self._conn:
+                cur = self._conn.execute(
+                    "UPDATE jobs SET status = ? WHERE status = ?",
+                    (JobStatus.QUEUED, JobStatus.RUNNING),
+                )
+            return cur.rowcount
+
+
+    class StepClock:
+        """Fake-годинник: кожен виклик на хвилину пізніше."""
+
+        def __init__(self, start: datetime) -> None:
+            self._now = start
+
+        def __call__(self) -> datetime:
+            current = self._now
+            self._now += timedelta(minutes=1)
+            return current
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що станеться?
+    ```python
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE forms (slug TEXT)")
+    conn.execute("INSERT INTO forms VALUES ('signup')")
+    rows = conn.execute("SELECT * FROM forms WHERE slug = ?", ("signup")).fetchall()
+    print(rows)
+    ```
+  options:
+    - "Надрукує `[('signup',)]`"
+    - "`ProgrammingError`: запит чекає 1 параметр, а отримано 6"
+    - "Надрукує `[]`: рядок порівнюється як `('signup')` разом з дужками"
+    - "`OperationalError: near \"?\": syntax error`"
+  answer: 1
+  explain: |
+    `("signup")` без коми це не кортеж, а рядок у дужках, як `(1 + 2)` це число. Рядок теж послідовність, тому
+    `sqlite3` бачить шість значень, по одному на символ, і порівнює їх з одним плейсхолдером:
+    `Incorrect number of bindings supplied. The current statement uses 1, and there are 6 supplied.`
+    Перший варіант був би правильним з `("signup",)` або `{"slug": ...}` з `:slug`. Значення ніколи не
+    підставляється в текст SQL, тож порівняння "разом з дужками" неможливе, а `syntax error` біля `?`
+    буває лише тоді, коли плейсхолдер стоїть на місці імені таблиці чи колонки.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує код? Файл `app.db` порожній перед запуском.
+    ```python
+    import sqlite3
+    with sqlite3.connect("app.db") as conn:
+        conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY)")
+        conn.execute("INSERT INTO jobs DEFAULT VALUES")
+    print(conn.execute("SELECT count(*) FROM jobs").fetchone()[0])
+    ```
+  options:
+    - "`1`"
+    - "`ProgrammingError: Cannot operate on a closed database.`"
+    - "`0`: без явного `commit()` вставка відкочена"
+    - "`OperationalError: no such table: jobs`"
+  answer: 0
+  explain: |
+    `with conn:` у `sqlite3` це транзакція, а не звільнення ресурсу: `__exit__` робить `commit()` (або `rollback()`
+    при винятку) і лишає з'єднання відкритим. Тому після блоку запит працює і бачить закомічений рядок.
+    `ProgrammingError` про закриту базу очікує той, хто переносить інтуїцію `with open(...)` або `using` з TS;
+    для закриття потрібен `contextlib.closing`. `0` був би правильним, якби з'єднання закрили без `commit()` і
+    без `with`. Таблиця теж існує: `CREATE TABLE` у legacy-режимі виконується одразу, поза транзакцією.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує код?
+    ```python
+    import json, sqlite3
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE forms (is_published BOOLEAN, config JSON)")
+    conn.execute("INSERT INTO forms VALUES (?, ?)", (True, json.dumps({"id": "signup"})))
+    flag, config = conn.execute("SELECT is_published, config FROM forms").fetchone()
+    print(flag, type(config).__name__)
+    ```
+  options:
+    - "`True dict`"
+    - "`1 str`"
+    - "`True str`"
+    - "`1 dict`"
+  answer: 1
+  explain: |
+    У SQLite немає типів `BOOLEAN` і `JSON`: це просто імена, які дають колонці affinity, а значення зберігається
+    в одному з п'яти класів. `True` записується як ціле `1` і повертається як `int`; `json.dumps` дав рядок, і
+    назад приходить рядок. Модуль не читає схему, щоб перетворити значення: варіанти з `True` і `dict` це
+    очікування від ORM на кшталт Prisma з полями `Boolean` і `Json`. Розбирати значення треба явно:
+    `bool(flag)`, `json.loads(config)`.
+
+- id: q4
+  type: quiz
+  question: |
+    З'єднання створене в головному потоці. Що станеться в цій корутині?
+    ```python
+    conn = sqlite3.connect("formbuilder.db")
+
+    async def next_job():
+        return await asyncio.to_thread(
+            lambda: conn.execute("SELECT id FROM jobs WHERE status = 'queued' LIMIT 1").fetchone()
+        )
+    ```
+  options:
+    - "Спрацює: через GIL у кожен момент код виконує лише один потік, тож гонки немає"
+    - "`ProgrammingError`: з'єднання можна використовувати лише в потоці, де його створили"
+    - "`OperationalError: database is locked`, бо читають два потоки"
+    - "Спрацює, але заблокує event loop на час запиту"
+  answer: 1
+  explain: |
+    `to_thread` виконує функцію в потоці з пулу, а з'єднання за замовчуванням створене з `check_same_thread=True`
+    і в чужому потоці кидає `ProgrammingError: SQLite objects created in a thread can only be used in that same thread`.
+    GIL тут ні до чого: перевірку робить сам модуль. `database is locked` стосується двох writer-ів, а не читачів.
+    Event loop якраз не блокується: для цього й потрібен `to_thread`. Виправлення: `check_same_thread=False`
+    і один writer, або окреме з'єднання на виклик.
+
+- id: p1
+  type: project
+  title: "JobStore у капстоуні: SQLite, fake і контрактні тести"
+  prompt: |
+    Перенесіть сховище з розділу "Для капстоуну" разом із рішенням t6 у `src/formbuilder/store.py`: `JobStatus`
+    не дублюйте, а імпортуйте з `formbuilder.jobs` (m4-l06) і переконайтесь, що значення `queued`, `running`,
+    `done`, `failed`; далі `Job`, Protocol `JobStore` з методами `save_config`, `enqueue`, `next_pending`, `mark_done`,
+    `mark_failed`, `history`, `requeue_running`, список `MIGRATIONS`, `migrate`, `connect` і `SqliteJobStore`.
+    `connect(path)` приймає `str | Path`, для файлу створює батьківську директорію, вмикає WAL до перемикання
+    в `autocommit=False` і застосовує міграції.
+
+    У `Settings` з m6-l06 додайте `db_path: Path` (змінна оточення `FORMBUILDER_DB_PATH`, за замовчуванням
+    `data/formbuilder.db`), а `data/` додайте в `.gitignore`. Поруч у `store.py` напишіть `MemoryJobStore` на
+    словниках з тією самою поведінкою, включно з повторами й `requeue_running`. Він живе в `src/`, а не в
+    `tests/`, бо ним підмінятимуть сховище тести воркера й API в модулі 7. Цей Protocol і є інтерфейсом
+    сховища до кінця курсу: m7-l01 допише в нього `latest_config` і `get_job`, а решта імен не зміниться.
+
+    `tests/test_store.py` містить контрактні тести: фікстура `store` з `params=["sqlite", "memory"]`, і кожен тест
+    отримує `JobStore`, не знаючи, яка реалізація під ним. Окремо, лише для SQLite, тести на файл у `tmp_path`:
+    дані переживають перевідкриття з'єднання, `migrate` на вже мігрованій базі нічого не робить,
+    `conn.backup` дає копію з тими самими задачами.
+  checklist:
+    - "`SqliteJobStore` і `MemoryJobStore` проходять той самий набір тестів через параметризовану фікстуру"
+    - "Покрито: версії конфігу ростуть окремо для кожного `id`; `next_pending` бере найстарішу `queued` і збільшує `attempts`; повтор до `MAX_ATTEMPTS` і остаточний `failed`; `mark_done`/`mark_failed` не з `running` кидають `ValueError`; `requeue_running`"
+    - "Жодне значення не потрапляє в SQL через f-рядок: `grep -n 'execute(f' src/formbuilder/store.py` знаходить лише `PRAGMA user_version`"
+    - "Кожен публічний метод `SqliteJobStore` це один `with self._conn:`; час лише з інжектованого годинника"
+    - "Тест з `tmp_path`: після `close()` і нового `connect` задачі на місці, `PRAGMA user_version` дорівнює `len(MIGRATIONS)`"
+    - "`uv run mypy --strict src/formbuilder/store.py` без помилок; `Job` назовні сховища, `sqlite3.Row` всередині"
+  verify: "cd capstone && uv run pytest tests/test_store.py -q"

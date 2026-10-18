@@ -1,0 +1,698 @@
+- id: t1
+  type: code
+  title: "Два рендерери без спільного предка"
+  prompt: |
+    Дано Protocol `Renderer`. Напишіть два класи, які йому відповідають, **не наслідуючи** його,
+    і функцію `render_all`, яка приймає будь-який iterable рендерерів і повертає список результатів.
+
+    - `HtmlRenderer.render(text)` повертає `<p>...</p>`, текст екранований через `html.escape`.
+    - `PlainRenderer.render(text)` повертає текст без пробілів на краях.
+    - `render_all(renderers, text)` повертає `[r.render(text) for ...]` у порядку рендерерів.
+
+    ```python
+    render_all([HtmlRenderer(), PlainRenderer()], " a & b ")
+    # ['<p> a &amp; b </p>', 'a & b']
+    ```
+  starter: |
+    from collections.abc import Iterable
+    from html import escape
+    from typing import Protocol
+
+
+    class Renderer(Protocol):
+        def render(self, text: str) -> str: ...
+
+
+    class HtmlRenderer:
+        ...
+
+
+    class PlainRenderer:
+        ...
+
+
+    def render_all(renderers: Iterable[Renderer], text: str) -> list[str]:
+        ...
+  harness: |
+    print(render_all([HtmlRenderer(), PlainRenderer()], " a & b "))
+    print(render_all((PlainRenderer(),), "  Hi  "))
+    print(render_all([], "x"))
+    print(Renderer in HtmlRenderer.__mro__, Renderer in PlainRenderer.__mro__)
+  expected: |
+    ['<p> a &amp; b </p>', 'a & b']
+    ['Hi']
+    []
+    False False
+  hints:
+    - "Протокол не потрібно згадувати в оголошенні класу: достатньо методу render з тією самою сигнатурою."
+    - "class HtmlRenderer:\n    def render(self, text: str) -> str:\n        return f\"<p>{escape(text)}</p>\""
+  solution: |
+    from collections.abc import Iterable
+    from html import escape
+    from typing import Protocol
+
+
+    class Renderer(Protocol):
+        def render(self, text: str) -> str: ...
+
+
+    class HtmlRenderer:
+        def render(self, text: str) -> str:
+            return f"<p>{escape(text)}</p>"
+
+
+    class PlainRenderer:
+        def render(self, text: str) -> str:
+            return text.strip()
+
+
+    def render_all(renderers: Iterable[Renderer], text: str) -> list[str]:
+        return [r.render(text) for r in renderers]
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Завантаження плагінів через runtime_checkable"
+  prompt: |
+    Плагіни-рендерери приходять як словник `{name: object}`: щось завантажене з конфігу, і тип невідомий.
+    Напишіть `load_renderers(candidates)`, яка повертає пару `(accepted, rejected)`:
+
+    - `accepted` словник `{name: Renderer}` з тими кандидатами, що пройшли перевірку, у вихідному порядку;
+    - `rejected` список імен відкинутих кандидатів, у вихідному порядку.
+
+    Кандидат приймається, якщо одночасно:
+
+    1. `isinstance(obj, Renderer)` істинне (Protocol уже позначений `@runtime_checkable`);
+    2. це не клас, а екземпляр: сам клас `HtmlRenderer` теж має атрибут `render` і пройде пункт 1;
+    3. `obj.render` справді можна викликати: `isinstance` перевіряє лише наявність атрибута,
+       і `render = "yes"` для нього достатньо.
+
+    Сигнатуру `render` у рантаймі не перевірити, тому кандидат з `render(self)` без параметрів буде прийнятий.
+    Харнес показує, що з ним станеться при виклику.
+  starter: |
+    from typing import Protocol, runtime_checkable
+
+
+    @runtime_checkable
+    class Renderer(Protocol):
+        def render(self, text: str) -> str: ...
+
+
+    def load_renderers(candidates: dict[str, object]) -> tuple[dict[str, Renderer], list[str]]:
+        ...
+  harness: |
+    class HtmlRenderer:
+        def render(self, text: str) -> str:
+            return f"<p>{text}</p>"
+
+    class PlainRenderer:
+        def render(self, text: str) -> str:
+            return text
+
+    class Flagged:
+        render = "yes"
+
+    class Disabled:
+        render = None
+
+    class NoArgs:
+        def render(self) -> str:
+            return "no args"
+
+    accepted, rejected = load_renderers({
+        "html": HtmlRenderer(),
+        "cls": HtmlRenderer,
+        "plain": PlainRenderer(),
+        "str": "<p>{}</p>",
+        "flag": Flagged(),
+        "off": Disabled(),
+        "noargs": NoArgs(),
+    })
+    print(list(accepted))
+    print(rejected)
+    for name, renderer in accepted.items():
+        try:
+            print(name, renderer.render("Hi"))
+        except TypeError:
+            print(name, "TypeError")
+    print(load_renderers({}))
+  expected: |
+    ['html', 'plain', 'noargs']
+    ['cls', 'str', 'flag', 'off']
+    html <p>Hi</p>
+    plain Hi
+    noargs TypeError
+    ({}, [])
+  hints:
+    - "Три перевірки по черзі: isinstance(obj, Renderer), not isinstance(obj, type), callable(obj.render)."
+    - "Порядок важливий: callable(obj.render) безпечно викликати лише після isinstance, інакше на рядку \"<p>{}</p>\" буде AttributeError."
+    - "for name, obj in candidates.items():\n    if isinstance(obj, Renderer) and not isinstance(obj, type) and callable(obj.render):\n        accepted[name] = obj\n    else:\n        rejected.append(name)"
+  solution: |
+    from typing import Protocol, runtime_checkable
+
+
+    @runtime_checkable
+    class Renderer(Protocol):
+        def render(self, text: str) -> str: ...
+
+
+    def load_renderers(candidates: dict[str, object]) -> tuple[dict[str, Renderer], list[str]]:
+        accepted: dict[str, Renderer] = {}
+        rejected: list[str] = []
+        for name, obj in candidates.items():
+            if isinstance(obj, Renderer) and not isinstance(obj, type) and callable(obj.render):
+                accepted[name] = obj
+            else:
+                rejected.append(name)
+        return accepted, rejected
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Iterable замість list і пастка з рядком"
+  prompt: |
+    Напишіть `unique_ids(ids)`, яка приймає будь-який iterable рядків (список, кортеж, генератор, ключі словника)
+    і повертає список унікальних id: кожен приведений до нижнього регістру й без пробілів на краях,
+    порожні після очищення пропускаються, порядок першої появи зберігається.
+
+    Рядок теж є `Iterable[str]`, і mypy його пропустить, але `unique_ids("email")` дав би `['e', 'm', 'a', 'i', 'l']`.
+    Тому якщо передали голий `str`, функція кидає `TypeError("expected an iterable of ids, got str")`.
+
+    ```python
+    unique_ids(["Email", " email ", "Phone", ""])   # ['email', 'phone']
+    unique_ids(f["id"] for f in fields)             # працює з генератором
+    unique_ids("email")                             # TypeError
+    ```
+  starter: |
+    from collections.abc import Iterable
+
+
+    def unique_ids(ids: Iterable[str]) -> list[str]:
+        ...
+  harness: |
+    print(unique_ids(["Email", " email ", "Phone", ""]))
+    print(unique_ids(("age", "AGE", "note")))
+    print(unique_ids(f["id"] for f in [{"id": "Name"}, {"id": "name "}, {"id": "  "}]))
+    print(unique_ids({"Email": 1, "Phone": 2}))
+    print(unique_ids([]))
+    try:
+        unique_ids("email")
+    except TypeError as e:
+        print("TypeError:", e)
+  expected: |
+    ['email', 'phone']
+    ['age', 'note']
+    ['name']
+    ['email', 'phone']
+    []
+    TypeError: expected an iterable of ids, got str
+  hints:
+    - "Перевірку на str треба зробити до циклу: isinstance(ids, str). Для порядку й унікальності підійде список результатів плюс множина вже бачених."
+    - "Альтернатива множині: dict.fromkeys(...) зберігає порядок вставки, і list(dict.fromkeys(cleaned)) дає унікальні значення в порядку першої появи."
+    - "if isinstance(ids, str):\n    raise TypeError(\"expected an iterable of ids, got str\")\ncleaned = (i.strip().lower() for i in ids)\nreturn list(dict.fromkeys(c for c in cleaned if c))"
+  solution: |
+    from collections.abc import Iterable
+
+
+    def unique_ids(ids: Iterable[str]) -> list[str]:
+        if isinstance(ids, str):
+            raise TypeError("expected an iterable of ids, got str")
+        cleaned = (i.strip().lower() for i in ids)
+        return list(dict.fromkeys(c for c in cleaned if c))
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Callback protocol для валідаторів"
+  prompt: |
+    Валідатор поля викликається як `validator(value, field_id="email")` і повертає текст помилки або `None`.
+    `field_id` keyword-only, і `Callable[[str], str | None]` цього не виразить, тому тип описаний як Protocol з `__call__`.
+
+    Напишіть:
+
+    - функцію `required(value, *, field_id)`: для порожнього рядка повертає `"<field_id>: required"`, інакше `None`;
+    - клас `MaxLength(limit)` з `__call__(value, *, field_id)`: для довшого за `limit` рядка повертає
+      `"<field_id>: max <limit> chars"`, інакше `None`;
+    - функцію `validate(answers, rules)`: `rules` це `{field_id: [validator, ...]}`. Повертає словник
+      `{field_id: [помилки]}` лише для полів, де є хоча б одна помилка, у порядку `rules`. Відсутня відповідь
+      вважається порожнім рядком.
+
+    ```python
+    rules = {"email": [required, MaxLength(5)]}
+    validate({"email": "toolong"}, rules)   # {'email': ['email: max 5 chars']}
+    ```
+  starter: |
+    from typing import Protocol
+
+
+    class Validator(Protocol):
+        def __call__(self, value: str, *, field_id: str) -> str | None: ...
+
+
+    def required(value: str, *, field_id: str) -> str | None:
+        ...
+
+
+    class MaxLength:
+        ...
+
+
+    def validate(answers: dict[str, str], rules: dict[str, list[Validator]]) -> dict[str, list[str]]:
+        ...
+  harness: |
+    rules: dict[str, list[Validator]] = {
+        "email": [required, MaxLength(10)],
+        "nick": [MaxLength(3)],
+        "bio": [required],
+    }
+    print(validate({"email": "a@b.c", "nick": "neo", "bio": "hi"}, rules))
+    print(validate({"email": "", "nick": "trinity"}, rules))
+    print(validate({"email": "very.long@mail.com"}, {"email": [required, MaxLength(10)]}))
+    print(validate({}, {}))
+    print(MaxLength(2)("abc", field_id="x"), required("ok", field_id="y"))
+  expected: |
+    {}
+    {'email': ['email: required'], 'nick': ['nick: max 3 chars'], 'bio': ['bio: required']}
+    {'email': ['email: max 10 chars']}
+    {}
+    x: max 2 chars None
+  hints:
+    - "MaxLength зберігає limit в __init__, а __call__ має ту саму сигнатуру, що й Validator.__call__, разом із зірочкою перед field_id."
+    - "У validate: для кожного field_id з rules беріть value = answers.get(field_id, \"\"), збирайте помилки всіх валідаторів, що не None, і додавайте ключ лише якщо список непорожній."
+    - "errors = [e for v in validators if (e := v(value, field_id=field_id)) is not None]"
+  solution: |
+    from typing import Protocol
+
+
+    class Validator(Protocol):
+        def __call__(self, value: str, *, field_id: str) -> str | None: ...
+
+
+    def required(value: str, *, field_id: str) -> str | None:
+        return f"{field_id}: required" if value == "" else None
+
+
+    class MaxLength:
+        def __init__(self, limit: int) -> None:
+            self.limit = limit
+
+        def __call__(self, value: str, *, field_id: str) -> str | None:
+            if len(value) > self.limit:
+                return f"{field_id}: max {self.limit} chars"
+            return None
+
+
+    def validate(answers: dict[str, str], rules: dict[str, list[Validator]]) -> dict[str, list[str]]:
+        result: dict[str, list[str]] = {}
+        for field_id, validators in rules.items():
+            value = answers.get(field_id, "")
+            errors = [e for v in validators if (e := v(value, field_id=field_id)) is not None]
+            if errors:
+                result[field_id] = errors
+        return result
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Реєстр рендерерів FormBuilder"
+  prompt: |
+    Зберіть модуль рендерингу з капстоуну. `Theme` і `Element` уже дані. Напишіть:
+
+    1. `Renderer`: Protocol з `@runtime_checkable` і методом `render(self, element: Element, theme: Theme) -> str`.
+    2. `HtmlRenderer` без наслідування від `Renderer`. Текст `label` екранується через `html.escape`:
+       - `input`: `<label for="ID">LABEL</label><input id="ID" name="ID">`
+       - `text`: `<p>LABEL</p>`
+       - `button`: `<button style="background:ACCENT">LABEL</button>`, де `ACCENT` це `theme.accent`
+    3. `TextRenderer` для тестів, теж без наслідування: `KIND:ID LABEL`, без екранування, наприклад `button:send Send`.
+    4. `register(registry, name, renderer)`: кладе `renderer` у `registry[name]`. Якщо це не екземпляр, що відповідає
+       `Renderer` (не проходить `isinstance` або є класом), кидає `TypeError(f"{name!r} is not a Renderer")`.
+    5. `render_form(registry, fmt, elements, theme)`: рендерить кожен елемент обраним рендерером і з'єднує через `"\n"`.
+       `elements` це будь-який iterable. Невідомий `fmt` дає
+       `ValueError(f"unknown format {fmt!r}; available: {', '.join(sorted(registry))}")`.
+
+    ```python
+    registry: dict[str, Renderer] = {}
+    register(registry, "text", TextRenderer())
+    render_form(registry, "text", [Element("button", "send", "Send")], Theme("light", "#06c"))
+    # 'button:send Send'
+    ```
+  starter: |
+    from collections.abc import Iterable
+    from dataclasses import dataclass
+    from html import escape
+    from typing import Literal, Protocol, runtime_checkable
+
+
+    @dataclass(frozen=True)
+    class Theme:
+        name: str
+        accent: str
+
+
+    @dataclass(frozen=True)
+    class Element:
+        kind: Literal["input", "text", "button"]
+        id: str
+        label: str
+
+
+    class Renderer(Protocol):
+        ...
+
+
+    class HtmlRenderer:
+        ...
+
+
+    class TextRenderer:
+        ...
+
+
+    def register(registry: dict[str, Renderer], name: str, renderer: object) -> None:
+        ...
+
+
+    def render_form(
+        registry: dict[str, Renderer], fmt: str, elements: Iterable[Element], theme: Theme
+    ) -> str:
+        ...
+  harness: |
+    registry: dict[str, Renderer] = {}
+    register(registry, "html", HtmlRenderer())
+    register(registry, "text", TextRenderer())
+    for name, candidate in [("cls", HtmlRenderer), ("str", "<p>"), ("none", None)]:
+        try:
+            register(registry, name, candidate)
+        except TypeError as e:
+            print("TypeError:", e)
+    print(sorted(registry))
+
+    form = [
+        Element("input", "email", "Email"),
+        Element("text", "terms", "Terms & <conditions>"),
+        Element("button", "send", "Send"),
+    ]
+    theme = Theme("light", "#0066cc")
+    print(render_form(registry, "html", form, theme))
+    print(render_form(registry, "text", (e for e in form), theme))
+    print(repr(render_form(registry, "text", [], theme)))
+    try:
+        render_form(registry, "pdf", form, theme)
+    except ValueError as e:
+        print("ValueError:", e)
+    print(Renderer in HtmlRenderer.__mro__, Renderer in TextRenderer.__mro__)
+  expected: |
+    TypeError: 'cls' is not a Renderer
+    TypeError: 'str' is not a Renderer
+    TypeError: 'none' is not a Renderer
+    ['html', 'text']
+    <label for="email">Email</label><input id="email" name="email">
+    <p>Terms &amp; &lt;conditions&gt;</p>
+    <button style="background:#0066cc">Send</button>
+    input:email Email
+    text:terms Terms & <conditions>
+    button:send Send
+    ''
+    ValueError: unknown format 'pdf'; available: html, text
+    False False
+  hints:
+    - "Рендерери це звичайні класи з методом render(self, element, theme); всередині HtmlRenderer зручно розібрати element.kind через match. Перевірка в register та сама, що в t2, але без callable: тут достатньо isinstance і not isinstance(..., type)."
+    - "render_form: спершу знайти рендерер (if fmt not in registry: raise ValueError(...)), потім \"\\n\".join(renderer.render(el, theme) for el in elements)."
+    - "match element.kind:\n    case \"input\":\n        return f'<label for=\"{element.id}\">{label}</label><input id=\"{element.id}\" name=\"{element.id}\">'\n    case \"text\":\n        return f\"<p>{label}</p>\"\n    case \"button\":\n        return f'<button style=\"background:{theme.accent}\">{label}</button>'"
+  solution: |
+    from collections.abc import Iterable
+    from dataclasses import dataclass
+    from html import escape
+    from typing import Literal, Protocol, runtime_checkable
+
+
+    @dataclass(frozen=True)
+    class Theme:
+        name: str
+        accent: str
+
+
+    @dataclass(frozen=True)
+    class Element:
+        kind: Literal["input", "text", "button"]
+        id: str
+        label: str
+
+
+    @runtime_checkable
+    class Renderer(Protocol):
+        def render(self, element: Element, theme: Theme) -> str: ...
+
+
+    class HtmlRenderer:
+        def render(self, element: Element, theme: Theme) -> str:
+            label = escape(element.label)
+            match element.kind:
+                case "input":
+                    return (
+                        f'<label for="{element.id}">{label}</label>'
+                        f'<input id="{element.id}" name="{element.id}">'
+                    )
+                case "text":
+                    return f"<p>{label}</p>"
+                case "button":
+                    return f'<button style="background:{theme.accent}">{label}</button>'
+
+
+    class TextRenderer:
+        def render(self, element: Element, theme: Theme) -> str:
+            return f"{element.kind}:{element.id} {element.label}"
+
+
+    def register(registry: dict[str, Renderer], name: str, renderer: object) -> None:
+        if not isinstance(renderer, Renderer) or isinstance(renderer, type):
+            raise TypeError(f"{name!r} is not a Renderer")
+        registry[name] = renderer
+
+
+    def render_form(
+        registry: dict[str, Renderer], fmt: str, elements: Iterable[Element], theme: Theme
+    ) -> str:
+        if fmt not in registry:
+            available = ", ".join(sorted(registry))
+            raise ValueError(f"unknown format {fmt!r}; available: {available}")
+        renderer = registry[fmt]
+        return "\n".join(renderer.render(el, theme) for el in elements)
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from typing import Protocol, runtime_checkable
+
+    @runtime_checkable
+    class Renderer(Protocol):
+        def render(self, element: str, theme: str) -> str: ...
+
+    class Legacy:
+        def render(self) -> bytes:
+            return b"<p></p>"
+
+    print(isinstance(Legacy(), Renderer))
+    ```
+  options: ["True", "False", "TypeError: Instance and class checks can only be used with @runtime_checkable protocols", "TypeError: render() takes 1 positional argument"]
+  answer: 0
+  explain: |
+    `isinstance` з runtime-протоколом перевіряє лише, що в об'єкта є атрибут `render` і він не `None`.
+    Кількість параметрів і тип результату в рантаймі не звіряються: анотації там ніхто не читає. Тому `True`,
+    хоча виклик `render("x", "y")` впаде. `False` це інтуїція "isinstance перевіряє тип повністю", як мав би робити
+    TS-компілятор. Перший `TypeError` з'являється лише без `@runtime_checkable`, а другий був би при виклику методу,
+    якого `isinstance` не робить.
+
+- id: q2
+  type: quiz
+  question: |
+    Що скаже `mypy --strict` і що надрукує запуск?
+    ```python
+    from collections.abc import Iterable
+
+    def shout(ids: Iterable[str]) -> list[str]:
+        return [i.upper() for i in ids]
+
+    print(shout("email"))
+    ```
+  options: ["mypy: Success; ['E', 'M', 'A', 'I', 'L']", "mypy: Success; ['EMAIL']", "mypy: error [arg-type]; ['EMAIL']", "mypy: error [arg-type]; TypeError у рантаймі"]
+  answer: 0
+  explain: |
+    `str` реалізує `__iter__`, який віддає `str` по одному символу, тож рядок і є `Iterable[str]`, і mypy з ним згоден.
+    Цикл ітерує символи, тому кожна літера окремо. Варіант `['EMAIL']` це очікування, що рядок поводиться як
+    "одне значення", а `arg-type` це надія, що чекер відрізнить "колекцію рядків" від рядка. Не відрізнить:
+    якщо голий рядок це помилка, перевіряйте `isinstance(ids, str)` явно.
+
+- id: q3
+  type: quiz
+  question: |
+    Що скаже `mypy --strict` на останньому рядку?
+    ```python
+    from dataclasses import dataclass
+    from typing import Protocol
+
+    class Named(Protocol):
+        name: str
+
+    @dataclass(frozen=True)
+    class Field:
+        name: str
+
+    f: Named = Field("email")
+    ```
+  options: ["Success: атрибут name є, тип збігається", "error: Protocol member Named.name expected settable variable, got read-only attribute", "error: \"Field\" is missing protocol member \"name\"", "Нічого статично, але FrozenInstanceError у рантаймі"]
+  answer: 1
+  explain: |
+    Оголошення `name: str` у Protocol означає змінний атрибут: той, хто приймає `Named`, має право написати
+    `x.name = "..."`. Frozen dataclass цього не дозволяє, тому mypy відмовляє. Якщо потрібне лише читання,
+    в Protocol пишуть `@property def name(self) -> str: ...`, і тоді підходять і frozen dataclass, і звичайний атрибут,
+    і property. "Success" це TS-інтуїція, де `readonly` у реалізації сумісний з мутабельним полем інтерфейсу.
+    `FrozenInstanceError` у рантаймі з'явився б лише при спробі присвоєння, якого тут немає.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує запуск цього файлу через `python` (не mypy)?
+    ```python
+    from typing import Protocol
+
+    class Renderer(Protocol):
+        def render(self, text: str) -> str: ...
+
+    class Draft(Renderer):
+        pass
+
+    print(Draft().render("hi"))
+    ```
+  options: ["None", "TypeError: Can't instantiate abstract class Draft", "AttributeError: 'Draft' object has no attribute 'render'", "hi"]
+  answer: 0
+  explain: |
+    Явне наслідування від Protocol робить `Draft` звичайним підкласом, і він успадковує метод `render` з тілом `...`.
+    Це валідне тіло функції, яке нічого не повертає, тому результат `None`. mypy тут скаже
+    `Cannot instantiate abstract class "Draft"`, але інтерпретатор методи Protocol абстрактними не вважає, тож
+    `TypeError` з ABC не буде: його дає лише `@abstractmethod`. `AttributeError` ні, бо метод успадковано.
+
+- id: p1
+  type: project
+  title: "Статичні вправи: протоколи, які перевіряє лише mypy"
+  prompt: |
+    Створіть у репозиторії капстоуну файл `typing_drills/m2_l07.py` з каркасом нижче. Над рискою допишіть три
+    протоколи й три функції так, щоб `mypy --strict` пройшов без помилок. Нижче риски нічого не змінюйте.
+
+    Що потрібно:
+
+    - `Labeled`: Protocol з **read-only** атрибутом `label: str`. Йому мають відповідати і frozen dataclass,
+      і клас зі звичайним атрибутом.
+    - `Validator`: callback protocol, викликається як `v(value, field_id="...")`, повертає `str | None`.
+      Функція без keyword-only `field_id` йому не відповідає.
+    - `Source[T]`: generic Protocol з методом `load(self) -> T`.
+    - `first_label(items)`: приймає будь-який iterable `Labeled` (і список, і генератор), повертає `label`
+      першого елемента або `""`.
+    - `run(validator, value, *, field_id)`: викликає валідатор.
+    - `load_all(sources)`: приймає iterable `Source[T]`, повертає `list[T]`.
+
+    Рядки з `# type: ignore[...]` у функції `_must_fail` це перевірка навпаки: `--strict` вмикає
+    `warn_unused_ignores`, тож якщо ваш протокол занадто широкий і помилки на цьому рядку немає, mypy скаже
+    `Unused "type: ignore" comment`. `assert_type` перевіряє, що виведений тип саме такий, як очікується.
+
+    ```python
+    from collections.abc import Iterable
+    from dataclasses import dataclass
+    from typing import Protocol, assert_type
+
+    # ---- ваш код тут ----
+
+
+    # ---- нижче нічого не змінювати ----
+
+
+    @dataclass(frozen=True)
+    class FrozenField:
+        label: str
+
+
+    class MutableField:
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+
+    class NoLabel:
+        title: str = "x"
+
+
+    def required(value: str, *, field_id: str) -> str | None:
+        return f"{field_id}: required" if not value else None
+
+
+    def no_field_id(value: str) -> str | None:
+        return None
+
+
+    class IntSource:
+        def load(self) -> int:
+            return 1
+
+
+    class StrSource:
+        def load(self) -> str:
+            return "a"
+
+
+    assert_type(first_label([FrozenField("Email"), MutableField("Phone")]), str)
+    assert_type(first_label(f for f in [FrozenField("Email")]), str)
+    assert_type(run(required, "", field_id="email"), str | None)
+    assert_type(load_all([IntSource(), IntSource()]), list[int])
+    assert_type(load_all(src for src in [StrSource()]), list[str])
+
+
+    def _must_fail() -> None:
+        first_label([NoLabel()])  # type: ignore[list-item]
+        run(no_field_id, "", field_id="email")  # type: ignore[arg-type]
+
+
+    print(first_label([MutableField("Phone")]), run(required, "", field_id="email"), load_all([IntSource()]))
+    ```
+  checklist:
+    - "`uv run mypy --strict typing_drills/m2_l07.py` друкує `Success: no issues found in 1 source file`"
+    - "Жодного `Any`, `cast` чи нового `# type: ignore` у вашій частині файлу"
+    - "Жоден клас нижче риски не наслідує ваші протоколи: відповідність лише структурна"
+    - "`Labeled` описаний через `@property`: якщо замінити його на `label: str`, mypy падає на `FrozenField`"
+    - "`Validator` описаний через `__call__`: з `Callable[..., str | None]` mypy повідомляє `Unused \"type: ignore\" comment`"
+    - "`uv run python typing_drills/m2_l07.py` друкує `Phone email: required [1]`"
+  verify: "cd capstone && uv run mypy --strict typing_drills/m2_l07.py"
+
+- id: p2
+  type: project
+  title: "Модуль рендерерів у капстоуні"
+  prompt: |
+    Перенесіть рішення t5 у капстоун пакетом `src/formbuilder/renderers/`: тека з `__init__.py`, по модулю
+    на формат (як працюють пакети й імпорти, детально в m3-l01). Ця розкладка далі не змінюється, наступні
+    уроки лише дописують у неї.
+
+    - `renderers/base.py`: Protocol `Renderer`;
+    - `renderers/html.py`: `HtmlRenderer`;
+    - `renderers/text.py`: `TextRenderer`;
+    - `renderers/__init__.py`: реєстр `RENDERERS` і функція `register()`.
+
+    Імпорти абсолютні: `from formbuilder.renderers.base import Renderer`. `Element` і `Theme` беріть
+    з `formbuilder.domain` (m2-l05): там поле типу називається `type`, а не `kind`, і є ще `block`; для
+    нього досить обгортки без дітей, обхід дерева з'явиться в m3-l01 і m4-l05. Тест у `tests/test_renderers.py`.
+
+    Реєстр типізований як `dict[str, Renderer]` і заповнюється в одному місці. `text.py` нічого не імпортує
+    з `html.py`: у цьому і є сенс структурної типізації, жодного спільного базового класу.
+  checklist:
+    - "`Renderer` це `Protocol` з `@runtime_checkable` і одним методом `render(self, element, theme) -> str`"
+    - "`HtmlRenderer` і `TextRenderer` не наслідують `Renderer` і не мають спільного предка, крім `object`"
+    - "`RENDERERS: dict[str, Renderer]` оголошений на рівні модуля; спроба додати туди клас з іншою сигнатурою `render` дає `[dict-item]` у mypy (перевірте вручну і відкотіть)"
+    - "`register()` відкидає класи, рядки й `None` з `TypeError`; тест на кожен випадок"
+    - "Тест рендерингу HTML перевіряє екранування `&` і `<` у `label`"
+    - "`uv run mypy --strict src/formbuilder/renderers` без помилок"
+  verify: "cd capstone && uv run mypy --strict src/formbuilder/renderers"

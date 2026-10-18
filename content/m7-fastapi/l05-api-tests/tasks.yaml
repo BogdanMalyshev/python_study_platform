@@ -1,0 +1,530 @@
+- id: q2
+  type: quiz
+  question: |
+    Застосунок відкриває сховище в `lifespan` і кладе його в `app.state.store`.
+    Що станеться в цьому тесті (плагін anyio увімкнено)?
+    ```python
+    async def test_read_form():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/forms/signup")
+        assert response.status_code == 404
+    ```
+  options:
+    - "Тест проходить: lifespan запускається при першому запиті, форми немає, 404"
+    - "Тест падає з AttributeError: 'State' object has no attribute 'store', піднятим прямо в тесті"
+    - "Тест падає на assert: клієнт отримує 500 Internal Server Error"
+    - "Тест зависає: ASGITransport чекає на lifespan.startup.complete"
+  answer: 1
+  explain: |
+    `ASGITransport` викликає застосунок лише з `scope["type"] == "http"` і ніколи не надсилає
+    подій `lifespan`, тому код до `yield` у lifespan не виконувався і `app.state.store`
+    не існує. Ліниво при першому запиті lifespan не запускає ніхто, ні uvicorn, ні транспорт.
+    500 не буде, бо `raise_app_exceptions=True` за замовчуванням: виняток з обробника
+    піднімається в тест, а не перетворюється на відповідь. Зависання теж немає: транспорт про
+    lifespan просто не знає. Lifespan у тестах запускає `asgi_lifespan.LifespanManager` або
+    `with TestClient(app)`.
+
+- id: q3
+  type: quiz
+  question: |
+    Ендпоінт отримує налаштування через `Depends(get_settings)`, де `get_settings` обгорнута
+    `@lru_cache` і повертає `Settings()`. Яке значення побачить ендпоінт?
+    ```python
+    app.dependency_overrides[Settings] = lambda: Settings(out_dir="/tmp/t")
+    response = await client.get("/where")   # повертає settings.out_dir
+    ```
+  options:
+    - "\"/tmp/t\": FastAPI шукає перевизначення за типом залежності"
+    - "\"out\", значення за замовчуванням: перевизначення не спрацювало"
+    - "KeyError: Settings не є залежністю застосунку"
+    - "\"/tmp/t\" лише після `get_settings.cache_clear()`"
+  answer: 1
+  explain: |
+    `dependency_overrides` це звичайний словник, і FastAPI шукає в ньому той самий об'єкт,
+    що стоїть у `Depends(...)`, тобто функцію `get_settings`, а не тип, який вона повертає.
+    Ключ `Settings` нікому не потрібен, тому нічого не відбувається, без помилки й без
+    попередження. `cache_clear()` тут ні до чого: кеш `lru_cache` впливає лише на виклики
+    справжньої `get_settings`, а перевизначення підміняє саму функцію. Правильно:
+    `app.dependency_overrides[get_settings] = ...`.
+
+- id: q4
+  type: quiz
+  question: |
+    Обробник ставить фонову задачу і відповідає `202`:
+    ```python
+    @app.post("/notify", status_code=202)
+    async def notify(background: BackgroundTasks) -> dict[str, bool]:
+        background.add_task(sent.append, "email")
+        return {"queued": True}
+    ```
+    Що в `sent` одразу після `response = await client.post("/notify")` через `ASGITransport`?
+  options:
+    - "[] : задача виконається пізніше, тесту треба почекати `asyncio.sleep(0)`"
+    - "['email']: транспорт дочекався всього виклику застосунку, включно з фоновими задачами"
+    - "[] : `ASGITransport` фонові задачі не виконує взагалі"
+    - "Залежить від планувальника: іноді [], іноді ['email']"
+  answer: 1
+  explain: |
+    Starlette запускає `BackgroundTasks` після відправки відповіді, але всередині того самого
+    виклику `await app(scope, receive, send)`. uvicorn віддає байти клієнту раніше, а
+    `ASGITransport` повертає `Response` лише тоді, коли виклик застосунку завершився цілком.
+    Тому в тестах фонові задачі детерміновано вже виконані, і жодного `sleep` не треба.
+    Зворотний бік: тест не помітить, що задача повільна, бо чекатиме її разом з відповіддю.
+
+- id: q1
+  type: quiz
+  question: |
+    У `conftest.py` є фікстура `anyio_backend` без параметра `scope` і ця фікстура:
+    ```python
+    @pytest.fixture(scope="module")
+    async def shared_client():
+        async with make_client() as client:
+            yield client
+    ```
+    Що буде з тестом, який просить `shared_client`?
+  options:
+    - "Працює: anyio сам розширить scope бекенда"
+    - "ERROR на setup: ScopeMismatch, модульна фікстура звертається до функціональної `anyio_backend`"
+    - "Працює, але клієнт створюється заново для кожного тесту"
+    - "Тест пропускається з попередженням про async-фікстуру"
+  answer: 1
+  explain: |
+    Плагін anyio виконує async-фікстуру через обгортку, яка просить `anyio_backend`. pytest
+    не дозволяє фікстурі ширшого scope залежати від вужчої, тож модульна фікстура не може взяти
+    функціональну `anyio_backend`, і тест отримує `ERROR` з `ScopeMismatch` ще до виконання.
+    Тихого розширення scope чи пропуску тесту pytest не робить. Тому в капстоуні
+    `anyio_backend` оголошена з `scope="session"`.
+
+- id: t1
+  type: code
+  title: "Фабрика тестових конфігів зі захистом від опечаток"
+  prompt: |
+    Напишіть `make_form(**overrides)`, фабрику для тестів API. Вона повертає новий словник
+    мінімального валідного конфігу:
+
+    ```python
+    {
+        "id": "signup",
+        "title": "Sign up",
+        "elements": [
+            {"type": "input", "id": "email", "name": "email", "label": "Email"},
+            {"type": "button", "id": "send", "label": "Send"},
+        ],
+    }
+    ```
+
+    - Ключові аргументи замінюють ключі верхнього рівня: `make_form(title="")`.
+    - Невідомий ключ (опечатка на кшталт `titel=""`) кидає `TypeError` з текстом
+      `unknown config key(s): titel`; кілька невідомих перелічуються через кому в алфавітному порядку.
+      Без цього тест на "порожній title" отримав би валідний конфіг з зайвим ключем і впав би з
+      незрозумілої причини.
+    - Кожен виклик дає незалежні вкладені списки й словники: зміна одного результату не впливає
+      на наступний.
+
+    Харнес перевіряє результат справжньою моделлю `FormConfig` (Pydantic).
+  starter: |
+    from typing import Any
+
+
+    def make_form(**overrides: Any) -> dict[str, Any]:
+        ...
+  harness: |
+    from typing import Annotated, Literal
+    from pydantic import BaseModel, ConfigDict, Field
+
+    class Input(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        type: Literal["input"]
+        id: str
+        name: str
+        label: str = Field(min_length=1)
+
+    class Button(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        type: Literal["button"]
+        id: str
+        label: str = Field(min_length=1)
+
+    class FormConfig(BaseModel):
+        id: str = Field(min_length=1)
+        title: str = Field(min_length=1, max_length=120)
+        elements: list[Annotated[Input | Button, Field(discriminator="type")]]
+
+    print(FormConfig.model_validate(make_form()).title)
+    print(make_form(title="Contact")["title"])
+    a = make_form()
+    a["elements"].append({"type": "button", "id": "x", "label": "X"})
+    a["elements"][0]["label"] = "changed"
+    b = make_form()
+    print(len(b["elements"]), b["elements"][0]["label"])
+    print(make_form(elements=[])["elements"])
+    for bad in ({"titel": ""}, {"zeta": 1, "alpha": 2, "id": "x"}):
+        try:
+            make_form(**bad)
+        except TypeError as exc:
+            print("TypeError:", exc)
+  expected: |
+    Sign up
+    Contact
+    2 Email
+    []
+    TypeError: unknown config key(s): titel
+    TypeError: unknown config key(s): alpha, zeta
+  hints:
+    - "Дефолтний словник збирайте всередині функції на кожен виклик: модульна константа з `{**DEFAULT, **overrides}` дає спільні вкладені списки."
+    - "Невідомі ключі це різниця множин: `set(overrides) - set(form)`; `sorted(...)` і `', '.join(...)` дадуть стабільний текст."
+    - "`form = {...}; unknown = sorted(set(overrides) - form.keys()); if unknown: raise TypeError(...); form.update(overrides); return form`"
+  solution: |
+    from typing import Any
+
+
+    def make_form(**overrides: Any) -> dict[str, Any]:
+        form: dict[str, Any] = {
+            "id": "signup",
+            "title": "Sign up",
+            "elements": [
+                {"type": "input", "id": "email", "name": "email", "label": "Email"},
+                {"type": "button", "id": "send", "label": "Send"},
+            ],
+        }
+        unknown = sorted(set(overrides) - form.keys())
+        if unknown:
+            raise TypeError(f"unknown config key(s): {', '.join(unknown)}")
+        form.update(overrides)
+        return form
+  requires: [pydantic]
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Невалідний варіант за шляхом: set_path"
+  prompt: |
+    Для таблиці `parametrize` зручно описувати невалідний конфіг шляхом у тому ж форматі,
+    у якому API повертає помилку: `"elements.0.label"`. Напишіть `set_path(data, path, value)`:
+
+    - повертає глибоку копію `data`, у якій за шляхом `path` стоїть `value`; оригінал не змінюється;
+    - сегменти шляху розділені крапкою; сегмент з цифр у списку означає індекс (`"0"` це `[0]`),
+      у словнику будь-який сегмент це ключ;
+    - останній сегмент у словнику може бути новим ключем (так додають зайве поле);
+    - неіснуючий проміжний ключ дає `KeyError`, індекс за межами списку дає `IndexError`
+      (нічого ловити не треба, це поведінка `[]`).
+
+    ```python
+    set_path({"a": [{"b": 1}]}, "a.0.b", 2)   # {'a': [{'b': 2}]}
+    ```
+  starter: |
+    from typing import Any
+
+
+    def set_path(data: Any, path: str, value: Any) -> Any:
+        ...
+  harness: |
+    form = {
+        "id": "signup",
+        "title": "Sign up",
+        "elements": [
+            {"type": "input", "id": "email", "name": "email", "label": "Email"},
+            {"type": "button", "id": "send", "label": "Send"},
+        ],
+    }
+    print(set_path(form, "title", "")["title"] == "")
+    changed = set_path(form, "elements.1.label", "")
+    print(changed["elements"][1])
+    print(form["elements"][1])
+    print(set_path(form, "elements.0.placeholder", "x")["elements"][0]["placeholder"])
+    print(set_path(form, "elements.0", None)["elements"])
+    print(set_path({"a": {"1": "dict key"}}, "a.1", "ok"))
+    for bad in ("elements.5.label", "theme.mode"):
+        try:
+            set_path(form, bad, 1)
+        except (KeyError, IndexError) as exc:
+            print(type(exc).__name__)
+  expected: |
+    True
+    {'type': 'button', 'id': 'send', 'label': ''}
+    {'type': 'button', 'id': 'send', 'label': 'Send'}
+    x
+    [None, {'type': 'button', 'id': 'send', 'label': 'Send'}]
+    {'a': {'1': 'ok'}}
+    IndexError
+    KeyError
+  hints:
+    - "Спершу `copy.deepcopy(data)`, далі йдіть по копії до передостаннього сегмента і присвойте в останній."
+    - "Ключ сегмента залежить від контейнера: `int(part)`, якщо поточний вузол це `list`, інакше сам рядок."
+    - "`*parents, last = path.split('.')`; у циклі `node = node[key(node, part)]`; наприкінці `node[key(node, last)] = value`."
+  solution: |
+    import copy
+    from typing import Any
+
+
+    def _key(node: Any, part: str) -> Any:
+        return int(part) if isinstance(node, list) else part
+
+
+    def set_path(data: Any, path: str, value: Any) -> Any:
+        result = copy.deepcopy(data)
+        *parents, last = path.split(".")
+        node = result
+        for part in parents:
+            node = node[_key(node, part)]
+        node[_key(node, last)] = value
+        return result
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Очікувані помилки 422 без запуску API"
+  prompt: |
+    Обробник `RequestValidationError` у капстоуні (m7-l02) перетворює помилки Pydantic на поля
+    `{"path", "code", "message"}`. FastAPI додає до `loc` першим елементом джерело (`"body"`,
+    `"query"`, `"path"`, `"header"`, `"cookie"`), а клієнту шлях потрібен без нього. Напишіть дві функції:
+
+    - `to_fields(errors)` отримує список помилок у форматі `ValidationError.errors()` (словники з
+      `loc`, `type`, `msg`) і повертає список пар `(path, code)`: `path` будується рівно як
+      `loc_to_path` з m7-l02 (перший елемент зрізається, якщо це джерело; сегменти через крапку,
+      індекси теж рядками), `code` це `type`. Порядок як у вхідному списку.
+    - `validation_errors(raw)` валідує словник моделлю `FormConfig` зі стартера і повертає
+      `to_fields(...)` від її помилок, або `[]`, якщо конфіг валідний.
+
+    Так тест може перевірити рядок таблиці ще до того, як піде в API: якщо `validation_errors`
+    дає не ту пару, помилка в таблиці, а не в застосунку. Зверніть увагу на дискримінований
+    union: Pydantic додає в `loc` тег варіанта, тому шлях до мітки інпута це
+    `elements.0.input.label`. `make_form` і `set_path` уже є в стартері.
+  starter: |
+    import copy
+    from typing import Annotated, Any, Literal
+
+    from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+
+    class Input(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        type: Literal["input"]
+        id: str
+        name: str
+        label: str = Field(min_length=1)
+
+
+    class Button(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        type: Literal["button"]
+        id: str
+        label: str = Field(min_length=1)
+
+
+    class FormConfig(BaseModel):
+        id: str = Field(min_length=1, pattern=r"^[a-z0-9-]+$")
+        title: str = Field(min_length=1, max_length=120)
+        elements: list[Annotated[Input | Button, Field(discriminator="type")]]
+
+
+    def make_form(**overrides: Any) -> dict[str, Any]:
+        form: dict[str, Any] = {
+            "id": "signup",
+            "title": "Sign up",
+            "elements": [
+                {"type": "input", "id": "email", "name": "email", "label": "Email"},
+                {"type": "button", "id": "send", "label": "Send"},
+            ],
+        }
+        form.update(overrides)
+        return form
+
+
+    def set_path(data: Any, path: str, value: Any) -> Any:
+        result = copy.deepcopy(data)
+        *parents, last = path.split(".")
+        node = result
+        for part in parents:
+            node = node[int(part) if isinstance(node, list) else part]
+        node[int(last) if isinstance(node, list) else last] = value
+        return result
+
+
+    def to_fields(errors: list[dict[str, Any]]) -> list[tuple[str, str]]:
+        ...
+
+
+    def validation_errors(raw: dict[str, Any]) -> list[tuple[str, str]]:
+        ...
+  harness: |
+    print(validation_errors(make_form()))
+    cases = [
+        ("title", ""),
+        ("id", "Sign Up"),
+        ("elements.0.label", ""),
+        ("elements.1.type", "select"),
+        ("elements.0.placeholder", "x"),
+    ]
+    for path, value in cases:
+        print(path, "->", validation_errors(set_path(make_form(), path, value)))
+    print(validation_errors(make_form(title="", elements=None)))
+    api_style = [
+        {"loc": ("body", "elements", 0, "input", "label"), "type": "string_too_short", "msg": "..."},
+        {"loc": ("body",), "type": "json_invalid", "msg": "..."},
+        {"loc": ("query", "limit"), "type": "int_parsing", "msg": "..."},
+    ]
+    print(to_fields(api_style))
+  expected: |
+    []
+    title -> [('title', 'string_too_short')]
+    id -> [('id', 'string_pattern_mismatch')]
+    elements.0.label -> [('elements.0.input.label', 'string_too_short')]
+    elements.1.type -> [('elements.1', 'union_tag_invalid')]
+    elements.0.placeholder -> [('elements.0.input.placeholder', 'extra_forbidden')]
+    [('title', 'string_too_short'), ('elements', 'list_type')]
+    [('elements.0.input.label', 'string_too_short'), ('', 'json_invalid'), ('limit', 'int_parsing')]
+  hints:
+    - "`loc` це кортеж з рядків і чисел; `'.'.join` потребує рядків, тож спершу `str(part)` для кожного сегмента."
+    - "Зрізайте перший елемент, лише якщо він джерело: `loc[1:] if loc and loc[0] in SOURCES else loc`, де `SOURCES = {\"body\", \"query\", \"path\", \"header\", \"cookie\"}`, як у `loc_to_path` з m7-l02."
+    - "`validation_errors`: `try: FormConfig.model_validate(raw)` / `except ValidationError as exc: return to_fields(exc.errors())` / `return []`."
+  solution: |
+    import copy
+    from typing import Annotated, Any, Literal
+
+    from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+
+    class Input(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        type: Literal["input"]
+        id: str
+        name: str
+        label: str = Field(min_length=1)
+
+
+    class Button(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        type: Literal["button"]
+        id: str
+        label: str = Field(min_length=1)
+
+
+    class FormConfig(BaseModel):
+        id: str = Field(min_length=1, pattern=r"^[a-z0-9-]+$")
+        title: str = Field(min_length=1, max_length=120)
+        elements: list[Annotated[Input | Button, Field(discriminator="type")]]
+
+
+    def make_form(**overrides: Any) -> dict[str, Any]:
+        form: dict[str, Any] = {
+            "id": "signup",
+            "title": "Sign up",
+            "elements": [
+                {"type": "input", "id": "email", "name": "email", "label": "Email"},
+                {"type": "button", "id": "send", "label": "Send"},
+            ],
+        }
+        form.update(overrides)
+        return form
+
+
+    def set_path(data: Any, path: str, value: Any) -> Any:
+        result = copy.deepcopy(data)
+        *parents, last = path.split(".")
+        node = result
+        for part in parents:
+            node = node[int(part) if isinstance(node, list) else part]
+        node[int(last) if isinstance(node, list) else last] = value
+        return result
+
+
+    SOURCES = {"body", "query", "path", "header", "cookie"}
+
+
+    def to_fields(errors: list[dict[str, Any]]) -> list[tuple[str, str]]:
+        fields = []
+        for err in errors:
+            loc = list(err["loc"])
+            if loc and loc[0] in SOURCES:
+                loc = loc[1:]
+            fields.append((".".join(str(part) for part in loc), err["type"]))
+        return fields
+
+
+    def validation_errors(raw: dict[str, Any]) -> list[tuple[str, str]]:
+        try:
+            FormConfig.model_validate(raw)
+        except ValidationError as exc:
+            return to_fields(exc.errors())
+        return []
+  requires: [pydantic]
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "Тестова інфраструктура API: anyio, lifespan, client, фабрика"
+  prompt: |
+    Налаштуйте асинхронні тести API в капстоуні за схемою з уроку. Імена нижче такі, як у
+    m7-l01–m7-l04 (`create_app(settings)`, `Settings` з `db_path`, `out_dir`, `workers`,
+    `app.state.worker`); якщо у вашому коді вони інші, адаптуйте, але принцип лишається:
+    застосунок збирається фабрикою з явних налаштувань, а не з глобального `get_settings()`.
+
+    1. `uv add --dev asgi-lifespan httpx2` (httpx2 лише для `TestClient` Starlette 1.x, щоб не
+       було `StarletteDeprecationWarning`; `AsyncClient` лишається з `httpx`).
+    2. У `[tool.pytest.ini_options]` додайте `anyio_mode = "auto"`, `--strict-markers` в
+       `addopts` і маркер `slow`.
+    3. `tests/conftest.py`: `anyio_backend` зі `scope="session"`, що повертає `"asyncio"`;
+       `settings` на `tmp_path` з `workers=0`; `app` з `LifespanManager` і
+       `dependency_overrides.clear()` у teardown; `client` на `ASGITransport` з
+       `base_url="http://test"`; `make_form` з захистом від невідомих ключів (завдання t1).
+    4. `tests/test_api.py` (з m7-l01, переведіть на асинхронний `client`): створення і читання форми,
+       зростання версій, заголовок `X-Request-ID`, список шляхів OpenAPI.
+    5. `tests/test_api_errors.py` (з m7-l02): 404 у форматі помилок m7-l02 (`http_404`),
+       параметризований тест 422 щонайменше на 6 рядків з `pytest.param(..., id=...)`, де
+       перевіряється `error.code == "validation_error"` і список пар `(path, code)` цілком (шлях
+       будується як `loc_to_path` з m7-l02), тіло не-JSON.
+  checklist:
+    - "`uv run pytest tests -q` зелений, у виводі немає `PytestUnknownMarkWarning` і `StarletteDeprecationWarning`"
+    - "Жоден асинхронний тест не має маркера вручну: їх підхоплює `anyio_mode = \"auto\"`"
+    - "Кожен тест працює зі своїм `tmp_path`: запуск одного тесту за node id дає той самий результат, що й у повному прогоні"
+    - "Тест 422 перевіряє точний список полів, а не лише статус"
+    - "У тестах немає `sleep`, портів і запущеного uvicorn"
+  verify: "cd capstone && uv run pytest tests -q"
+
+- id: p2
+  type: project
+  title: "Повний сценарій генерації і воркер без сну"
+  prompt: |
+    `tests/test_worker.py` і тест хаба в `tests/test_ws.py` у капстоуні.
+
+    - Фікстура `job_id`: створює форму через API і ставить build, повертає id задачі.
+    - Повний сценарій: статус `queued` → `await app.state.worker.run_once()` → `GET /jobs/{id}`
+      дає `done` і `url` `/sites/<config_id>/<version>/` → файл `index.html` за цим ключем існує
+      в `settings.out_dir` (тобто в `tmp_path`) і містить очікуваний HTML.
+    - Ретраї: окремий `Worker` з m7-l03 над тими самими `store`, `queue`, `events` з fake-рендерером,
+      що падає двічі, `MemoryPublisher` і `RecordingSleep`; перевірте статус, кількість спроб і
+      точний список затримок.
+    - Вичерпані спроби: статус `failed` і текст помилки.
+    - `JobEvents` з `formbuilder/hub.py` напряму: події, опубліковані до першої ітерації, доходять;
+      події після термінального статусу не доходять; глядач прибирається.
+  checklist:
+    - "Повний сценарій не мокає нічого: справжній SQLite і справжній `StaticPublisher` у `tmp_path`"
+    - "Fake-класи не наслідуються від протоколів, mypy приймає їх як `Renderer` і `Publisher`"
+    - "Тест ретраїв проходить за мілісекунди: `sleep` інʼєктований, `asyncio.sleep` не викликається"
+    - "`uv run pytest tests -q --durations=3` не показує тестів довших за 0.1 с, крім позначених `slow`"
+  verify: "cd capstone && uv run pytest tests -q"
+
+- id: p3
+  type: project
+  title: "WebSocket-тести, маркер slow і coverage API"
+  prompt: |
+    `tests/test_ws.py` і налаштування coverage.
+
+    - Синхронна фікстура `sync_client`: `with TestClient(create_app(settings)) as client`.
+    - Тест з fake-джерелом подій через `app.dependency_overrides[get_hub]`: клієнт отримує
+      `queued`, `running`, `done`, після чого сервер закриває з'єднання з кодом 1000.
+    - Невідома задача: `WebSocketDisconnect` з кодом 4404.
+    - Тест з реальним воркером (`workers=1`) під маркером `slow`: перевіряє лише останній статус
+      і файл сторінки, бо проміжні події залежать від того, хто встиг першим.
+    - Coverage: `uv run pytest tests -q --cov=formbuilder --cov-branch` і `fail_under` у
+      `[tool.coverage.report]`; знайдіть у звіті місце, яке покрите лише завдяки fake, і закрийте
+      його прямим тестом.
+  checklist:
+    - "`uv run pytest tests -q -m \"not slow\"` проходить і відбирає рівно один тест"
+    - "WS-тест з fake не залежить від таймінгів: 20 запусків поспіль зелені"
+    - "Coverage `formbuilder/api` і `formbuilder/hub.py` не нижче 95% з `--cov-branch`"
+    - "Перевизначення залежностей знімаються в teardown фікстури, а не в кінці тесту"
+  verify: "cd capstone && uv run pytest tests -q"

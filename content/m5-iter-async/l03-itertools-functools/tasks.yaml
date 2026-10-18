@@ -1,0 +1,573 @@
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from itertools import islice
+
+    ids = iter(range(10))
+    print(list(islice(ids, 3)), list(islice(ids, 3)))
+    ```
+  options:
+    - "[0, 1, 2] [0, 1, 2]"
+    - "[0, 1, 2] [3, 4, 5]"
+    - "[0, 1, 2] []"
+    - "TypeError: 'range_iterator' object is not subscriptable"
+  answer: 1
+  explain: |
+    `islice` на ітераторі не копіює, а споживає: перший виклик забрав `0, 1, 2`, і спільний
+    ітератор `ids` тепер стоїть на `3`. Другий `islice` бере наступні три. Варіант 1 це
+    інтуїція `arr.slice(0, 3)`, який не змінює масив; він був би правильним, якби `ids` був
+    списком, бо тоді кожен `islice` створює свій ітератор над списком. Варіант 3 плутає
+    "ітератор одноразовий" з "ітератор вичерпано": `islice(ids, 3)` прочитав лише три
+    елементи, решта на місці. Варіант 4 невірний, бо `islice` не індексує джерело, а
+    просто викликає `next`, тому індексованість йому не потрібна.
+
+- id: t1
+  type: code
+  title: "chunk без slice"
+  prompt: |
+    Напишіть `chunk(items, size)`, аналог `_.chunk` з lodash: розбиває будь-який iterable на
+    списки по `size` елементів, останній може бути коротшим. Без індексів і `len`: `items`
+    може бути генератором.
+
+    ```python
+    chunk(range(7), 3)   # [[0, 1, 2], [3, 4, 5], [6]]
+    chunk("abcde", 2)    # [['a', 'b'], ['c', 'd'], ['e']]
+    chunk([], 3)         # []
+    ```
+  starter: |
+    from itertools import batched
+
+
+    def chunk(items, size: int) -> list[list]:
+        ...
+  harness: |
+    print(chunk(range(7), 3))
+    print(chunk("abcde", 2))
+    print(chunk([], 3))
+    print(chunk((n * n for n in range(5)), 4))
+  expected: |
+    [[0, 1, 2], [3, 4, 5], [6]]
+    [['a', 'b'], ['c', 'd'], ['e']]
+    []
+    [[0, 1, 4, 9], [16]]
+  hints:
+    - "У 3.12 є готова функція, що ріже потік на пачки. Вона віддає кортежі, а потрібні списки."
+    - "`batched(items, size)` дає `(0, 1, 2), (3, 4, 5), (6,)`; кожну пачку перетворіть на список у comprehension."
+    - "`return [list(batch) for batch in batched(items, size)]`"
+  solution: |
+    from itertools import batched
+
+
+    def chunk(items, size: int) -> list[list]:
+        return [list(batch) for batch in batched(items, size)]
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from itertools import groupby
+
+    types = ["input", "input", "text"]
+    groups = dict(groupby(types))
+    print({k: list(v) for k, v in groups.items()})
+    ```
+  options:
+    - "{'input': ['input', 'input'], 'text': ['text']}"
+    - "{'input': [], 'text': []}"
+    - "{'input': [], 'text': ['text']}"
+    - "TypeError: groupby object is not a mapping"
+  answer: 1
+  explain: |
+    Групи з `groupby` це вікна в один спільний ітератор. `dict(...)` спершу проходить
+    зовнішній ітератор до кінця, і кожен крок до наступного ключа інвалідує попередню групу;
+    після останнього кроку (який виявив, що джерело скінчилось) недійсна й група `text`.
+    Читати їх пізніше означає отримати порожнечу без помилки. Варіант 1 це очікування від
+    `_.groupBy`, який повертає готовий словник масивів. Варіант 3 інтуїція "остання група
+    ще жива", але `dict` теж питає наступний елемент після неї, щоб дізнатися про кінець.
+    Варіант 4 невірний: `dict()` приймає будь-який iterable пар, а `groupby` віддає саме
+    пари `(key, group)`.
+
+- id: t2
+  type: code
+  title: "Перші n видимих полів без зайвих завантажень"
+  prompt: |
+    `pages` це iterable сторінок, кожна сторінка це список полів-словників
+    `{"id": str, "hidden": bool}`. Сторінки можуть завантажуватися ліниво (харнес передає
+    генератор, який друкує `load page N`). Напишіть `first_visible(pages, n)`, яка повертає
+    список `id` перших `n` полів з `hidden == False` і не завантажує жодної сторінки понад
+    потрібні.
+
+    ```python
+    first_visible(pages, 2)   # ['email', 'age']; сторінка 3 не завантажена
+    ```
+  starter: |
+    from itertools import chain, islice
+
+
+    def first_visible(pages, n: int) -> list[str]:
+        ...
+  harness: |
+    def load(data):
+        for number, page in enumerate(data, start=1):
+            print("load page", number)
+            yield page
+
+    data = [
+        [{"id": "email", "hidden": False}, {"id": "utm", "hidden": True}],
+        [{"id": "age", "hidden": False}, {"id": "plan", "hidden": False}],
+        [{"id": "consent", "hidden": False}],
+    ]
+    print(first_visible(load(data), 2))
+    print(first_visible(load(data), 3))
+    print(first_visible(load(data), 10))
+    print(first_visible(load([]), 2))
+  expected: |
+    load page 1
+    load page 2
+    ['email', 'age']
+    load page 1
+    load page 2
+    ['email', 'age', 'plan']
+    load page 1
+    load page 2
+    load page 3
+    ['email', 'age', 'plan', 'consent']
+    []
+  hints:
+    - "Три кроки: сплющити сторінки в один потік полів, відкинути приховані й узяти ід, обрізати до n. Усі три мають бути лінивими, `list()` лише в кінці."
+    - "`chain.from_iterable(pages)` дає поля по одному; генераторний вираз `(f[\"id\"] for f in ... if not f[\"hidden\"])` фільтрує, `islice(..., n)` обрізає."
+    - "`fields = chain.from_iterable(pages)`, `ids = (f[\"id\"] for f in fields if not f[\"hidden\"])`, `return list(islice(ids, n))`."
+  solution: |
+    from itertools import chain, islice
+
+
+    def first_visible(pages, n: int) -> list[str]:
+        fields = chain.from_iterable(pages)
+        ids = (f["id"] for f in fields if not f["hidden"])
+        return list(islice(ids, n))
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "get_path як _.get через reduce"
+  prompt: |
+    Напишіть `get_path(data, path, default=None)`, аналог `_.get`: `path` це рядок з
+    ключами через крапку, сегменти, що складаються з цифр, на списках означають індекс.
+    Якщо на будь-якому кроці ключа чи індексу немає (або значення не контейнер), поверніть
+    `default`. Обхід зробіть через `functools.reduce`.
+
+    ```python
+    config = {"pages": [{"fields": [{"id": "email"}]}]}
+    get_path(config, "pages.0.fields.0.id")          # 'email'
+    get_path(config, "pages.3.title", "untitled")    # 'untitled'
+    ```
+  starter: |
+    from functools import reduce
+
+
+    def get_path(data, path: str, default=None):
+        ...
+  harness: |
+    config = {
+        "id": "signup",
+        "pages": [
+            {"title": "Contact", "fields": [{"id": "email"}, {"id": "phone"}]},
+            {"title": "Plan", "fields": []},
+        ],
+        "theme": {"mode": "dark"},
+    }
+    print(get_path(config, "pages.0.fields.1.id"))
+    print(get_path(config, "theme.mode"))
+    print(get_path(config, "pages.1.title"))
+    print(get_path(config, "pages.5.title", "untitled"))
+    print(get_path(config, "pages.0.fields.0.id.extra", "n/a"))
+    print(get_path(config, "theme.color"))
+    print(get_path(config, "pages.first", "bad index"))
+    print(get_path(config, "id"))
+  expected: |
+    phone
+    dark
+    Plan
+    untitled
+    n/a
+    None
+    bad index
+    signup
+  hints:
+    - "Згортка йде по сегментах шляху: акумулятор це поточний вузол, крок бере з нього наступний ключ. Для списків ключ треба перетворити на `int`."
+    - "Напишіть `step(node, key)`, яка для `list` повертає `node[int(key)]`, інакше `node[key]`. Відсутній ключ, індекс, нечисловий індекс і рядок замість контейнера дають `KeyError`, `IndexError`, `ValueError` або `TypeError`."
+    - "`try: return reduce(step, path.split(\".\"), data)` і `except (KeyError, IndexError, ValueError, TypeError): return default`."
+  solution: |
+    from functools import reduce
+
+
+    def get_path(data, path: str, default=None):
+        def step(node, key):
+            if isinstance(node, list):
+                return node[int(key)]
+            return node[key]
+
+        try:
+            return reduce(step, path.split("."), data)
+        except (KeyError, IndexError, ValueError, TypeError):
+            return default
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Скільки разів виконається тіло `scale`?
+    ```python
+    from functools import cache
+
+    calls = 0
+
+    @cache
+    def scale(x, factor=2):
+        global calls
+        calls += 1
+        return x * factor
+
+    scale(1)
+    scale(1, 2)
+    scale(x=1)
+    scale(1)
+    print(calls)
+    ```
+  options: ["1", "2", "3", "4"]
+  answer: 2
+  explain: |
+    Ключ кешу будується з аргументів буквально так, як їх передали, без підстановки значень
+    за замовчуванням і без зведення позиційних до ключових. `scale(1)`, `scale(1, 2)` і
+    `scale(x=1)` дають три різні ключі, хоча для функції це той самий виклик; лише
+    останній `scale(1)` влучає в кеш. Варіант 1 це очікування, що кеш розуміє семантику
+    виклику. Варіант 2 припускає, що хоча б дефолт `factor=2` нормалізується. Варіант 4
+    забуває, що повторний `scale(1)` таки знаходить готовий результат.
+
+- id: t4
+  type: code
+  title: "Кешоване читання теми"
+  prompt: |
+    `read_file(name)` імітує читання JSON-теми з диска: щоразу додає `name` у список
+    `reads` і повертає новий словник. Напишіть `load_theme(name)`, яка:
+
+    - кешує не більше двох останніх тем (LRU), тож `load_theme.cache_info()` має працювати;
+    - повертає тему, яку неможливо змінити: присвоєння ключа кидає `TypeError`.
+
+    ```python
+    load_theme("dark")["primary"]     # '#000'
+    load_theme("dark")["primary"] = "red"   # TypeError
+    ```
+  starter: |
+    from functools import lru_cache
+    from types import MappingProxyType
+
+    DISK = {
+        "light": {"primary": "#fff"},
+        "dark": {"primary": "#000"},
+        "contrast": {"primary": "#ff0"},
+    }
+    reads: list[str] = []
+
+
+    def read_file(name: str) -> dict:
+        reads.append(name)
+        return dict(DISK[name])
+
+
+    def load_theme(name: str):
+        ...
+  harness: |
+    for name in ["light", "dark", "light", "contrast", "dark", "dark"]:
+        load_theme(name)
+    print(reads)
+    print(load_theme.cache_info())
+    theme = load_theme("dark")
+    print(theme["primary"])
+    try:
+        theme["primary"] = "red"
+        print("mutated")
+    except TypeError:
+        print("read-only")
+    print(load_theme("dark")["primary"])
+  expected: |
+    ['light', 'dark', 'contrast', 'dark']
+    CacheInfo(hits=2, misses=4, maxsize=2, currsize=2)
+    #000
+    read-only
+    #000
+  hints:
+    - "Потрібен декоратор кешу з обмеженим розміром, а результат треба загорнути в read-only погляд на словник."
+    - "`@lru_cache(maxsize=2)` над функцією; всередині `MappingProxyType(read_file(name))`."
+    - |
+      ```python
+      @lru_cache(maxsize=2)
+      def load_theme(name: str) -> MappingProxyType:
+          return MappingProxyType(read_file(name))
+      ```
+  solution: |
+    from functools import lru_cache
+    from types import MappingProxyType
+
+    DISK = {
+        "light": {"primary": "#fff"},
+        "dark": {"primary": "#000"},
+        "contrast": {"primary": "#ff0"},
+    }
+    reads: list[str] = []
+
+
+    def read_file(name: str) -> dict:
+        reads.append(name)
+        return dict(DISK[name])
+
+
+    @lru_cache(maxsize=2)
+    def load_theme(name: str) -> MappingProxyType:
+        return MappingProxyType(read_file(name))
+  requires: []
+  runtime: browser
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from functools import singledispatch
+
+    @singledispatch
+    def show(value) -> str:
+        return "other"
+
+    @show.register
+    def _(value: int) -> str:
+        return "int"
+
+    @show.register
+    def _(value: str) -> str:
+        return "str"
+
+    print(show(True), show(None), show("1"))
+    ```
+  options:
+    - "other other str"
+    - "int other str"
+    - "bool other str"
+    - "TypeError: no implementation for bool"
+  answer: 1
+  explain: |
+    `bool` у Python це підклас `int` (`True == 1`), а `singledispatch` вибирає реалізацію
+    за MRO типу: для `bool` найближчий зареєстрований предок `int`. Варіант 1 це JS-інтуїція,
+    де `typeof true` це `"boolean"`, окремий від `"number"`. Варіант 3 припускає, що
+    повертається назва типу, але повертається результат реалізації. Варіант 4 невірний,
+    бо базова реалізація для `object` ловить усе, що не знайшлося в реєстрі, а `bool` до
+    неї навіть не доходить.
+
+- id: t5
+  type: code
+  title: "Рендер дерева через singledispatch"
+  prompt: |
+    Елементи форми це frozen dataclass-и `Input`, `Text` і `Block` (з кортежем `children`).
+    Напишіть `render(el)` через `functools.singledispatch`:
+
+    - `Input("email")` → `<input name="email">`
+    - `Text("Hi")` → `<p>Hi</p>`
+    - `Block((...))` → `<div>` + рендер дітей підряд + `</div>`
+    - будь-який інший тип → `TypeError` з повідомленням `no renderer for <ім'я типу>`
+
+    Підклас `EmailInput(Input)` має рендеритись як `Input` без окремої реєстрації.
+  starter: |
+    from dataclasses import dataclass
+    from functools import singledispatch
+
+
+    @dataclass(frozen=True)
+    class Input:
+        name: str
+
+
+    @dataclass(frozen=True)
+    class EmailInput(Input):
+        pass
+
+
+    @dataclass(frozen=True)
+    class Text:
+        text: str
+
+
+    @dataclass(frozen=True)
+    class Block:
+        children: tuple = ()
+
+
+    def render(el) -> str:
+        ...
+  harness: |
+    print(render(Text("Contact")))
+    print(render(Input("email")))
+    print(render(EmailInput("work_email")))
+    print(render(Block((Text("Hi"), Block((Input("a"), Input("b")))))))
+    print(render(Block()))
+    for bad in [{"type": "input"}, 42]:
+        try:
+            render(bad)
+        except TypeError as e:
+            print(e)
+  expected: |
+    <p>Contact</p>
+    <input name="email">
+    <input name="work_email">
+    <div><p>Hi</p><div><input name="a"><input name="b"></div></div>
+    <div></div>
+    no renderer for dict
+    no renderer for int
+  hints:
+    - "Базова функція під `@singledispatch` обробляє \"все інше\", тобто кидає помилку. Реалізації для конкретних типів реєструються окремо, тип береться з анотації першого параметра."
+    - "`@render.register` над `def _(el: Input) -> str: ...`. Для `Block` рендер дітей це рекурсивний виклик `render(child)`, склеєний через `\"\".join`."
+    - |
+      ```python
+      @singledispatch
+      def render(el) -> str:
+          raise TypeError(f"no renderer for {type(el).__name__}")
+
+      @render.register
+      def _(el: Block) -> str:
+          return "<div>" + "".join(render(c) for c in el.children) + "</div>"
+      ```
+  solution: |
+    from dataclasses import dataclass
+    from functools import singledispatch
+
+
+    @dataclass(frozen=True)
+    class Input:
+        name: str
+
+
+    @dataclass(frozen=True)
+    class EmailInput(Input):
+        pass
+
+
+    @dataclass(frozen=True)
+    class Text:
+        text: str
+
+
+    @dataclass(frozen=True)
+    class Block:
+        children: tuple = ()
+
+
+    @singledispatch
+    def render(el) -> str:
+        raise TypeError(f"no renderer for {type(el).__name__}")
+
+
+    @render.register
+    def _(el: Input) -> str:
+        return f'<input name="{el.name}">'
+
+
+    @render.register
+    def _(el: Text) -> str:
+        return f"<p>{el.text}</p>"
+
+
+    @render.register
+    def _(el: Block) -> str:
+        return "<div>" + "".join(render(child) for child in el.children) + "</div>"
+  requires: []
+  runtime: browser
+
+- id: t6
+  type: code
+  title: "Публікація сторінок пачками"
+  prompt: |
+    Зберіть публікацію FormBuilder з готових частин. Дано `render(el, *, theme)`, яка
+    рендерить один елемент-словник з урахуванням теми. Напишіть
+    `publish(pages, theme, batch_size)`, яка повертає список пачок для завантаження:
+
+    - порожні сторінки пропускаються, але нумерація файлів іде за позицією сторінки в
+      `pages` (сторінка на позиції 2 це `page-2.html`, навіть якщо перша порожня);
+    - вміст файлу це рендери елементів сторінки, склеєні без роздільника; тему зафіксуйте
+      один раз через `functools.partial`, а не передавайте в кожен виклик;
+    - файли групуються в пачки по `batch_size`, кожна пачка це словник
+      `{filename: html}`, остання пачка може бути меншою;
+    - `pages` може бути генератором, тобто без `len` і індексів.
+
+    ```python
+    publish([[{"type": "text", "text": "Hi"}], [], [{"type": "input", "name": "email"}]], "dark", 2)
+    # [{'page-1.html': '<p class="dark">Hi</p>', 'page-3.html': '<input name="email" class="dark">'}]
+    ```
+  starter: |
+    from functools import partial
+    from itertools import batched
+
+
+    def render(el: dict, *, theme: str) -> str:
+        if el["type"] == "input":
+            return f'<input name="{el["name"]}" class="{theme}">'
+        return f'<p class="{theme}">{el["text"]}</p>'
+
+
+    def publish(pages, theme: str, batch_size: int) -> list[dict[str, str]]:
+        ...
+  harness: |
+    pages = [
+        [{"type": "text", "text": "Contact"}, {"type": "input", "name": "email"}],
+        [],
+        [{"type": "input", "name": "phone"}],
+        [{"type": "text", "text": "Plan"}],
+        [{"type": "text", "text": "Thanks"}],
+    ]
+    for batch in publish(pages, "dark", 2):
+        print(batch)
+    print(publish((p for p in pages), "light", 10)[0]["page-4.html"])
+    print(publish([[], []], "dark", 2))
+  expected: |
+    {'page-1.html': '<p class="dark">Contact</p><input name="email" class="dark">', 'page-3.html': '<input name="phone" class="dark">'}
+    {'page-4.html': '<p class="dark">Plan</p>', 'page-5.html': '<p class="dark">Thanks</p>'}
+    <p class="light">Plan</p>
+    []
+  hints:
+    - "Порядок кроків: пронумерувати сторінки, відкинути порожні, перетворити кожну на пару (ім'я файлу, html), нарізати пари на пачки, кожну пачку перетворити на словник."
+    - "`render_el = partial(render, theme=theme)`; пари можна зібрати генераторним виразом по `enumerate(pages, start=1)` з умовою `if page`; `dict(batch)` перетворює кортеж пар на словник."
+    - |
+      ```python
+      files = (
+          (f"page-{n}.html", "".join(map(render_el, page)))
+          for n, page in enumerate(pages, start=1)
+          if page
+      )
+      return [dict(batch) for batch in batched(files, batch_size)]
+      ```
+  solution: |
+    from functools import partial
+    from itertools import batched
+
+
+    def render(el: dict, *, theme: str) -> str:
+        if el["type"] == "input":
+            return f'<input name="{el["name"]}" class="{theme}">'
+        return f'<p class="{theme}">{el["text"]}</p>'
+
+
+    def publish(pages, theme: str, batch_size: int) -> list[dict[str, str]]:
+        render_el = partial(render, theme=theme)
+        files = (
+            (f"page-{n}.html", "".join(map(render_el, page)))
+            for n, page in enumerate(pages, start=1)
+            if page
+        )
+        return [dict(batch) for batch in batched(files, batch_size)]
+  requires: []
+  runtime: browser

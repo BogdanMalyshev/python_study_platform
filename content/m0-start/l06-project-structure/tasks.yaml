@@ -1,0 +1,520 @@
+- id: t1
+  type: code
+  title: "Шлях у src/ як ім'я модуля"
+  prompt: |
+    У src layout ім'я модуля однозначно виводиться зі шляху: відкидаємо `src/` і `.py`, слеші стають крапками,
+    а `__init__.py` означає сам пакет. Напишіть `module_name(path)`, яка робить це перетворення.
+
+    Шлях, що не лежить у `src/` або не закінчується на `.py`, це не модуль пакета: киньте
+    `ValueError(f"not a module under src/: {path}")`.
+
+    ```python
+    module_name("src/formbuilder/cli.py")              # 'formbuilder.cli'
+    module_name("src/formbuilder/__init__.py")         # 'formbuilder'
+    module_name("tests/test_smoke.py")                 # ValueError
+    ```
+  starter: |
+    def module_name(path: str) -> str:
+        ...
+  harness: |
+    print(module_name("src/formbuilder/cli.py"))
+    print(module_name("src/formbuilder/__init__.py"))
+    print(module_name("src/formbuilder/config/loader.py"))
+    print(module_name("src/formbuilder/config/__init__.py"))
+    print(module_name("src/formbuilder/__main__.py"))
+    for bad in ["tests/test_smoke.py", "src/formbuilder/README.md"]:
+        try:
+            module_name(bad)
+        except ValueError as e:
+            print("ValueError:", e)
+  expected: |
+    formbuilder.cli
+    formbuilder
+    formbuilder.config.loader
+    formbuilder.config
+    formbuilder.__main__
+    ValueError: not a module under src/: tests/test_smoke.py
+    ValueError: not a module under src/: src/formbuilder/README.md
+  hints:
+    - "Перевірте префікс і суфікс, відріжте їх, розбийте решту по `/`. Останній шматок `__init__` означає, що модуль це сама папка."
+    - "`parts = path.removeprefix(\"src/\").removesuffix(\".py\").split(\"/\")`, потім `if parts[-1] == \"__init__\": parts.pop()` і `\".\".join(parts)`."
+  solution: |
+    def module_name(path: str) -> str:
+        if not (path.startswith("src/") and path.endswith(".py")):
+            raise ValueError(f"not a module under src/: {path}")
+        parts = path.removeprefix("src/").removesuffix(".py").split("/")
+        if parts[-1] == "__init__":
+            parts.pop()
+        return ".".join(parts)
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Завантажити entry point за рядком module:attr"
+  prompt: |
+    Згенерований скрипт `.venv/bin/formbuilder` робить рівно одне: імпортує модуль з рядка
+    `"formbuilder.cli:main"` і бере з нього атрибут. Напишіть `load_entry_point(spec)`, яка повторює цю логіку.
+
+    - Ліворуч від `:` ім'я модуля з крапками, праворуч ім'я об'єкта; праворуч теж можуть бути крапки
+      (`"json:JSONDecoder.decode"` означає атрибут `decode` класу `JSONDecoder`).
+    - Двокрапка має бути рівно одна, обидві частини непорожні. Інакше
+      `ValueError(f"bad entry point: {spec!r}")`.
+    - Модуль імпортуйте через `importlib.import_module`; якщо модуля немає, хай летить рідний
+      `ModuleNotFoundError`, не перехоплюйте його.
+
+    ```python
+    load_entry_point("json:dumps")({"id": "email"})   # '{"id": "email"}'
+    load_entry_point("formbuilder.cli")               # ValueError
+    ```
+  starter: |
+    import importlib
+    from collections.abc import Callable
+    from typing import Any
+
+
+    def load_entry_point(spec: str) -> Callable[..., Any]:
+        ...
+  harness: |
+    dumps = load_entry_point("json:dumps")
+    print(dumps({"id": "email"}))
+    join = load_entry_point("os.path:join")
+    print(join("dist", "index.html"))
+    decode = load_entry_point("json:JSONDecoder.decode")
+    print(decode.__qualname__)
+    for bad in ["formbuilder.cli", "formbuilder.cli:", ":main", "a:b:c"]:
+        try:
+            load_entry_point(bad)
+        except ValueError as e:
+            print("ValueError:", e)
+    try:
+        load_entry_point("no_such_module:main")
+    except ModuleNotFoundError as e:
+        print(type(e).__name__, e)
+  expected: |
+    {"id": "email"}
+    dist/index.html
+    JSONDecoder.decode
+    ValueError: bad entry point: 'formbuilder.cli'
+    ValueError: bad entry point: 'formbuilder.cli:'
+    ValueError: bad entry point: ':main'
+    ValueError: bad entry point: 'a:b:c'
+    ModuleNotFoundError No module named 'no_such_module'
+  hints:
+    - "Розбийте рядок по двокрапці й перевірте кількість частин і їх непорожність. Атрибут з крапками це ланцюжок getattr."
+    - "`module_name, sep, attr = spec.partition(\":\")` не відрізнить `a:b:c`; надійніше `parts = spec.split(\":\")` і `len(parts) == 2`. Далі `obj = importlib.import_module(module_name)` і `for name in attr.split(\".\"): obj = getattr(obj, name)`."
+  solution: |
+    import importlib
+    from collections.abc import Callable
+    from typing import Any
+
+
+    def load_entry_point(spec: str) -> Callable[..., Any]:
+        parts = spec.split(":")
+        if len(parts) != 2 or not all(parts):
+            raise ValueError(f"bad entry point: {spec!r}")
+        module_name, attr = parts
+        obj: Any = importlib.import_module(module_name)
+        for name in attr.split("."):
+            obj = getattr(obj, name)
+        return obj
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "main() для console script: stdout, stderr і код виходу"
+  prompt: |
+    Напишіть заглушку CLI так, як вона лежить у `src/formbuilder/cli.py` капстоуну.
+    `main(argv=None)` повертає код виходу як `int`, а не викликає `sys.exit` сама: це робить згенерований скрипт.
+
+    - `argv is None` означає "взяти `sys.argv[1:]`"; тести передають список явно.
+    - `[]` або `["--help"]`: надрукувати `USAGE` у stdout, повернути `0`.
+    - `["--version"]`: надрукувати `formbuilder 0.1.0` (з константи `VERSION`), повернути `0`.
+    - Будь-що інше: у **stderr** два рядки, `formbuilder: unknown arguments: <аргументи через пробіл>` і `USAGE`;
+      повернути `2` (так робить argparse при помилці використання).
+
+    Харнес перехоплює обидва потоки окремо, тож рядок, надрукований не в той потік, буде видно.
+  starter: |
+    import sys
+
+    VERSION = "0.1.0"
+    USAGE = "usage: formbuilder [--help] [--version]"
+
+
+    def main(argv: list[str] | None = None) -> int:
+        ...
+  harness: |
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+
+    def run(argv):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = main(argv)
+        print(f"{argv} -> {code!r}")
+        print("  out:", out.getvalue().splitlines())
+        print("  err:", err.getvalue().splitlines())
+
+
+    run([])
+    run(["--help"])
+    run(["--version"])
+    run(["build", "form.json"])
+    sys.argv = ["formbuilder", "--version"]
+    run(None)
+  expected: |
+    [] -> 0
+      out: ['usage: formbuilder [--help] [--version]']
+      err: []
+    ['--help'] -> 0
+      out: ['usage: formbuilder [--help] [--version]']
+      err: []
+    ['--version'] -> 0
+      out: ['formbuilder 0.1.0']
+      err: []
+    ['build', 'form.json'] -> 2
+      out: []
+      err: ['formbuilder: unknown arguments: build form.json', 'usage: formbuilder [--help] [--version]']
+    None -> 0
+      out: ['formbuilder 0.1.0']
+      err: []
+  hints:
+    - "Спершу нормалізуйте argv: якщо його не передали, візьміть аргументи процесу без нульового. Далі три гілки, і лише остання пише в stderr."
+    - "`args = sys.argv[1:] if argv is None else argv`; `if args in ([], [\"--help\"]):`; для помилки `print(..., file=sys.stderr)`."
+  solution: |
+    import sys
+
+    VERSION = "0.1.0"
+    USAGE = "usage: formbuilder [--help] [--version]"
+
+
+    def main(argv: list[str] | None = None) -> int:
+        args = sys.argv[1:] if argv is None else argv
+        if args in ([], ["--help"]):
+            print(USAGE)
+            return 0
+        if args == ["--version"]:
+            print(f"formbuilder {VERSION}")
+            return 0
+        print(f"formbuilder: unknown arguments: {' '.join(args)}", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
+        return 2
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Як pytest знаходить тести"
+  prompt: |
+    Відтворіть правила збору pytest за замовчуванням на спрощеній моделі проєкту.
+    `files` це словник `шлях -> список імен функцій верхнього рівня у файлі` (у порядку появи),
+    `testpaths` це значення з `[tool.pytest.ini_options]`.
+
+    Поверніть список node id у форматі `шлях::функція`, як друкує `pytest --collect-only -q`:
+
+    - файл лежить у одній з `testpaths` (шлях починається з `"<testpath>/"`); порожній `testpaths` означає "шукати скрізь";
+    - ім'я файлу (остання частина шляху) відповідає `test_*.py` або `*_test.py`;
+    - функція має префікс `test`;
+    - файли відсортовані за шляхом, функції всередині файлу в порядку появи.
+
+    `conftest.py` і допоміжні модулі тестами не є, навіть якщо в них є функції з `test` на початку.
+  starter: |
+    def collect(files: dict[str, list[str]], testpaths: list[str]) -> list[str]:
+        ...
+  harness: |
+    files = {
+        "tests/test_smoke.py": ["test_package_is_installed_and_cli_runs", "helper"],
+        "tests/config/test_loader.py": ["test_load_empty", "_make_config", "test_load_valid"],
+        "tests/conftest.py": ["test_like_fixture"],
+        "tests/render_test.py": ["test_render"],
+        "tests/helpers.py": ["test_like_name"],
+        "src/formbuilder/test_utils.py": ["test_inside_src"],
+    }
+    for node in collect(files, ["tests"]):
+        print(node)
+    print(collect(files, ["src"]))
+    print(len(collect(files, [])))
+    print(collect({}, ["tests"]))
+  expected: |
+    tests/config/test_loader.py::test_load_empty
+    tests/config/test_loader.py::test_load_valid
+    tests/render_test.py::test_render
+    tests/test_smoke.py::test_package_is_installed_and_cli_runs
+    ['src/formbuilder/test_utils.py::test_inside_src']
+    5
+    []
+  hints:
+    - "Три фільтри по черзі: місце файлу, ім'я файлу, ім'я функції. Ім'я файлу це те, що після останнього `/`."
+    - "`name = path.rsplit(\"/\", 1)[-1]`; `name.endswith(\".py\") and (name.startswith(\"test_\") or name.endswith(\"_test.py\"))`; для testpaths `any(path.startswith(tp + \"/\") for tp in testpaths)`."
+  solution: |
+    def is_test_file(path: str) -> bool:
+        name = path.rsplit("/", 1)[-1]
+        return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+
+
+    def collect(files: dict[str, list[str]], testpaths: list[str]) -> list[str]:
+        nodes = []
+        for path in sorted(files):
+            if testpaths and not any(path.startswith(tp + "/") for tp in testpaths):
+                continue
+            if not is_test_file(path):
+                continue
+            for func in files[path]:
+                if func.startswith("test"):
+                    nodes.append(f"{path}::{func}")
+        return nodes
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Лінтер скелета проєкту"
+  prompt: |
+    Напишіть `check_skeleton(pyproject, files)`, яка перевіряє скелет так, як ви перевіряли б його на code review.
+    `pyproject` це текст `pyproject.toml`, `files` це множина шляхів файлів відносно кореня проєкту.
+    Розбирайте TOML через `tomllib.loads` зі стандартної бібліотеки. Поверніть список проблем у такому порядку
+    (порожній список означає, що скелет у порядку):
+
+    1. Для кожного з ключів `name`, `version`, `requires-python`, яких немає в `[project]`: `"missing project.<key>"`.
+       Якщо немає `name`, решту перевірок пакета (пункти 2 і 3) пропустіть.
+    2. Ім'я пакета для імпорту: `name` з `-` заміненим на `_`. Якщо є `<pkg>/__init__.py` у корені:
+       `"flat layout: move <pkg>/ to src/<pkg>/"`. Інакше, якщо немає `src/<pkg>/__init__.py`:
+       `"missing src/<pkg>/__init__.py"`.
+    3. Для кожного запису `[project.scripts]` у порядку оголошення: ціль має вигляд `module:attr` з рівно однією
+       двокрапкою, інакше `"script <name>: bad target '<target>'"`. Модуль має існувати як
+       `src/<module з / замість .>.py` або `src/<...>/__init__.py`, інакше `"script <name>: module <module> not found"`.
+    4. `testpaths` з `[tool.pytest.ini_options]`, за замовчуванням `["tests"]`. Для кожного: якщо в ньому
+       немає жодного файлу з ім'ям `test_*.py`, `"no test files in <testpath>/"`.
+    5. Для `.python-version`, `.gitignore`, `README.md` у цьому порядку: якщо файлу немає, `"missing <file>"`.
+  starter: |
+    import tomllib
+
+
+    def check_skeleton(pyproject: str, files: set[str]) -> list[str]:
+        ...
+  harness: |
+    GOOD = '''
+    [project]
+    name = "formbuilder"
+    version = "0.1.0"
+    requires-python = ">=3.12"
+
+    [project.scripts]
+    formbuilder = "formbuilder.cli:main"
+
+    [tool.pytest.ini_options]
+    testpaths = ["tests"]
+    '''
+    good_files = {
+        "pyproject.toml", ".python-version", ".gitignore", "README.md",
+        "src/formbuilder/__init__.py", "src/formbuilder/cli.py", "src/formbuilder/__main__.py",
+        "tests/test_smoke.py",
+    }
+    print(check_skeleton(GOOD, good_files))
+
+    BAD = '''
+    [project]
+    name = "form-builder"
+    version = "0.1.0"
+
+    [project.scripts]
+    fb = "form_builder.cli:main"
+    fb-admin = "form_builder.admin"
+    fb-api = "form_builder.api:app"
+
+    [tool.pytest.ini_options]
+    testpaths = ["tests", "integration"]
+    '''
+    bad_files = {
+        "pyproject.toml", ".gitignore",
+        "form_builder/__init__.py", "form_builder/cli.py",
+        "tests/test_cli.py", "integration/conftest.py",
+        "src/form_builder/api/__init__.py",
+    }
+    for problem in check_skeleton(BAD, bad_files):
+        print(problem)
+    print(check_skeleton("[project]\n", {"tests/test_x.py"}))
+  expected: |
+    []
+    missing project.requires-python
+    flat layout: move form_builder/ to src/form_builder/
+    script fb: module form_builder.cli not found
+    script fb-admin: bad target 'form_builder.admin'
+    no test files in integration/
+    missing .python-version
+    missing README.md
+    ['missing project.name', 'missing project.version', 'missing project.requires-python', 'missing .python-version', 'missing .gitignore', 'missing README.md']
+  hints:
+    - "Спершу `data = tomllib.loads(pyproject)`, далі `data.get(\"project\", {})` і `data.get(\"tool\", {}).get(\"pytest\", {}).get(\"ini_options\", {})`. Кожен пункт умови це окремий невеликий цикл, який дописує в один список."
+    - "Шлях модуля: `base = \"src/\" + module.replace(\".\", \"/\")`, далі перевірка `base + \".py\" in files or base + \"/__init__.py\" in files`. Для testpaths: `any(f.startswith(tp + \"/\") and f.rsplit(\"/\", 1)[-1].startswith(\"test_\") and f.endswith(\".py\") for f in files)`."
+    - "Порядок повідомлень визначається порядком перевірок, тому не сортуйте результат; `dict` з TOML зберігає порядок оголошення скриптів."
+  solution: |
+    import tomllib
+
+
+    def check_skeleton(pyproject: str, files: set[str]) -> list[str]:
+        data = tomllib.loads(pyproject)
+        project = data.get("project", {})
+        problems = [
+            f"missing project.{key}"
+            for key in ("name", "version", "requires-python")
+            if key not in project
+        ]
+
+        if "name" in project:
+            pkg = project["name"].replace("-", "_")
+            if f"{pkg}/__init__.py" in files:
+                problems.append(f"flat layout: move {pkg}/ to src/{pkg}/")
+            elif f"src/{pkg}/__init__.py" not in files:
+                problems.append(f"missing src/{pkg}/__init__.py")
+
+            for name, target in project.get("scripts", {}).items():
+                parts = target.split(":")
+                if len(parts) != 2 or not all(parts):
+                    problems.append(f"script {name}: bad target {target!r}")
+                    continue
+                base = "src/" + parts[0].replace(".", "/")
+                if f"{base}.py" not in files and f"{base}/__init__.py" not in files:
+                    problems.append(f"script {name}: module {parts[0]} not found")
+
+        pytest_cfg = data.get("tool", {}).get("pytest", {}).get("ini_options", {})
+        for tp in pytest_cfg.get("testpaths", ["tests"]):
+            has_tests = any(
+                f.startswith(tp + "/")
+                and f.rsplit("/", 1)[-1].startswith("test_")
+                and f.endswith(".py")
+                for f in files
+            )
+            if not has_tests:
+                problems.append(f"no test files in {tp}/")
+
+        for required in (".python-version", ".gitignore", "README.md"):
+            if required not in files:
+                problems.append(f"missing {required}")
+        return problems
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Flat layout, `pyproject.toml` на setuptools з `packages = ["formbuilder"]`, а код рендера лежить
+    у підпакеті `formbuilder/render/`. Пакет встановлено звичайним (не editable) встановленням: `uv sync --no-editable`.
+    З кореня проєкту запускають `.venv/bin/python -m pytest -q`, тест робить `from formbuilder.render import render`.
+    Що відбудеться?
+  options:
+    - "Тест пройде: імпортується локальна папка `formbuilder/`, де `render/` є"
+    - "`ModuleNotFoundError: No module named 'formbuilder.render'`, бо у встановленому пакеті підпакета немає"
+    - "pytest попередить, що локальна папка затіняє встановлений пакет, і тест пройде"
+    - "`ImportError: attempted relative import with no known parent package`"
+  answer: 0
+  explain: |
+    `python -m` ставить поточну директорію першою в `sys.path`, тому `import formbuilder` знаходить папку в корені
+    раніше за `site-packages`. Тест проходить, хоча встановлений пакет зламаний: `packages = ["formbuilder"]`
+    не включає підпакети, і у wheel лежить лише `formbuilder/__init__.py`.
+    `ModuleNotFoundError` ви отримали б у src layout: там у корені немає папки `formbuilder/`, імпорт іде у
+    `site-packages`, і помилка пакування стає червоним тестом. Саме в цьому аргумент за src layout.
+    Ніякого попередження про затінення pytest не дає, він не знає, який із двох `formbuilder` ви мали на увазі.
+    Відносних імпортів у сценарії немає, тож ця помилка тут ні до чого.
+
+- id: q2
+  type: quiz
+  question: |
+    У капстоуні після `uv sync` ви міняєте в `pyproject.toml` рядок на `version = "0.2.0"` і одразу, без `uv sync`, запускаєте:
+    ```bash
+    .venv/bin/python -c "from importlib.metadata import version; print(version('formbuilder'))"
+    ```
+    Що надрукується?
+  options: ["0.1.0", "0.2.0", "PackageNotFoundError: formbuilder", "0.2.0 і попередження про застарілий lockfile"]
+  answer: 0
+  explain: |
+    `importlib.metadata` читає не `pyproject.toml`, а файл `METADATA` у `.venv/lib/python3.12/site-packages/formbuilder-0.1.0.dist-info/`,
+    який з'явився під час встановлення. Editable install робить живим лише код у `src/`, а метадані (версія,
+    entry points, залежності) фіксуються в момент встановлення. Оновить їх `uv sync` або будь-який `uv run`,
+    який сам помітить зміну `pyproject.toml` і перевстановить пакет.
+    `0.2.0` це очікування з JS, де `require("./package.json").version` читає файл напряму.
+    `PackageNotFoundError` був би, якби пакет взагалі не встановлювали. Прямий виклик `.venv/bin/python` нічого
+    не знає про lockfile, тому й попереджати нема кому.
+
+- id: q3
+  type: quiz
+  question: |
+    `[project.scripts] formbuilder = "formbuilder.cli:main"`, і `main` написана за JS-звичкою "повернути, чи вдалося":
+    ```python
+    def main() -> bool:
+        print("built")
+        return True
+    ```
+    Що покаже `uv run formbuilder; echo $?`?
+  options: ["built і 1", "built і 0", "built, True і 0", "TypeError: exit code must be int"]
+  answer: 0
+  explain: |
+    Згенерований скрипт робить `sys.exit(main())`. `True` у Python це `int` зі значенням 1, а ненульовий код
+    виходу в shell означає помилку: CI вважатиме успішну збірку провалом.
+    `0` вийшов би при `return None` або `return 0`. Рядок `True` друкується лише тоді, коли в `sys.exit` передали
+    не число, а рядок чи інший об'єкт (і тоді код 1), але `bool` це підклас `int`, тож друку немає.
+    `TypeError` немає: `sys.exit` приймає будь-що.
+    Конвенція для `main`: повертати `int`, `0` при успіху.
+
+- id: q4
+  type: quiz
+  question: |
+    У `src/formbuilder/check.py` написано:
+    ```python
+    from .config import load
+
+    print(load("form.json"))
+    ```
+    Пакет встановлено через `uv sync`, `config.py` поруч існує. Що дасть `uv run python src/formbuilder/check.py`?
+  options:
+    - "`ImportError: attempted relative import with no known parent package`"
+    - "`{'source': 'form.json'}`, бо пакет встановлено"
+    - "`ModuleNotFoundError: No module named 'formbuilder'`"
+    - "Спрацює лише після додавання `src/__init__.py`"
+  answer: 0
+  explain: |
+    Запущений за шляхом файл стає модулем `__main__` без батьківського пакета, а відносний імпорт рахується
+    від пакета поточного модуля. Пакета немає, тому `.config` нема від чого рахувати. Те, що `formbuilder`
+    встановлено, не допомагає: інтерпретатор не знає, що цей файл і є `formbuilder.check`.
+    `uv run python -m formbuilder.check` або абсолютний `from formbuilder.config import load` дають
+    `{'source': 'form.json'}`. `ModuleNotFoundError` був би при абсолютному імпорті без встановленого пакета.
+    `src/__init__.py` зробив би пакетом `src`, а не допоміг: `src` у src layout не пакет, а лише папка.
+
+- id: p1
+  type: project
+  title: "Скелет капстоуну formbuilder"
+  prompt: |
+    Створіть у корені курсу папку `capstone/` з проєктом `formbuilder` у src layout. Це репозиторій, у який модулі 2–7
+    додаватимуть код, тож структура має бути саме такою:
+
+    ```text
+    capstone/
+    ├── .gitignore
+    ├── .python-version          # 3.12
+    ├── README.md                # що це і як запустити
+    ├── pyproject.toml
+    ├── uv.lock
+    ├── src/formbuilder/
+    │   ├── __init__.py          # __version__ з importlib.metadata
+    │   ├── __main__.py          # python -m formbuilder
+    │   └── cli.py               # main(argv=None) -> int
+    └── tests/
+        └── test_smoke.py
+    ```
+
+    Почніть з `uv init --package --vcs none --python 3.12 --name formbuilder capstone`, потім
+    `uv add --dev pytest ruff mypy`. Далі руками: `[project.scripts]` на `formbuilder.cli:main`,
+    конфіги `[tool.ruff]`, `[tool.pytest.ini_options]`, `[tool.mypy]` в `pyproject.toml`, `cli.py` з рішення t3
+    (версію брати з `formbuilder.__version__`), `__main__.py`, один smoke-тест.
+    Звірте свій результат з еталоном у `capstone/` курсу.
+  checklist:
+    - "`uv sync` на чистій копії (без `.venv/`) створює оточення і ставить `formbuilder` в editable-режимі"
+    - "`uv run python -c \"import formbuilder; print(formbuilder.__file__)\"` з будь-якої папки друкує шлях у `src/formbuilder/`"
+    - "`uv run pytest -q` збирає тести лише з `tests/` і проходить"
+    - "`uv run ruff check` і `uv run ruff format --check` без зауважень, `uv run mypy src` у strict-режимі без помилок"
+    - "`uv run formbuilder --help` друкує рядок usage і виходить з кодом 0; невідомий аргумент дає код 2 і текст у stderr"
+    - "`uv run python -m formbuilder --version` друкує `formbuilder 0.1.0`, і ця версія ніде в коді не записана руками"
+    - "У корені немає `formbuilder/`, `setup.py`, `requirements.txt` і `tests/__init__.py`; `.venv/` у `.gitignore`"
+  verify: "cd capstone && uv sync && uv run pytest -q && uv run ruff check && uv run mypy src && uv run formbuilder --help"

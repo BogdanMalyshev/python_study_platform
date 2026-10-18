@@ -1,0 +1,397 @@
+- id: t1
+  type: code
+  title: "Підпис поля через умовний вираз"
+  prompt: |
+    Напишіть `field_label(field)`, яка повертає підпис поля форми:
+
+    - текст береться з `label`, якщо ключ є і значення непорожнє, інакше з `name`;
+    - якщо `required` дорівнює `True`, до тексту додається `" *"`.
+
+    Обидва рішення через умовний вираз `a if cond else b`, без `if`-інструкцій.
+
+    ```python
+    field_label({"type": "input", "name": "email", "required": True})   # 'email *'
+    field_label({"type": "input", "name": "phone", "label": "Phone"})   # 'Phone'
+    ```
+  starter: |
+    def field_label(field: dict) -> str:
+        ...
+  harness: |
+    print(field_label({"type": "input", "name": "email", "required": True}))
+    print(field_label({"type": "input", "name": "phone", "label": "Phone"}))
+    print(field_label({"type": "input", "name": "age", "label": "", "required": False}))
+    print(field_label({"type": "input", "name": "bio", "label": "About you", "required": True}))
+  expected: |
+    email *
+    Phone
+    age
+    About you *
+  hints:
+    - "Два незалежні рішення: який текст і чи потрібна зірочка. Кожне це окремий умовний вираз, а результати склеюються."
+    - "text = field[\"label\"] if field.get(\"label\") else field[\"name\"]; зірочка: \" *\" if field.get(\"required\") else \"\"."
+  solution: |
+    def field_label(field: dict) -> str:
+        text = field["label"] if field.get("label") else field["name"]
+        mark = " *" if field.get("required") else ""
+        return text + mark
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Перевірка значення поля: guard clauses і walrus"
+  prompt: |
+    Напишіть `validate_value(field, value)`, яка повертає текст першої помилки або `None`, якщо значення валідне.
+    Правила по черзі:
+
+    1. Значення порожнє (`None` або `""`): для обов'язкового поля (`required` істинне) помилка `"<name>: required"`,
+       для необов'язкового `None`, далі нічого не перевіряється.
+    2. У полі є `min_length` і значення коротше: `"<name>: shorter than <min_length>"`.
+    3. У полі є `max_length` і значення довше: `"<name>: longer than <max_length>"`.
+
+    Ліміт може дорівнювати `0`, і це валідний ліміт. Пишіть guard clauses без `else` і без вкладених `if`.
+    Для лімітів зручно `(limit := field.get(...)) is not None`.
+
+    ```python
+    validate_value({"name": "email", "required": True}, "")             # 'email: required'
+    validate_value({"name": "code", "max_length": 0}, "x")              # 'code: longer than 0'
+    ```
+  starter: |
+    def validate_value(field: dict, value: str | None) -> str | None:
+        ...
+  harness: |
+    email = {"type": "input", "name": "email", "required": True, "min_length": 3, "max_length": 10}
+    print(validate_value(email, None))
+    print(validate_value(email, ""))
+    print(validate_value(email, "ab"))
+    print(validate_value(email, "a@b.c"))
+    print(validate_value(email, "long@example.com"))
+    print(validate_value({"type": "input", "name": "note"}, ""))
+    print(validate_value({"type": "input", "name": "code", "max_length": 0}, "x"))
+    print(validate_value({"type": "input", "name": "pin", "min_length": 0}, "1"))
+  expected: |
+    email: required
+    email: required
+    email: shorter than 3
+    None
+    email: longer than 10
+    None
+    code: longer than 0
+    None
+  hints:
+    - "Кожне правило це if з return усередині. Порожнє значення перевіряйте першим: після нього можна викликати len(value) без страху. Ліміт 0 хибний, тому if field.get(\"max_length\"): його пропустить."
+    - "if (limit := field.get(\"max_length\")) is not None and len(value) > limit: return f\"{name}: longer than {limit}\". Дужки навколо := обов'язкові, бо далі йде is not None."
+  solution: |
+    def validate_value(field: dict, value: str | None) -> str | None:
+        name = field["name"]
+        if value is None or value == "":
+            return f"{name}: required" if field.get("required") else None
+        if (limit := field.get("min_length")) is not None and len(value) < limit:
+            return f"{name}: shorter than {limit}"
+        if (limit := field.get("max_length")) is not None and len(value) > limit:
+            return f"{name}: longer than {limit}"
+        return None
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Команди редактора через патерни послідовностей"
+  prompt: |
+    Редактор форм надсилає команди списками. Напишіть `describe_command(cmd)` через `match`:
+
+    | Команда | Результат |
+    |---|---|
+    | `["add", kind]` | `"add <kind>"` |
+    | `["move", field_id, position]` | `"move <field_id> to <position>"` |
+    | `["remove"]` | `"nothing to remove"` |
+    | `["remove", id1, id2, ...]` | `"remove <id1>, <id2>, ..."` |
+    | `["undo"]` або `["redo"]` | `"undo"` або `"redo"` |
+    | будь-що інше | `"unknown command"` |
+
+    Команда може прийти й кортежем, це має працювати так само. Рядок `"undo"` це не команда.
+    Для `undo` і `redo` один `case` з `|` і `as`.
+
+    ```python
+    describe_command(["move", "email", 2])   # 'move email to 2'
+    describe_command(["remove", "a", "b"])   # 'remove a, b'
+    ```
+  starter: |
+    def describe_command(cmd) -> str:
+        ...
+  harness: |
+    print(describe_command(["add", "input"]))
+    print(describe_command(["move", "email", 2]))
+    print(describe_command(["remove"]))
+    print(describe_command(["remove", "email"]))
+    print(describe_command(["remove", "email", "phone", "age"]))
+    print(describe_command(("undo",)))
+    print(describe_command(["redo"]))
+    print(describe_command("undo"))
+    print(describe_command(["add"]))
+    print(describe_command([]))
+  expected: |
+    add input
+    move email to 2
+    nothing to remove
+    remove email
+    remove email, phone, age
+    undo
+    redo
+    unknown command
+    unknown command
+    unknown command
+  hints:
+    - "Патерн послідовності вимагає точну довжину, а *rest збирає хвіст. Порядок важливий: [\"remove\"] має стояти раніше за [\"remove\", *ids], інакше порожній ids теж потрапить у загальну гілку."
+    - "case [\"remove\", *ids]: return \"remove \" + \", \".join(ids); case [\"undo\" | \"redo\" as action]: return action; рядок \"undo\" не збігається з патернами послідовностей і дійде до case _."
+  solution: |
+    def describe_command(cmd) -> str:
+        match cmd:
+            case ["add", kind]:
+                return f"add {kind}"
+            case ["move", field_id, position]:
+                return f"move {field_id} to {position}"
+            case ["remove"]:
+                return "nothing to remove"
+            case ["remove", *ids]:
+                return "remove " + ", ".join(ids)
+            case ["undo" | "redo" as action]:
+                return action
+            case _:
+                return "unknown command"
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Опис елемента форми: патерни словників і guard"
+  prompt: |
+    Напишіть `summarize(element)` через `match` на словнику елемента FormBuilder:
+
+    - input з рядковим `name` і `required: True`: `"input <name> (required)"`;
+    - input з порожнім рядковим `name`: `"input with empty name"`;
+    - input з рядковим `name`: `"input <name>"`;
+    - input, у якого `name` немає або воно не рядок: `"input without name"`;
+    - block з порожнім списком `children`: `"empty block"`;
+    - block зі списком `children`: `"block with <N> children"`;
+    - будь-що інше з рядковим `type`: `"unknown type <type>"`;
+    - усе інше: `"invalid element"`.
+
+    Зайві ключі на кшталт `placeholder` не заважають. Порівнювати типи через `type(...)` чи `isinstance` не треба:
+    є патерни `str(...)` і `list(...)`.
+
+    ```python
+    summarize({"type": "input", "name": "email", "required": True})   # 'input email (required)'
+    summarize({"type": "block", "children": [{}, {}]})                 # 'block with 2 children'
+    ```
+  starter: |
+    def summarize(element: dict) -> str:
+        ...
+  harness: |
+    print(summarize({"type": "input", "name": "email", "required": True}))
+    print(summarize({"type": "input", "name": "phone", "placeholder": "+380"}))
+    print(summarize({"type": "input", "name": "", "required": True}))
+    print(summarize({"type": "input", "name": 42}))
+    print(summarize({"type": "input"}))
+    print(summarize({"type": "block", "children": []}))
+    print(summarize({"type": "block", "children": [{"type": "input", "name": "a"}, {"type": "input", "name": "b"}]}))
+    print(summarize({"type": "block", "children": "oops"}))
+    print(summarize({"type": "slider", "min": 0}))
+    print(summarize({"type": 7}))
+    print(summarize({}))
+  expected: |
+    input email (required)
+    input phone
+    input with empty name
+    input without name
+    input without name
+    empty block
+    block with 2 children
+    unknown type block
+    unknown type slider
+    invalid element
+    invalid element
+  hints:
+    - "Від вузького до широкого: спершу найконкретніший input, потім загальніші. Порожнє ім'я ловиться guard-ом після захоплення str(name)."
+    - "case {\"type\": \"input\", \"name\": str(name)} if not name: ...; case {\"type\": \"input\"}: return \"input without name\"; case {\"type\": \"block\", \"children\": list(children)}: return f\"block with {len(children)} children\"; case {\"type\": str(kind)}: ..."
+  solution: |
+    def summarize(element: dict) -> str:
+        match element:
+            case {"type": "input", "name": str(name)} if not name:
+                return "input with empty name"
+            case {"type": "input", "name": str(name), "required": True}:
+                return f"input {name} (required)"
+            case {"type": "input", "name": str(name)}:
+                return f"input {name}"
+            case {"type": "input"}:
+                return "input without name"
+            case {"type": "block", "children": []}:
+                return "empty block"
+            case {"type": "block", "children": list(children)}:
+                return f"block with {len(children)} children"
+            case {"type": str(kind)}:
+                return f"unknown type {kind}"
+            case _:
+                return "invalid element"
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Рендер дерева форми через match"
+  prompt: |
+    Напишіть рекурсивну `render(element)`, яка перетворює дерево FormBuilder на HTML-рядок:
+
+    - будь-який елемент з `"hidden": True` рендериться в `""`, незалежно від типу і вмісту;
+    - `{"type": "input", "name": str, "required": True}` дає `<input name="email" required>`;
+    - `{"type": "input", "name": str}` дає `<input name="email">`;
+    - `{"type": "text", "content": str}` дає `<p>content</p>`;
+    - `{"type": "block", "children": list}` дає `<div>...</div>`, де всередині склеєні рендери дітей по порядку;
+    - словник з рядковим `type`, що не підійшов вище, кидає `ValueError(f"unknown element type: {kind!r}")`;
+    - усе інше кидає `ValueError("invalid element")`.
+
+    Обхід `children` це звичайний `for` (детально в m1-l06). Винятки кидаються через `raise`, як у guard clauses з уроку.
+
+    ```python
+    render({"type": "block", "children": [{"type": "text", "content": "Hi"}]})   # '<div><p>Hi</p></div>'
+    ```
+  starter: |
+    def render(element: dict) -> str:
+        ...
+  harness: |
+    form = {
+        "type": "block",
+        "children": [
+            {"type": "text", "content": "Contact us"},
+            {"type": "input", "name": "email", "required": True},
+            {"type": "input", "name": "promo", "hidden": True},
+            {"type": "block", "children": [{"type": "input", "name": "phone"}]},
+            {"type": "block", "hidden": True, "children": "not even a list"},
+        ],
+    }
+    print(render(form))
+    print(repr(render({"type": "block", "children": []})))
+    for bad in [{"type": "slider", "min": 0}, {"type": "input"}, {"type": "block", "children": [{"name": "x"}]}]:
+        try:
+            render(bad)
+        except ValueError as e:
+            print("ValueError:", e)
+  expected: |
+    <div><p>Contact us</p><input name="email" required><div><input name="phone"></div></div>
+    '<div></div>'
+    ValueError: unknown element type: 'slider'
+    ValueError: unknown element type: 'input'
+    ValueError: invalid element
+  hints:
+    - "Порядок case вирішує все: \"hidden\" має стояти першим, бо інакше прихований block з поламаними children впаде або зрендериться. Input без name не збігається з input-патернами і доходить до гілки з рядковим type."
+    - "case {\"hidden\": True}: return \"\"; case {\"type\": \"block\", \"children\": list(children)}: html = \"\"; for child in children: html += render(child); return f\"<div>{html}</div>\"; case {\"type\": str(kind)}: raise ValueError(f\"unknown element type: {kind!r}\")"
+  solution: |
+    def render(element: dict) -> str:
+        match element:
+            case {"hidden": True}:
+                return ""
+            case {"type": "input", "name": str(name), "required": True}:
+                return f'<input name="{name}" required>'
+            case {"type": "input", "name": str(name)}:
+                return f'<input name="{name}">'
+            case {"type": "text", "content": str(content)}:
+                return f"<p>{content}</p>"
+            case {"type": "block", "children": list(children)}:
+                html = ""
+                for child in children:
+                    html += render(child)
+                return f"<div>{html}</div>"
+            case {"type": str(kind)}:
+                raise ValueError(f"unknown element type: {kind!r}")
+            case _:
+                raise ValueError("invalid element")
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    REQUIRED = "required"
+    status = "optional"
+    match status:
+        case "hidden":
+            print("hidden")
+        case REQUIRED:
+            print("required")
+    print(REQUIRED)
+    ```
+  options:
+    - "`required`, потім `optional`"
+    - "нічого, потім `required`"
+    - "`required`, потім `required`"
+    - "SyntaxError"
+  answer: 0
+  explain: |
+    Голе ім'я `REQUIRED` у `case` це capture pattern, а не порівняння з константою: воно збігається з будь-яким
+    значенням і присвоює його. Тому друкується `required`, а глобальна `REQUIRED` тепер дорівнює `"optional"`.
+    "Нічого" це інтуїція `switch` з JS, де `case REQUIRED:` порівнює з константою. "`required` двічі" вгадує
+    збіг, але не помічає перезапису. `SyntaxError` був би, якби після `case REQUIRED:` стояв ще один `case`:
+    тоді він недосяжний, і Python відмовляється компілювати. Останнім такий `case` легальний.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    match 1:
+        case True:
+            print("True")
+        case 1.0:
+            print("1.0")
+        case _:
+            print("other")
+    ```
+  options: ["True", "1.0", "other", "SyntaxError"]
+  answer: 1
+  explain: |
+    Літерали `True`, `False` і `None` у `case` порівнюються через `is`, а `1 is True` хибне, тож перша гілка
+    не збігається, хоча `1 == True` істинне. Числові літерали порівнюються через `==`, а `1 == 1.0` істинне,
+    тому друкується `1.0`. "True" це інтуїція "`case` порівнює все через `==`". "other" це інтуїція строгого
+    порівняння з перевіркою типу: `int` і `float` різні типи, але для чисел `match` використовує звичайне `==`.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    element = {"type": "input", "name": "email", "required": True}
+    match element:
+        case {"type": "input"}:
+            print("A")
+        case {"type": "input", "name": "email", "required": True}:
+            print("B")
+    ```
+  options: ["A", "B", "A, потім B", "нічого"]
+  answer: 0
+  explain: |
+    Патерн словника перевіряє лише згадані ключі, зайві ігнорує, тож `{"type": "input"}` збігається з цим елементом.
+    `match` виконує перший `case`, що збігся, і завершується. "B" це очікування, що патерн словника перевіряє
+    точну форму або що вибирається найконкретніший `case`. "A, потім B" це fallthrough зі `switch`, якого в `match`
+    немає. "Нічого" знову інтуїція точного збігу форми. Найконкретніші патерни треба ставити вище.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    match "ok":
+        case [first, *rest]:
+            print(first, rest)
+        case str(s):
+            print("string", s)
+    ```
+  options: ["o ['k']", "string ok", "o k", "TypeError"]
+  answer: 1
+  explain: |
+    Рядок формально послідовність, але патерни послідовностей навмисно не приймають `str`, `bytes` і `bytearray`,
+    тому перший `case` не збігається. Другий це патерн класу: `str(s)` перевіряє `isinstance(value, str)`
+    і захоплює значення цілком. "o ['k']" очікує, що рядок розбереться на символи, як `[...str]` у JS.
+    "o k" плутає `*rest` (завжди список) з окремим елементом. `TypeError` ні: невідповідність типу в `match`
+    це просто незбіг, а не помилка.

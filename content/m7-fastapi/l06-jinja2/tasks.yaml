@@ -1,0 +1,439 @@
+- id: t1
+  type: code
+  title: "Атрибути HTML з екрануванням"
+  prompt: |
+    Напишіть `render_attrs(attrs)`, яка перетворює словник атрибутів на рядок для вставки в тег.
+    Це те, що в JSX робить спред `<input {...attrs} />`, лише вручну.
+
+    - Кожен атрибут дає пробіл і `name="value"`, у порядку словника.
+    - Значення екрануються через `html.escape` з `quote=True`, щоб `"` не закрила атрибут.
+    - `True` дає булевий атрибут без значення: ` required`.
+    - `False` і `None` атрибут пропускають.
+    - Порожній словник дає порожній рядок.
+
+    ```python
+    render_attrs({"id": "e1", "required": True, "title": None})
+    # -> ' id="e1" required'
+    ```
+  starter: |
+    from html import escape
+
+
+    def render_attrs(attrs: dict[str, str | bool | None]) -> str:
+        ...
+  harness: |
+    print(f'<input{render_attrs({"id": "e1", "name": "email", "required": True})}>')
+    print(f'<input{render_attrs({"placeholder": "Say \"hi\" & <go>", "disabled": False, "title": None})}>')
+    print(repr(render_attrs({})))
+    print(f'<button{render_attrs({"type": "submit", "data-label": "Send"})}>')
+  expected: |
+    <input id="e1" name="email" required>
+    <input placeholder="Say &quot;hi&quot; &amp; &lt;go&gt;">
+    ''
+    <button type="submit" data-label="Send">
+  hints:
+    - "Пройдіть `attrs.items()` і на кожен атрибут вирішіть одне з трьох: пропустити, булевий, зі значенням. Порядок перевірок важливий: `True` і `False` треба відсіяти раніше за загальний випадок."
+    - "`value is True` і `value is False or value is None`; для рядка `f' {name}=\"{escape(value, quote=True)}\"'`, склеєний через `\"\".join(...)`."
+    - |
+      ```python
+      parts = []
+      for name, value in attrs.items():
+          if value is None or value is False:
+              continue
+          if value is True:
+              parts.append(f" {name}")
+          else:
+              parts.append(f' {name}="{escape(value, quote=True)}"')
+      return "".join(parts)
+      ```
+  solution: |
+    from html import escape
+
+
+    def render_attrs(attrs: dict[str, str | bool | None]) -> str:
+        parts: list[str] = []
+        for name, value in attrs.items():
+            if value is None or value is False:
+                continue
+            if value is True:
+                parts.append(f" {name}")
+            else:
+                parts.append(f' {name}="{escape(value, quote=True)}"')
+        return "".join(parts)
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Тема як CSS-змінні"
+  prompt: |
+    Шаблон капстоуну кладе тему в `:root { ... }` як CSS-змінні. Готувати цей рядок у шаблоні циклом по полях
+    незручно, тож його будують у Python і передають у контекст. Напишіть `css_vars(theme)` для будь-якого
+    dataclass-екземпляра.
+
+    - Обхід полів через `dataclasses.fields(theme)` у порядку оголошення.
+    - Ім'я змінної: `--fb-` плюс ім'я поля з `_`, заміненим на `-`.
+    - Значення через `str(...)`; змінні розділені пробілом, кожна закінчується `;`.
+    - Значення, що містить будь-який із символів `;{}<>`, це спроба CSS-ін'єкції: `ValueError` з повідомленням
+      `unsafe value for primary_color: 'red;}'` (ім'я поля і `repr` значення).
+
+    ```python
+    css_vars(Theme())
+    # -> '--fb-mode: light; --fb-primary-color: #2563eb; --fb-radius-px: 8;'
+    ```
+  starter: |
+    from dataclasses import dataclass, fields
+    from typing import Any
+
+
+    @dataclass(frozen=True)
+    class Theme:
+        mode: str = "light"
+        primary_color: str = "#2563eb"
+        radius_px: int = 8
+
+
+    def css_vars(theme: Any) -> str:
+        ...
+  harness: |
+    print(css_vars(Theme()))
+    print(css_vars(Theme(mode="dark", radius_px=0)))
+
+
+    @dataclass(frozen=True)
+    class Spacing:
+        gap_px: int = 12
+        max_width: str = "560px"
+
+
+    print(css_vars(Spacing()))
+    try:
+        css_vars(Theme(primary_color="red;} body { display: none"))
+    except ValueError as e:
+        print("ValueError:", e)
+    try:
+        css_vars(Theme(mode="</style><script>"))
+    except ValueError as e:
+        print("ValueError:", e)
+  expected: |
+    --fb-mode: light; --fb-primary-color: #2563eb; --fb-radius-px: 8;
+    --fb-mode: dark; --fb-primary-color: #2563eb; --fb-radius-px: 0;
+    --fb-gap-px: 12; --fb-max-width: 560px;
+    ValueError: unsafe value for primary_color: 'red;} body { display: none'
+    ValueError: unsafe value for mode: '</style><script>'
+  hints:
+    - "`fields(theme)` віддає об'єкти `Field` з атрибутом `.name`; саме значення дістається через `getattr(theme, f.name)`."
+    - "Перевірка на заборонені символи: `any(ch in value for ch in \";{}<>\")`, де `value = str(getattr(...))`. Частини збирайте в список і склейте `\" \".join(...)`."
+    - |
+      ```python
+      parts = []
+      for f in fields(theme):
+          value = str(getattr(theme, f.name))
+          if any(ch in value for ch in ";{}<>"):
+              raise ValueError(f"unsafe value for {f.name}: {value!r}")
+          parts.append(f"--fb-{f.name.replace('_', '-')}: {value};")
+      return " ".join(parts)
+      ```
+  solution: |
+    from dataclasses import dataclass, fields
+    from typing import Any
+
+
+    @dataclass(frozen=True)
+    class Theme:
+        mode: str = "light"
+        primary_color: str = "#2563eb"
+        radius_px: int = 8
+
+
+    def css_vars(theme: Any) -> str:
+        parts: list[str] = []
+        for f in fields(theme):
+            value = str(getattr(theme, f.name))
+            if any(ch in value for ch in ";{}<>"):
+                raise ValueError(f"unsafe value for {f.name}: {value!r}")
+            parts.append(f"--fb-{f.name.replace('_', '-')}: {value};")
+        return " ".join(parts)
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Нормалізація HTML для golden-тесту"
+  prompt: |
+    Golden-тест порівнює відрендерений HTML з еталоном після нормалізації пробілів. Напишіть `normalize_html(html)`:
+
+    1. Обрізати пробіли на початку й у кінці.
+    2. Будь-які пробільні символи між `>` і `<` (переноси, відступи) прибрати повністю.
+    3. Решту послідовностей пробільних символів замінити одним пробілом.
+
+    Текст усередині тегів і пробіл між словами мають лишитися: `<p>Terms  &amp;\n conditions</p>` стає
+    `<p>Terms &amp; conditions</p>`.
+  starter: |
+    import re
+
+
+    def normalize_html(html: str) -> str:
+        ...
+  harness: |
+    rendered = """
+    <form id="signup">
+        <label for="e1">Email</label>
+        <input id="e1"   name="email">
+    </form>
+    """
+    golden = '<form id="signup"><label for="e1">Email</label>\n<input id="e1" name="email"></form>\n'
+    print(normalize_html(rendered))
+    print(normalize_html(rendered) == normalize_html(golden))
+    print(normalize_html("<p>Terms  &amp;\n conditions</p>"))
+    print(normalize_html("<p>Email</p>") == normalize_html("<p>E-mail</p>"))
+    print(repr(normalize_html("  \n ")))
+  expected: |
+    <form id="signup"><label for="e1">Email</label><input id="e1" name="email"></form>
+    True
+    <p>Terms &amp; conditions</p>
+    False
+    ''
+  hints:
+    - "Порядок важливий: спершу `strip`, потім прибрати пробіли між тегами, і лише тоді схлопувати решту, інакше між тегами лишиться один пробіл."
+    - "`re.sub(r\">\\s+<\", \"><\", ...)` для кроку 2 і `re.sub(r\"\\s+\", \" \", ...)` для кроку 3."
+    - |
+      ```python
+      html = re.sub(r">\s+<", "><", html.strip())
+      return re.sub(r"\s+", " ", html)
+      ```
+  solution: |
+    import re
+
+
+    def normalize_html(html: str) -> str:
+        html = re.sub(r">\s+<", "><", html.strip())
+        return re.sub(r"\s+", " ", html)
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Міні-шаблонізатор: вставки, крапка, екранування, safe"
+  prompt: |
+    Щоб побачити механізм цілком, напишіть крихітний рендерер `render(template, context)`, який підтримує лише
+    вставки `{{ path }}` і `{{ path | safe }}`. Він повторює рішення Jinja2 з уроку:
+
+    - `path` це ім'я або шлях через крапку: `form.title`, `theme.mode`. Пробіли всередині `{{ }}` і навколо `|`
+      необов'язкові.
+    - Перший сегмент береться з `context`. Кожен наступний: якщо поточне значення `dict`, то за ключем, інакше
+      через `getattr` (так dataclass і dict однаково доступні через крапку).
+    - Відсутній ключ чи атрибут на будь-якому кроці це `LookupError` з повідомленням `'form.titel' is undefined`
+      (повний `path` через `repr`), як у `StrictUndefined`.
+    - Значення перетворюється на рядок через `str` і екранується `html.escape`, крім випадку `| safe`.
+    - Решта тексту шаблону лишається як є.
+  starter: |
+    import re
+    from html import escape
+    from typing import Any
+
+
+    def render(template: str, context: dict[str, Any]) -> str:
+        ...
+  harness: |
+    from dataclasses import dataclass
+
+
+    @dataclass(frozen=True)
+    class Theme:
+        mode: str
+
+
+    ctx = {
+        "form": {"title": "Sign up & go", "meta": {"version": 3}},
+        "theme": Theme("dark"),
+        "intro": "<b>Hi</b>",
+    }
+    print(render("<h1>{{ form.title }}</h1>", ctx))
+    print(render('<body class="{{theme.mode}}"> v{{ form.meta.version }}', ctx))
+    print(render("{{ intro }} vs {{ intro|safe }} vs {{ intro | safe }}", ctx))
+    print(render("no placeholders, {curly} stays", ctx))
+    for broken in ["{{ form.titel }}", "{{ theme.color }}", "{{ user }}"]:
+        try:
+            render(broken, ctx)
+        except LookupError as e:
+            print("LookupError:", e)
+  expected: |
+    <h1>Sign up &amp; go</h1>
+    <body class="dark"> v3
+    &lt;b&gt;Hi&lt;/b&gt; vs <b>Hi</b> vs <b>Hi</b>
+    no placeholders, {curly} stays
+    LookupError: 'form.titel' is undefined
+    LookupError: 'theme.color' is undefined
+    LookupError: 'user' is undefined
+  hints:
+    - "Один регулярний вираз з двома групами (шлях і необов'язковий `| safe`) і `re.sub` з функцією замість рядка заміни. Пошук значення винесіть в окрему функцію `lookup(path, context)`."
+    - "Шаблон `r\"\\{\\{\\s*([\\w.]+)\\s*(\\|\\s*safe\\s*)?\\}\\}\"`. У `lookup` пройдіть `path.split(\".\")`: для `dict` перевірка `key in value`, для решти `hasattr`; при невдачі `raise LookupError(f\"{path!r} is undefined\")`."
+    - |
+      ```python
+      def lookup(path, context):
+          value = context
+          for key in path.split("."):
+              if isinstance(value, dict) and key in value:
+                  value = value[key]
+              elif not isinstance(value, dict) and hasattr(value, key):
+                  value = getattr(value, key)
+              else:
+                  raise LookupError(f"{path!r} is undefined")
+          return value
+      ```
+  solution: |
+    import re
+    from html import escape
+    from typing import Any
+
+    PLACEHOLDER = re.compile(r"\{\{\s*([\w.]+)\s*(\|\s*safe\s*)?\}\}")
+
+
+    def lookup(path: str, context: dict[str, Any]) -> Any:
+        value: Any = context
+        for key in path.split("."):
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            elif not isinstance(value, dict) and hasattr(value, key):
+                value = getattr(value, key)
+            else:
+                raise LookupError(f"{path!r} is undefined")
+        return value
+
+
+    def render(template: str, context: dict[str, Any]) -> str:
+        def replace(match: re.Match[str]) -> str:
+            text = str(lookup(match[1], context))
+            return text if match[2] else escape(text)
+
+        return PLACEHOLDER.sub(replace, template)
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    У `templates/page.html` пакета лежить `<p>{{ label }}</p>`. Що надрукує код?
+    ```python
+    from jinja2 import Environment, PackageLoader
+
+    env = Environment(loader=PackageLoader("formbuilder", "templates"))
+    print(env.get_template("page.html").render(label="<b>x</b>"))
+    ```
+  options:
+    - "`<p>&lt;b&gt;x&lt;/b&gt;</p>`, бо шаблон має розширення `.html`"
+    - "`<p><b>x</b></p>`"
+    - "`<p>&lt;b&gt;x&lt;/b&gt;</p>`, бо Jinja2, як і Nunjucks 2+, екранує за замовчуванням"
+    - "`TemplateRuntimeError`: для `.html`-шаблону потрібно явно задати `autoescape`"
+  answer: 1
+  explain: |
+    Параметр `autoescape` у `Environment` за замовчуванням `False`, і розширення файлу саме по собі нічого не
+    вмикає: на імені шаблону екранування вирішує лише функція `select_autoescape()`, якщо її передали. Інтуїція
+    з Nunjucks тут підводить: там автоекранування за замовчуванням увімкнене з версії 2. Помилки теж немає,
+    Jinja2 мовчки вставляє рядок як є, і саме тому `autoescape=select_autoescape()` пишуть у кожному
+    `Environment` для HTML.
+
+- id: q2
+  type: quiz
+  question: |
+    `label` прийшов з конфігу форми, тобто від користувача. Який рядок дає XSS?
+    ```python
+    from markupsafe import Markup, escape
+
+    a = escape(label)
+    b = Markup("<b>{}</b>").format(label)
+    c = Markup("<b>") + label
+    d = Markup(f"<b>{label}</b>")
+    ```
+  options: ["a", "b", "c", "d"]
+  answer: 3
+  explain: |
+    У `d` f-рядок підставляє `label` без екранування ще до того, як `Markup` побачить результат, а потім `Markup`
+    оголошує весь рядок безпечним. `a` повертає екранований `Markup`. `b` і `c` виглядають схоже на `d`, але
+    працюють навпаки: `Markup.format` і `Markup + str` екранують аргументи, які не є `Markup`, а довіреною
+    вважається лише розмітка, написана в коді. Правило: у `Markup(...)` потрапляє тільки літерал або вже
+    безпечний `Markup`.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує код?
+    ```python
+    from dataclasses import dataclass
+    from jinja2 import Environment, StrictUndefined
+
+
+    @dataclass(frozen=True)
+    class Field:
+        label: str
+        hint: str | None = None
+
+
+    env = Environment(autoescape=True, undefined=StrictUndefined)
+    print(env.from_string("{{ f.label }}: {{ f.hint | default('-') }}").render(f=Field("Email")))
+    ```
+  options:
+    - "`Email: -`"
+    - "`Email: None`"
+    - "`Email: `"
+    - "`UndefinedError: 'hint' is undefined`"
+  answer: 1
+  explain: |
+    `hint` існує і дорівнює `None`, тобто це визначене значення, а не `Undefined`. `|default` реагує лише на
+    `Undefined`, тому пропускає `None`, і воно друкується як `str(None)`. JS-інтуїція "`null` і `undefined` обидва
+    дають fallback, як у `??`" тут не працює. `StrictUndefined` теж ні до чого: він стосується відсутніх імен і
+    атрибутів. `Email: -` дав би `|default('-', true)`: з другим аргументом `true` фільтр спрацьовує на будь-яке
+    хибне значення, включно з `None` і `""`.
+
+- id: p1
+  type: project
+  title: "JinjaRenderer у капстоуні"
+  prompt: |
+    Додайте в капстоун рендерер на Jinja2, що реалізує `Renderer` Protocol з m2-l07 без `BaseRenderer` з m4-l05:
+    дерево обходить шаблон, а не Python.
+
+    1. `uv add jinja2` у `capstone/`.
+    2. Шаблони в `src/formbuilder/templates/`: `base.html` (doctype, `<meta viewport>`, `<style>` з `:root`
+       і `{% include "critical.css" %}`, блоки `title` і `body`), `form.html` (`{% extends "base.html" %}`),
+       `elements.html` (macro на кожен тип елемента, словник `тип -> macro` і рекурсивний `render`),
+       `critical.css` (стилі форми, кнопка через `var(--fb-primary)`, щонайменше один `@media` breakpoint).
+    3. `src/formbuilder/renderers/jinja.py`: клас `JinjaRenderer` створює один `Environment` у `__init__`
+       (`PackageLoader("formbuilder", "templates")`, `select_autoescape()`, `StrictUndefined`, `trim_blocks`,
+       `lstrip_blocks`, `keep_trailing_newline`) і має метод `render(element, theme) -> str`. Корінь дерева
+       це `block`, його `label` стає `<title>`.
+    4. `tests/test_jinja_renderer.py`: тест екранування `label` і тест, що `JinjaRenderer` проходить там, де
+       очікується `Renderer` (функція з параметром типу `Renderer`).
+
+    Еталон усіх файлів у розділі уроку "Для капстоуну". Моделі `Element` і `Theme` беріть з `formbuilder.domain` (m2-l05);
+    якщо там поля називаються інакше, ніж в уроці, підлаштуйте шаблони, а не моделі. Наприкінці модуля
+    покладіть `renderer = JinjaRenderer()`, щоб `get_renderer("jinja")` з m3-l01 знайшов формат без правок у реєстрі.
+  checklist:
+    - "`jinja2` у `dependencies` у `pyproject.toml`, `uv.lock` оновлено"
+    - "Чотири файли шаблонів у `src/formbuilder/templates/`, завантаження лише через `PackageLoader`, без `Path(__file__)`"
+    - "`Environment` створюється один раз на екземпляр `JinjaRenderer`, а не в `render`"
+    - "`label` з `<script>` рендериться як `&lt;script&gt;`; жодного `|safe` і `Markup(...)` у шаблонах і рендерері"
+    - "Опечатка в імені змінної шаблону дає `UndefinedError` у тесті, а не порожнє місце в HTML"
+    - "Тема потрапляє в сторінку як CSS-змінна в `:root`; у `critical.css` є `@media`"
+    - "`uv run mypy --strict src/formbuilder/renderers/jinja.py` без помилок; `get_renderer(\"jinja\")` повертає `JinjaRenderer`"
+  verify: "cd capstone && uv run pytest tests/test_jinja_renderer.py -q"
+
+- id: p2
+  type: project
+  title: "Golden-тест і підключення до воркера"
+  prompt: |
+    1. Відрендеріть форму з трьома рівнями (сторінка, вкладений `block`, елементи всіх чотирьох типів, `label`
+       з `&` і `<`) з темною темою, перегляньте HTML очима й збережіть як `tests/fixtures/signup_dark.html`.
+    2. У `tests/test_jinja_renderer.py` додайте golden-тест: рендер тієї самої форми порівнюється з еталоном після
+       `normalize_html` (як у завданні t3). Окремо параметризований тест (`pytest.mark.parametrize`) на кожен тип
+       елемента: фрагмент HTML макроса через `env.get_template("elements.html").module`.
+    3. Підключіть рендерер до воркера з m7-l03: функція побудови сторінки приймає `Renderer`, викликає
+       `await asyncio.to_thread(renderer.render, form, theme)` і пише `index.html` у директорію публікації.
+       `JinjaRenderer` створюється один раз при старті застосунку, а не на кожну задачу.
+  checklist:
+    - "Еталон у `tests/fixtures/` згенеровано рендерером і перевірено вручну; порівняння після нормалізації пробілів"
+    - "Зміна відступів у шаблоні не валить golden-тест, зміна тегу чи атрибута валить (перевірте вручну один раз)"
+    - "Параметризований тест покриває `input`, `text`, `button`, `block`"
+    - "Воркер типізований через `Renderer` Protocol і викликає рендер через `asyncio.to_thread`"
+    - "Один `JinjaRenderer` на застосунок: створення в lifespan або при старті воркера"
+  verify: "cd capstone && uv run pytest tests/test_jinja_renderer.py -q"

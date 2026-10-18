@@ -1,0 +1,390 @@
+- id: t1
+  type: code
+  title: "filter().map() в одну comprehension"
+  prompt: |
+    Перекладіть на Python цей TypeScript:
+
+    ```ts
+    const specs = fields.filter((f) => !f.hidden).map((f) => `${f.name}:${f.type}`);
+    ```
+
+    Напишіть `visible_specs(fields)`, яка повертає список рядків `"<name>:<type>"` для всіх полів,
+    крім прихованих. Ключ `"hidden"` необов'язковий: якщо його немає, поле видиме.
+    Одна list comprehension, без `map`, `filter` і `lambda`.
+
+    ```python
+    visible_specs([{"name": "email", "type": "email"}, {"name": "token", "type": "text", "hidden": True}])
+    # ['email:email']
+    ```
+  starter: |
+    def visible_specs(fields: list[dict]) -> list[str]:
+        ...
+  harness: |
+    fields = [
+        {"name": "email", "type": "email"},
+        {"name": "token", "type": "text", "hidden": True},
+        {"name": "age", "type": "number", "hidden": False},
+    ]
+    print(visible_specs(fields))
+    print(visible_specs([]))
+    print(visible_specs([{"name": "x", "type": "text", "hidden": True}]))
+  expected: |
+    ['email:email', 'age:number']
+    []
+    []
+  hints:
+    - "Вираз-результат пишеться першим, фільтр останнім; відсутній ключ читається через get зі значенням за замовчуванням."
+    - "[f\"{f['name']}:{f['type']}\" for f in fields if not f.get(\"hidden\", False)]"
+  solution: |
+    def visible_specs(fields: list[dict]) -> list[str]:
+        return [f"{f['name']}:{f['type']}" for f in fields if not f.get("hidden", False)]
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Сітка без спільних рядків"
+  prompt: |
+    Напишіть `make_grid(rows, cols, fill)`, яка повертає список із `rows` рядків, кожен рядок це список
+    із `cols` значень `fill`. Рядки мають бути незалежними: зміна клітинки в одному рядку не змінює інші.
+
+    ```python
+    g = make_grid(2, 3, 0)
+    g[0][0] = 1
+    g   # [[1, 0, 0], [0, 0, 0]]
+    ```
+  starter: |
+    def make_grid(rows: int, cols: int, fill: object) -> list[list]:
+        ...
+  harness: |
+    g = make_grid(2, 3, 0)
+    g[0][0] = 1
+    print(g)
+    print(make_grid(1, 2, "-"))
+    print(make_grid(0, 3, 0))
+    g = make_grid(3, 1, None)
+    print(len({id(row) for row in g}))
+  expected: |
+    [[1, 0, 0], [0, 0, 0]]
+    [['-', '-']]
+    []
+    3
+  hints:
+    - "Множення зовнішнього списку повторює посилання на один рядок; кожен рядок треба створити заново на кожній ітерації."
+    - "[[fill] * cols for _ in range(rows)]: внутрішнє множення безпечне, зовнішнє замінене comprehension."
+  solution: |
+    def make_grid(rows: int, cols: int, fill: object) -> list[list]:
+        return [[fill] * cols for _ in range(rows)]
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Типи полів з усіх сторінок"
+  prompt: |
+    Конфіг форми це список сторінок, кожна сторінка має список `fields`. Поле це словник з `"id"` і `"type"`;
+    декоративні елементи (розділювачі, заголовки) мають `"type"`, але не мають `"id"`.
+
+    Напишіть `field_types(pages)`, яка повертає словник `{id: type}` для всіх полів з `id` по всіх сторінках,
+    у порядку появи. Одна dict comprehension з двома `for`, без `flatMap`-подібних допоміжних кроків.
+
+    ```python
+    pages = [
+        {"title": "Contact", "fields": [{"id": "email", "type": "email"}, {"type": "divider"}]},
+        {"title": "About", "fields": [{"id": "age", "type": "number"}]},
+    ]
+    field_types(pages)   # {'email': 'email', 'age': 'number'}
+    ```
+  starter: |
+    def field_types(pages: list[dict]) -> dict[str, str]:
+        ...
+  harness: |
+    pages = [
+        {"title": "Contact", "fields": [
+            {"id": "email", "type": "email"},
+            {"type": "divider"},
+            {"id": "phone", "type": "phone"},
+        ]},
+        {"title": "Empty", "fields": []},
+        {"title": "About", "fields": [{"type": "heading"}, {"id": "age", "type": "number"}]},
+    ]
+    print(field_types(pages))
+    print(field_types([]))
+    print(field_types([{"title": "Decor", "fields": [{"type": "divider"}]}]))
+  expected: |
+    {'email': 'email', 'phone': 'phone', 'age': 'number'}
+    {}
+    {}
+  hints:
+    - "Порядок for такий самий, як у вкладених циклах: спершу сторінки, потім поля сторінки; фільтр стоїть у кінці й бачить змінну поля."
+    - "{f[\"id\"]: f[\"type\"] for page in pages for f in page[\"fields\"] if \"id\" in f}"
+  solution: |
+    def field_types(pages: list[dict]) -> dict[str, str]:
+        return {f["id"]: f["type"] for page in pages for f in page["fields"] if "id" in f}
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Статистика форми через агрегатори"
+  prompt: |
+    Напишіть `form_stats(fields)`, яка повертає словник з п'ятьма ключами:
+
+    - `"total"`: кількість полів;
+    - `"required"`: кількість полів з `"required": True` (ключ необов'язковий, відсутній означає `False`);
+    - `"longest"`: довжина найдовшого `"name"`, або `0` для порожнього списку;
+    - `"all_labeled"`: `True`, якщо в кожного поля є непорожній `"label"`. Для порожнього списку `True`,
+      як `[].every(...)` у JS;
+    - `"required_names"`: імена обов'язкових полів через `", "`.
+
+    Жодного циклу з `append` чи `+= 1` і жодного проміжного списку: кожне значення це агрегатор
+    (`sum`, `max`, `all`, `join`) з generator expression. Функція не повинна падати на порожньому списку.
+
+    ```python
+    form_stats([{"name": "email", "label": "E-mail", "required": True}])
+    # {'total': 1, 'required': 1, 'longest': 5, 'all_labeled': True, 'required_names': 'email'}
+    ```
+  starter: |
+    def form_stats(fields: list[dict]) -> dict:
+        ...
+  harness: |
+    fields = [
+        {"name": "email", "label": "E-mail", "required": True},
+        {"name": "phone", "label": ""},
+        {"name": "company_name", "label": "Company", "required": False},
+        {"name": "age", "label": "Age", "required": True},
+    ]
+    print(form_stats(fields))
+    print(form_stats([]))
+    print(form_stats([{"name": "x", "label": "X"}]))
+  expected: |
+    {'total': 4, 'required': 2, 'longest': 12, 'all_labeled': False, 'required_names': 'email, age'}
+    {'total': 0, 'required': 0, 'longest': 0, 'all_labeled': True, 'required_names': ''}
+    {'total': 1, 'required': 0, 'longest': 1, 'all_labeled': True, 'required_names': ''}
+  hints:
+    - "Підрахунок з умовою це sum по одиницях з фільтром; max на порожньому джерелі падає, у нього є параметр на цей випадок."
+    - "sum(1 for f in fields if f.get(\"required\")), max((len(f[\"name\"]) for f in fields), default=0), all(f.get(\"label\") for f in fields), \", \".join(f[\"name\"] for f in fields if f.get(\"required\"))"
+  solution: |
+    def form_stats(fields: list[dict]) -> dict:
+        return {
+            "total": len(fields),
+            "required": sum(1 for f in fields if f.get("required")),
+            "longest": max((len(f["name"]) for f in fields), default=0),
+            "all_labeled": all(f.get("label") for f in fields),
+            "required_names": ", ".join(f["name"] for f in fields if f.get("required")),
+        }
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Парсинг віку з одним викликом на елемент"
+  prompt: |
+    У стартовому коді є `to_age(raw)`: вона повертає вік як `int` або `None`, якщо рядок не є віком.
+    Кожен її виклик записується в список `calls` (уявіть, що це дорогий виклик).
+
+    Напишіть `parse_ages(raw_values)`, яка повертає список валідних віків у порядку появи.
+    Умови: одна comprehension; `to_age` викликається рівно один раз на кожен елемент;
+    вік `0` валідний і має потрапити в результат.
+
+    ```python
+    parse_ages(["30", " 0 ", "abc"])   # [30, 0], а len(calls) зросте на 3
+    ```
+  starter: |
+    calls: list[str] = []
+
+    def to_age(raw: str) -> int | None:
+        calls.append(raw)
+        raw = raw.strip()
+        if raw.isdigit() and int(raw) <= 130:
+            return int(raw)
+        return None
+
+    def parse_ages(raw_values: list[str]) -> list[int]:
+        ...
+  harness: |
+    print(parse_ages(["30", " 0 ", "abc", "", "200", "41"]))
+    print(len(calls))
+    calls.clear()
+    print(parse_ages([]))
+    print(len(calls))
+  expected: |
+    [30, 0, 41]
+    6
+    []
+    0
+  hints:
+    - "Значення, обчислене у фільтрі, треба запам'ятати, щоб використати у виразі зліва; і порівнювати з None, а не покладатися на truthiness."
+    - "[age for raw in raw_values if (age := to_age(raw)) is not None]"
+  solution: |
+    calls: list[str] = []
+
+    def to_age(raw: str) -> int | None:
+        calls.append(raw)
+        raw = raw.strip()
+        if raw.isdigit() and int(raw) <= 130:
+            return int(raw)
+        return None
+
+    def parse_ages(raw_values: list[str]) -> list[int]:
+        return [age for raw in raw_values if (age := to_age(raw)) is not None]
+  requires: []
+  runtime: browser
+
+- id: t6
+  type: code
+  title: "Дерево FormBuilder: поля, індекс, умовна видимість"
+  prompt: |
+    Елемент форми це словник з `"type"` і `"name"`. Контейнер (форма, секція) має ключ `"children"` зі списком
+    елементів, можливо порожнім. Поле це елемент без ключа `"children"`. Будь-який елемент може мати
+    `"visible_if"` з умовою показу.
+
+    Напишіть три функції:
+
+    - `field_names(element)`: імена всіх полів дерева в порядку обходу в глибину (спершу елемент, потім його діти зліва направо);
+    - `build_index(element)`: словник `{name: element}` для всіх елементів дерева, включно з контейнерами й коренем,
+      у тому самому порядку обходу. Значення це самі елементи, а не копії;
+    - `conditional_fields(element)`: імена полів, які можуть бути приховані: поле має власний `visible_if`
+      або лежить усередині контейнера з `visible_if` на будь-якому рівні вище.
+
+    Рекурсія плюс comprehension; жодного циклу з `append`. Для `conditional_fields` стан "предок умовний"
+    передається в рекурсію параметром.
+
+    ```python
+    tree = {"type": "form", "name": "f", "children": [
+        {"type": "section", "name": "s", "visible_if": {"plan": "pro"}, "children": [{"type": "text", "name": "company"}]},
+        {"type": "email", "name": "email"},
+    ]}
+    field_names(tree)          # ['company', 'email']
+    list(build_index(tree))    # ['f', 's', 'company', 'email']
+    conditional_fields(tree)   # ['company']
+    ```
+  starter: |
+    def field_names(element: dict) -> list[str]:
+        ...
+
+    def build_index(element: dict) -> dict[str, dict]:
+        ...
+
+    def conditional_fields(element: dict, inherited: bool = False) -> list[str]:
+        ...
+  harness: |
+    form = {
+        "type": "form", "name": "signup", "children": [
+            {"type": "section", "name": "contact", "children": [
+                {"type": "email", "name": "email"},
+                {"type": "checkbox", "name": "wants_call"},
+                {"type": "phone", "name": "phone", "visible_if": {"wants_call": True}},
+            ]},
+            {"type": "select", "name": "plan"},
+            {"type": "section", "name": "company_info", "visible_if": {"plan": "pro"}, "children": [
+                {"type": "text", "name": "company"},
+                {"type": "section", "name": "billing", "children": [
+                    {"type": "text", "name": "vat_id"},
+                ]},
+            ]},
+            {"type": "section", "name": "empty", "children": []},
+        ],
+    }
+    print(field_names(form))
+    index = build_index(form)
+    print(list(index))
+    print(index["vat_id"]["type"], index["billing"]["type"])
+    print(index["vat_id"] is form["children"][2]["children"][1]["children"][0])
+    print(conditional_fields(form))
+    print(field_names({"type": "text", "name": "solo"}))
+    print(conditional_fields({"type": "text", "name": "solo", "visible_if": {"x": 1}}))
+    print(conditional_fields({"type": "form", "name": "f", "children": []}))
+  expected: |
+    ['email', 'wants_call', 'phone', 'plan', 'company', 'vat_id']
+    ['signup', 'contact', 'email', 'wants_call', 'phone', 'plan', 'company_info', 'company', 'billing', 'vat_id', 'empty']
+    text section
+    True
+    ['phone', 'company', 'vat_id']
+    ['solo']
+    ['solo']
+    []
+  hints:
+    - "Кожна функція має базовий випадок (поле без children) і рекурсивний: comprehension з двома for, де другий for іде по результату рекурсивного виклику для дитини."
+    - "Для індексу зручно спершу зібрати плаский список усіх елементів ([element] + [d for child in ... for d in all_elements(child)]), а потім одна dict comprehension. Для умовних полів обчисліть cond = inherited or \"visible_if\" in element і передайте cond у виклик для кожної дитини."
+    - "def conditional_fields(element, inherited=False): cond = inherited or \"visible_if\" in element; якщо \"children\" not in element: return [element[\"name\"]] if cond else []; інакше return [n for child in element[\"children\"] for n in conditional_fields(child, cond)]"
+  solution: |
+    def all_elements(element: dict) -> list[dict]:
+        return [element] + [
+            descendant
+            for child in element.get("children", [])
+            for descendant in all_elements(child)
+        ]
+
+    def field_names(element: dict) -> list[str]:
+        return [el["name"] for el in all_elements(element) if "children" not in el]
+
+    def build_index(element: dict) -> dict[str, dict]:
+        return {el["name"]: el for el in all_elements(element)}
+
+    def conditional_fields(element: dict, inherited: bool = False) -> list[str]:
+        cond = inherited or "visible_if" in element
+        if "children" not in element:
+            return [element["name"]] if cond else []
+        return [
+            name
+            for child in element["children"]
+            for name in conditional_fields(child, cond)
+        ]
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Який із рядків дає `SyntaxError`? `scores = [3, 0, 7]`.
+  options:
+    - "`[s for s in scores if s > 0 if s < 5]`"
+    - "`[s if s > 0 else None for s in scores]`"
+    - "`[s if s > 0 for s in scores]`"
+    - "`[(s, t) for s in scores for t in scores if s < t]`"
+  answer: 2
+  explain: |
+    `if` перед `for` це умовний вираз, частина виразу-результату, і він мусить мати `else`: для кожного елемента
+    треба щось покласти в список. Тому `[s if s > 0 for s in scores]` дає `SyntaxError: expected 'else' after 'if' expression`.
+    Перший варіант виглядає підозріло, але кілька фільтрів поспіль легальні й поєднуються як `and`, результат `[3]`.
+    Другий це правильний умовний вираз, `[3, None, 7]`. Четвертий: фільтр після другого `for` бачить обидві змінні,
+    результат `[(3, 7), (0, 3), (0, 7)]`: зовнішній цикл іде по `scores` у їхньому порядку.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    fields = [{"name": "email"}, {"name": "age"}]
+    names = (f["name"] for f in fields)
+    print(len(list(names)), "age" in names)
+    ```
+  options: ["2 True", "2 False", "TypeError", "('email', 'age')"]
+  answer: 1
+  explain: |
+    Круглі дужки дають generator expression, а не кортеж. `list(names)` вичерпує генератор, тому `len` дорівнює 2,
+    а наступна перевірка `in` перебирає вже порожній генератор і повертає `False`. `2 True` це інтуїція, що
+    `names` кортеж або масив, який можна обходити скільки завгодно. `TypeError` був би лише від `len(names)`
+    без `list`: у генератора немає довжини. Варіант з кортежем плутає вираз з tuple comprehension, якої в Python немає.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    x = "outer"
+    ys = [y for x in range(3) if (y := x * 10)]
+    print(x, y, ys)
+    ```
+  options:
+    - "`outer 20 [10, 20]`"
+    - "`2 20 [10, 20]`"
+    - "`outer 20 [0, 10, 20]`"
+    - "`NameError: name 'y' is not defined`"
+  answer: 0
+  explain: |
+    Змінна циклу comprehension живе у власному scope, тож зовнішня `x` лишилась `"outer"`; варіант з `2` це поведінка
+    звичайного `for`. Ім'я, присвоєне через `:=`, навпаки, прив'язується до охопного scope, тому `y` існує після
+    comprehension з останнім значенням `20`, і `NameError` не буде. Фільтр відкинув перший елемент, бо `0` хибне,
+    тому в `ys` лише `[10, 20]`, а не `[0, 10, 20]`.

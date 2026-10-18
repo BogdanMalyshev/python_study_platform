@@ -1,0 +1,582 @@
+- id: q1
+  type: quiz
+  question: |
+    Функція `score(config)` рахує метрики форми на чистому Python і на одному ядрі
+    виконується 1 секунду. На 4-ядерному Mac під CPython 3.12 її запускають так:
+    ```python
+    threads = [threading.Thread(target=score, args=(c,)) for c in configs[:4]]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    ```
+    Скільки приблизно займе цей блок?
+  options:
+    - "Близько 0.25 с: чотири потоки на чотирьох ядрах"
+    - "Близько 4 с, як послідовний запуск: потоки по черзі тримають GIL"
+    - "Близько 1 с: потоки ділять GIL, але перемикання кожні 5 мс розкладає роботу на ядра"
+    - "RuntimeError: Python однопотоковий, як Node, і потоки для байткоду не стартують"
+  answer: 1
+  explain: |
+    Байткод Python у будь-який момент виконує лише потік, що тримає GIL, тож чотири потоки
+    роблять ту саму сумарну роботу по черзі: близько 4 с, як без потоків (у замірі уроку
+    0.77 с проти 0.77 с). 0.25 с це інтуїція з Java чи Go, де потоки займають ядра; у Python так
+    поводяться процеси. 1 с плутає перемикання з паралелізмом: switch interval лише вирішує,
+    хто наступний тримає GIL, а не дозволяє виконувати байткод одночасно. Варіант 4 це міф
+    "Python як Node": потоки справжні, стартують і чудово прискорюють I/O.
+
+- id: t1
+  type: code
+  title: "Яка модель для навантаження"
+  prompt: |
+    Напишіть `choose_model(w)`, яка за описом навантаження повертає одну з чотирьох моделей:
+    `"sequential"`, `"asyncio"`, `"threading"`, `"multiprocessing"`. Правила з уроку:
+
+    - одна задача (`tasks <= 1`): паралелити нічого, `"sequential"`;
+    - CPU-робота (`kind == "cpu"`): якщо вона в C-коді, що відпускає GIL (`releases_gil`),
+      вистачить потоків, інакше потрібні процеси;
+    - I/O (`kind == "io"`): є асинхронний клієнт (`async_client`), значить asyncio, інакше потоки.
+
+    ```python
+    choose_model(Workload("io", tasks=200, async_client=True))   # 'asyncio'
+    choose_model(Workload("cpu", tasks=50))                      # 'multiprocessing'
+    ```
+  starter: |
+    from dataclasses import dataclass
+    from typing import Literal
+
+    Model = Literal["sequential", "asyncio", "threading", "multiprocessing"]
+
+    @dataclass(frozen=True)
+    class Workload:
+        kind: Literal["io", "cpu"]
+        tasks: int
+        async_client: bool = False     # для io: чи є async-бібліотека
+        releases_gil: bool = False     # для cpu: чи робота в C-коді, що відпускає GIL
+
+    def choose_model(w: Workload) -> Model:
+        ...
+  harness: |
+    cases = [
+        Workload("io", tasks=200, async_client=True),     # httpx до API
+        Workload("io", tasks=20),                         # синхронний SDK хмари
+        Workload("cpu", tasks=50),                        # рендер HTML на чистому Python
+        Workload("cpu", tasks=8, releases_gil=True),      # sha256 великих файлів
+        Workload("cpu", tasks=1),                         # один рендер
+        Workload("io", tasks=1, async_client=True),       # один запит
+    ]
+    for case in cases:
+        print(choose_model(case))
+  expected: |
+    asyncio
+    threading
+    multiprocessing
+    threading
+    sequential
+    sequential
+  hints:
+    - "Порядок перевірок важливий: кількість задач перевіряється раніше за тип роботи, бо одна задача ніде не паралелиться."
+    - "Зручно через match по w.kind з guard-ами або через два вкладені if. releases_gil має сенс лише для cpu, async_client лише для io."
+    - "if w.tasks <= 1: return 'sequential'; if w.kind == 'cpu': return 'threading' if w.releases_gil else 'multiprocessing'; return 'asyncio' if w.async_client else 'threading'"
+  solution: |
+    from dataclasses import dataclass
+    from typing import Literal
+
+    Model = Literal["sequential", "asyncio", "threading", "multiprocessing"]
+
+    @dataclass(frozen=True)
+    class Workload:
+        kind: Literal["io", "cpu"]
+        tasks: int
+        async_client: bool = False
+        releases_gil: bool = False
+
+    def choose_model(w: Workload) -> Model:
+        if w.tasks <= 1:
+            return "sequential"
+        match w.kind:
+            case "cpu":
+                return "threading" if w.releases_gil else "multiprocessing"
+            case "io":
+                return "asyncio" if w.async_client else "threading"
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Кожен з рядків виконують 4 потоки по 200 000 разів. Який з них не втратить жодного
+    оновлення гарантовано, у будь-якій версії й збірці CPython?
+  options:
+    - "`counter += 1` для глобального `int`: це один рядок, а в замірі уроку на 3.12 він дав рівно 800000"
+    - "`counts[k] = counts.get(k, 0) + 1`: оновлення словника атомарне під GIL"
+    - "`jobs.put(k)`, де `jobs` це `queue.Queue`"
+    - "`self.total = self.total + 1`: атрибут екземпляра в кожного потоку свій"
+  answer: 2
+  explain: |
+    `queue.Queue` потокобезпечна за контрактом: усередині `put` і `get` стоять власні lock-и.
+    `counter += 1` уцілів на 3.12 лише тому, що між читанням і записом немає точки перевірки
+    запиту на перемикання; це деталь реалізації, яка не тримається в інших версіях і в
+    free-threaded збірці. `counts.get(...)` з уроку якраз ламається: між читанням і записом
+    стоїть виклик, після якого потік може втратити GIL. Атрибут `self.total` один на об'єкт,
+    а об'єкт спільний для всіх потоків, тож це той самий read-modify-write, що й зі словником.
+
+- id: t2
+  type: code
+  title: "Лічильник без Lock: кожен рахує своє"
+  prompt: |
+    Найпростіший спосіб уникнути гонитви: не мати спільного стану. Кожен воркер рахує події
+    у своєму шматку даних і повертає власний `Counter`, а головний код зливає їх у кінці.
+    Ця схема однаково працює з потоками, процесами і навіть без них.
+
+    Напишіть три функції:
+
+    - `split(items, parts)` ділить список на не більше ніж `parts` суцільних шматків однакового
+      розміру `ceil(len / parts)` (останній може бути коротшим); порожній список дає `[]`;
+    - `count_chunk(events)` повертає `Counter` подій шматка, без жодних глобальних змінних;
+    - `count_parallel(events, parts, map_fn=map)` ділить, рахує кожен шматок через `map_fn` і
+      повертає злитий результат як звичайний `dict`.
+
+    `map_fn` за замовчуванням вбудований `map`; у справжньому коді туди передають `pool.map`
+    від `ThreadPoolExecutor` чи `ProcessPoolExecutor`, і функція не змінюється.
+
+    ```python
+    split([1, 2, 3, 4, 5, 6, 7], 3)                        # [[1, 2, 3], [4, 5, 6], [7]]
+    count_parallel(["view", "submit", "view"], parts=2)    # {'view': 2, 'submit': 1}
+    ```
+  starter: |
+    from collections import Counter
+    from collections.abc import Callable, Iterable, Iterator
+
+    def split(items: list[str], parts: int) -> list[list[str]]:
+        ...
+
+    def count_chunk(events: list[str]) -> Counter[str]:
+        ...
+
+    def count_parallel(
+        events: list[str],
+        parts: int,
+        map_fn: Callable[[Callable[[list[str]], Counter[str]], Iterable[list[str]]], Iterator[Counter[str]]] = map,
+    ) -> dict[str, int]:
+        ...
+  harness: |
+    print(split(list("abcdefg"), 3))
+    print(split(list("ab"), 5))
+    print(split([], 4))
+    events = ["view"] * 7 + ["submit"] * 3 + ["view", "error"]
+    print(sorted(count_parallel(events, parts=3).items()))
+    print(sorted(count_parallel(events, parts=3).items()))
+    print(type(count_parallel(events, parts=1)).__name__)
+    calls = []
+    def tracking_map(fn, chunks):
+        chunks = list(chunks)
+        calls.append(len(chunks))
+        return map(fn, chunks)
+    print(sorted(count_parallel(events, parts=4, map_fn=tracking_map).items()), calls)
+  expected: |
+    [['a', 'b', 'c'], ['d', 'e', 'f'], ['g']]
+    [['a'], ['b']]
+    []
+    [('error', 1), ('submit', 3), ('view', 8)]
+    [('error', 1), ('submit', 3), ('view', 8)]
+    dict
+    [('error', 1), ('submit', 3), ('view', 8)] [4]
+  hints:
+    - "Другий виклик з тими самими даними має дати той самий результат: якщо лічильник живе на рівні модуля, він накопичиться. Кожен count_chunk створює свій Counter."
+    - "Розмір шматка size = -(-len(items) // parts), далі зріз items[i:i + size] з кроком size. Порожній список перевірте окремо: range з кроком 0 кидає ValueError."
+    - "count_parallel: total = Counter(); for part in map_fn(count_chunk, split(events, parts)): total += part; return dict(total)"
+  solution: |
+    from collections import Counter
+    from collections.abc import Callable, Iterable, Iterator
+
+    def split(items: list[str], parts: int) -> list[list[str]]:
+        if not items:
+            return []
+        size = -(-len(items) // parts)
+        return [items[i:i + size] for i in range(0, len(items), size)]
+
+    def count_chunk(events: list[str]) -> Counter[str]:
+        return Counter(events)
+
+    def count_parallel(
+        events: list[str],
+        parts: int,
+        map_fn: Callable[[Callable[[list[str]], Counter[str]], Iterable[list[str]]], Iterator[Counter[str]]] = map,
+    ) -> dict[str, int]:
+        total: Counter[str] = Counter()
+        for part in map_fn(count_chunk, split(events, parts)):
+            total += part
+        return dict(total)
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Лічильник подій під Lock"
+  prompt: |
+    Завдання локальне: потоків у браузері немає. Створіть у корені курсу файл
+    `practice/m5-l08/event_counter.py` зі стартовим кодом нижче.
+
+    `EventCounter.record` зараз робить read-modify-write без захисту і під навантаженням
+    втрачає оновлення. Зробіть клас потокобезпечним через `threading.Lock` (один lock на
+    екземпляр, створений у `__init__`), а `snapshot` нехай повертає копію, зняту теж під lock-ом.
+    Допишіть `hammer(counter, events, threads, repeat)`: запускає `threads` потоків, кожен з яких
+    `repeat` разів записує всі `events` по черзі, і повертається лише тоді, коли всі потоки
+    завершились.
+
+    Перевірка зменшує switch interval до `1e-6`, щоб гонитва в незахищеній версії
+    відтворювалась у кожному запуску, і перевіряє, що після `hammer` не лишилось живих потоків.
+    Спершу запустіть харнес зі стартовим `record` і подивіться на неправильні числа, потім
+    виправляйте.
+  starter: |
+    import threading
+
+    class EventCounter:
+        def __init__(self) -> None:
+            self._counts: dict[str, int] = {}
+
+        def record(self, event: str) -> None:
+            self._counts[event] = self._counts.get(event, 0) + 1
+
+        def snapshot(self) -> dict[str, int]:
+            return dict(self._counts)
+
+    def hammer(counter: EventCounter, events: list[str], threads: int, repeat: int) -> None:
+        ...
+  harness: |
+    import sys
+    import threading
+
+    sys.setswitchinterval(1e-6)
+    c = EventCounter()
+    hammer(c, ["view", "submit"], threads=4, repeat=50_000)
+    print(sorted(c.snapshot().items()))
+    print(threading.active_count())
+  expected: |
+    [('submit', 200000), ('view', 200000)]
+    1
+  hints:
+    - "Lock потрібен один на екземпляр і спільний для всіх потоків: якщо створювати його всередині record, кожен виклик отримає власний lock і нічого не захистить."
+    - "with self._lock: навколо рядка з get і записом. hammer: список Thread(target=..., args=...), start усім, потім join усім."
+    - "def work(): for _ in range(repeat): for e in events: counter.record(e); ts = [threading.Thread(target=work) for _ in range(threads)]; for t in ts: t.start(); for t in ts: t.join()"
+  solution: |
+    import threading
+
+    class EventCounter:
+        def __init__(self) -> None:
+            self._counts: dict[str, int] = {}
+            self._lock = threading.Lock()
+
+        def record(self, event: str) -> None:
+            with self._lock:
+                self._counts[event] = self._counts.get(event, 0) + 1
+
+        def snapshot(self) -> dict[str, int]:
+            with self._lock:
+                return dict(self._counts)
+
+    def hammer(counter: EventCounter, events: list[str], threads: int, repeat: int) -> None:
+        def work() -> None:
+            for _ in range(repeat):
+                for event in events:
+                    counter.record(event)
+
+        workers = [threading.Thread(target=work) for _ in range(threads)]
+        for t in workers:
+            t.start()
+        for t in workers:
+            t.join()
+  requires: []
+  runtime: local
+  verify: |
+    PYTHONPATH=practice/m5-l08 .venv/bin/python -c "
+    import sys, threading
+    from event_counter import EventCounter, hammer
+    sys.setswitchinterval(1e-6)
+    for attempt in range(3):
+        c = EventCounter()
+        hammer(c, ['view', 'submit'], threads=4, repeat=50_000)
+        snap = c.snapshot()
+        assert snap == {'view': 200_000, 'submit': 200_000}, f'lost updates: {snap}'
+        assert threading.active_count() == 1, 'hammer must join all its threads'
+    print('OK')
+    "
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує скрипт і скільки житиме процес?
+    ```python
+    import threading
+    import time
+
+    def save_report() -> None:
+        try:
+            time.sleep(1)
+            print("saved")
+        finally:
+            print("cleanup")
+
+    threading.Thread(target=save_report, daemon=True).start()
+    print("main done")
+    ```
+  options:
+    - "main done, через секунду saved і cleanup: інтерпретатор чекає всі потоки"
+    - "Лише main done; процес завершиться одразу, finally не виконається"
+    - "main done і cleanup: daemon-потік зупиняють, але finally гарантовано відпрацьовує"
+    - "saved, cleanup, main done: потік стартує синхронно, як тіло async-функції в JS"
+  answer: 1
+  explain: |
+    Інтерпретатор на виході чекає лише не-daemon потоки. Daemon-потік вбивається разом із
+    процесом посеред `sleep`, без винятку всередині, тож `finally` не виконується. Варіант 1 це
+    поведінка для `daemon=False`, тобто за замовчуванням, і саме так виникають "потоки, що
+    пережили програму". Варіант 3 переносить гарантії `finally` з винятків на вбивство
+    процесу, а його `finally` не перехоплює. Варіант 4: `start()` лише запускає потік і
+    повертається, головний потік друкує одразу.
+
+- id: t4
+  type: code
+  title: "Пул потоків з частковими помилками"
+  prompt: |
+    Завдання локальне. Створіть `practice/m5-l08/fetch_pool.py`.
+
+    Напишіть `fetch_all(urls, fetch, max_workers)`: запускає `fetch(url)` для всіх адрес у
+    `ThreadPoolExecutor` і повертає список пар у порядку завершення. Для успішних пара
+    `(url, результат)`, для тих, що впали, `(url, "error: <ТипВинятку>: <повідомлення>")`.
+    Одна зламана адреса не повинна зупиняти решту, і жоден виняток не вилітає назовні.
+
+    `fake_fetch` у харнесі спить різний час для кожної адреси (100, 150, 200, 300 мс), тому
+    порядок завершення однозначний. Друга перевірка: усе разом має зайняти менше 0.45 с, хоча
+    сума затримок 0.75 с, тобто виклики справді йдуть паралельно.
+  starter: |
+    from collections.abc import Callable
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def fetch_all(
+        urls: list[str], fetch: Callable[[str], str], max_workers: int = 4
+    ) -> list[tuple[str, str]]:
+        ...
+  harness: |
+    import time
+
+    def fake_fetch(url: str) -> str:
+        time.sleep({"a": 0.3, "b": 0.1, "c": 0.2, "bad": 0.15}[url])
+        if url == "bad":
+            raise ConnectionError("refused")
+        return url.upper()
+
+    start = time.perf_counter()
+    print(fetch_all(["a", "b", "c", "bad"], fake_fetch, max_workers=4))
+    print(time.perf_counter() - start < 0.45)
+  expected: |
+    [('b', 'B'), ('bad', 'error: ConnectionError: refused'), ('c', 'C'), ('a', 'A')]
+    True
+  hints:
+    - "pool.map тут не підходить: він повертає результати в порядку аргументів і обривається на першому винятку. Потрібен submit для кожної адреси і обхід у порядку готовності."
+    - "Словник {pool.submit(fetch, url): url for url in urls} дозволяє дізнатися url за Future. as_completed(futures) віддає Future по мірі готовності, а future.result() піднімає виняток потоку."
+    - "for f in as_completed(futures): url = futures[f]; try: out.append((url, f.result())) except Exception as exc: out.append((url, f'error: {type(exc).__name__}: {exc}'))"
+  solution: |
+    from collections.abc import Callable
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def fetch_all(
+        urls: list[str], fetch: Callable[[str], str], max_workers: int = 4
+    ) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(fetch, url): url for url in urls}
+            for future in as_completed(futures):
+                url = futures[future]
+                try:
+                    out.append((url, future.result()))
+                except Exception as exc:
+                    out.append((url, f"error: {type(exc).__name__}: {exc}"))
+        return out
+  requires: []
+  runtime: local
+  verify: |
+    PYTHONPATH=practice/m5-l08 .venv/bin/python -c "
+    import time
+    from fetch_pool import fetch_all
+    def fake_fetch(url):
+        time.sleep({'a': 0.3, 'b': 0.1, 'c': 0.2, 'bad': 0.15}[url])
+        if url == 'bad':
+            raise ConnectionError('refused')
+        return url.upper()
+    start = time.perf_counter()
+    got = fetch_all(['a', 'b', 'c', 'bad'], fake_fetch, max_workers=4)
+    elapsed = time.perf_counter() - start
+    assert got == [('b', 'B'), ('bad', 'error: ConnectionError: refused'), ('c', 'C'), ('a', 'A')], got
+    assert elapsed < 0.45, f'not concurrent: {elapsed:.2f}s'
+    assert fetch_all([], fake_fetch) == [], 'empty input'
+    print('OK')
+    "
+
+- id: q4
+  type: quiz
+  question: |
+    Скрипт запускають на macOS як `python build.py`. Що станеться?
+    ```python
+    # build.py
+    from concurrent.futures import ProcessPoolExecutor
+
+    if __name__ == "__main__":
+        with ProcessPoolExecutor() as pool:
+            pages = list(pool.map(lambda c: f"<form id={c}>", ["signup", "survey"]))
+        print(pages)
+    ```
+  options:
+    - "Надрукує обидві сторінки: lambda виконається в пулі, як колбек у worker_threads"
+    - "RuntimeError про bootstrapping phase: на macOS процеси стартують через spawn"
+    - "PicklingError: lambda не можна передати в інший процес"
+    - "Надрукує сторінки, але повільно: lambda виконається в головному процесі"
+  answer: 2
+  explain: |
+    Усе, що йде в процес, серіалізується через pickle, а функцію pickle записує посиланням
+    "модуль плюс ім'я"; у lambda імені немає, і воркер не зміг би її знайти. Помилка
+    піднімається, коли `list(...)` доходить до результату. Варіант 1 переносить модель JS, де
+    функцію теж не можна передати через `postMessage`, але інтуїція "колбек просто викличеться"
+    звідти й береться. RuntimeError про bootstrapping з'являється без guard-а, а тут guard є.
+    Варіант 4: пул ніколи не виконує роботу в батьківському процесі мовчки.
+
+- id: t5
+  type: code
+  title: "Async-збірка: рендер у процесах, запис у потоках"
+  prompt: |
+    Завдання локальне, і воно поєднує все з уроку. Створіть `practice/m5-l08/build_pages.py`
+    зі стартовим кодом. `render` і `render_pid` уже написані й лежать на верхньому рівні модуля,
+    тож проходять через pickle.
+
+    Напишіть `async def build(configs, out_dir, render_fn, workers)`:
+
+    - рендерить кожен конфіг у `ProcessPoolExecutor(max_workers=workers)` через
+      `loop.run_in_executor`, усі одночасно, і пул закривається після збірки;
+    - пише кожну сторінку у файл `out_dir / f"{config['id']}.html"` через `asyncio.to_thread`,
+      щоб запис на диск не блокував цикл;
+    - повертає список шляхів у порядку `configs`.
+
+    Для задач використайте `asyncio.TaskGroup` або `gather`. Демо-запуск унизу файлу, якщо
+    додаєте, лише під `if __name__ == "__main__":`: без guard-а на macOS пул не стартує, а імпорт
+    модуля в перевірці почне створювати процеси. Харнес нижче зроблений саме так.
+
+    Перевірка викликає `build` з `render_pid`, який повертає pid процесу, де його виконали, і
+    вимагає, щоб жоден файл не містив pid батьківського процесу.
+  starter: |
+    import asyncio
+    import os
+    from collections.abc import Callable
+    from concurrent.futures import ProcessPoolExecutor
+    from html import escape
+    from pathlib import Path
+
+    def render(config: dict) -> str:
+        fields = "".join(
+            f'<input name="{escape(f["id"])}" type="{escape(f["type"])}">' for f in config["fields"]
+        )
+        return f'<form id="{escape(config["id"])}">{fields}</form>'
+
+    def render_pid(config: dict) -> str:          # для перевірки: де виконався рендер
+        return str(os.getpid())
+
+    async def build(
+        configs: list[dict], out_dir: Path, render_fn: Callable[[dict], str], workers: int = 4
+    ) -> list[Path]:
+        ...
+  harness: |
+    if __name__ == "__main__":
+        import tempfile
+
+        configs = [
+            {"id": f"form-{i}", "fields": [{"id": "email", "type": "email"}]} for i in range(6)
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = asyncio.run(build(configs, Path(tmp), render, workers=2))
+            print([p.name for p in paths])
+            print(paths[0].read_text())
+            pids = {p.read_text() for p in asyncio.run(build(configs, Path(tmp), render_pid, workers=2))}
+            print(str(os.getpid()) in pids, 1 <= len(pids) <= 2)
+  expected: |
+    ['form-0.html', 'form-1.html', 'form-2.html', 'form-3.html', 'form-4.html', 'form-5.html']
+    <form id="form-0"><input name="email" type="email"></form>
+    False True
+  hints:
+    - "loop = asyncio.get_running_loop(); пул відкривайте через with ProcessPoolExecutor(max_workers=workers) as pool усередині build, щоб він закрився після збірки."
+    - "Зручно мати внутрішню корутину one(config): html = await loop.run_in_executor(pool, render_fn, config); path = out_dir / f\"{config['id']}.html\"; await asyncio.to_thread(path.write_text, html); return path."
+    - "async with asyncio.TaskGroup() as tg: tasks = [tg.create_task(one(c)) for c in configs]; після блоку return [t.result() for t in tasks]. render_fn передається в пул як є: це функція верхнього рівня, pickle її пропустить."
+  solution: |
+    import asyncio
+    import os
+    from collections.abc import Callable
+    from concurrent.futures import ProcessPoolExecutor
+    from html import escape
+    from pathlib import Path
+
+    def render(config: dict) -> str:
+        fields = "".join(
+            f'<input name="{escape(f["id"])}" type="{escape(f["type"])}">' for f in config["fields"]
+        )
+        return f'<form id="{escape(config["id"])}">{fields}</form>'
+
+    def render_pid(config: dict) -> str:
+        return str(os.getpid())
+
+    async def build(
+        configs: list[dict], out_dir: Path, render_fn: Callable[[dict], str], workers: int = 4
+    ) -> list[Path]:
+        loop = asyncio.get_running_loop()
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+
+            async def one(config: dict) -> Path:
+                html = await loop.run_in_executor(pool, render_fn, config)
+                path = out_dir / f"{config['id']}.html"
+                await asyncio.to_thread(path.write_text, html)
+                return path
+
+            async with asyncio.TaskGroup() as tg:
+                tasks = [tg.create_task(one(c)) for c in configs]
+        return [t.result() for t in tasks]
+  requires: []
+  runtime: local
+  verify: |
+    PYTHONPATH=practice/m5-l08 .venv/bin/python -c "
+    import asyncio, os, tempfile
+    from pathlib import Path
+    from build_pages import build, render, render_pid
+    configs = [{'id': f'form-{i}', 'fields': [{'id': 'email', 'type': 'email'}]} for i in range(6)]
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = asyncio.run(build(configs, Path(tmp), render, workers=2))
+        assert [p.name for p in paths] == [f'form-{i}.html' for i in range(6)], paths
+        assert paths[3].read_text() == '<form id=\"form-3\"><input name=\"email\" type=\"email\"></form>', paths[3].read_text()
+        pids = {p.read_text() for p in asyncio.run(build(configs, Path(tmp), render_pid, workers=2))}
+        assert str(os.getpid()) not in pids, 'render ran in the parent process: use ProcessPoolExecutor'
+        assert 1 <= len(pids) <= 2, f'expected at most 2 worker processes, got {len(pids)}'
+    print('OK')
+    "
+
+- id: p1
+  type: project
+  title: "Пул процесів для рендеру в капстоуні"
+  prompt: |
+    У капстоуні рендер поки імітується `asyncio.sleep` у воркері з m5-l05. Додайте модуль
+    `src/formbuilder/render_pool.py`, який виносить справжню CPU-роботу в процеси:
+
+    - клас `RenderPool` з параметром `max_workers` створює один `ProcessPoolExecutor` на все
+      життя і є асинхронним контекстним менеджером (`async with RenderPool(4) as pool:`), який
+      на виході закриває пул;
+    - `async def render(self, config: dict) -> str` виконує функцію рендеру верхнього рівня
+      модуля через `loop.run_in_executor`; поки що рендер це проста збірка HTML з полів
+      конфігу, як у t5, Jinja2 з'явиться в m7-l06;
+    - `initializer` пулу один раз на процес готує те, що дороге в створенні (зараз досить
+      скомпільованого `re` чи словника шаблонів полів), і рендер це використовує;
+    - воркер капстоуну отримує `pool.render` як свій `render`.
+
+    Тести в `tests/test_render_pool.py`.
+  checklist:
+    - "`render` виконується не в батьківському процесі: тест порівнює `os.getpid()` з pid, який повертає допоміжна функція рендеру"
+    - "Десять конфігів через `asyncio.gather(pool.render(...))` повертають HTML у порядку конфігів"
+    - "Після виходу з `async with` пул закритий: нова задача дає `RuntimeError`"
+    - "У пул передається лише конфіг-словник, не об'єкти з відкритими файлами чи lock-ами; функції рендеру на верхньому рівні модуля"
+    - "Пул не створюється на кожен виклик: тест перевіряє, що два рендери йдуть через той самий executor"
+    - "`uv run mypy src` і `uv run ruff check` без помилок"
+  verify: "cd capstone && uv run pytest tests/test_render_pool.py -q"

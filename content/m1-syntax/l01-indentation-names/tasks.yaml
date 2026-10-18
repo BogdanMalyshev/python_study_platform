@@ -1,0 +1,346 @@
+- id: t1
+  type: code
+  title: "Рядок підсумку через sep і end"
+  prompt: |
+    Напишіть `print_summary(form_id, fields)`, яка друкує один рядок виду
+    `<form_id> -> <поле> | <поле> | <поле>`.
+
+    Рядок не склеювати вручну: без `+`, без `join` і без f-рядків. Достатньо двох викликів `print`
+    з параметрами `end` і `sep` та розпакування `*fields`. Функція нічого не повертає.
+
+    ```python
+    print_summary("signup", ["email", "phone", "age"])   # signup -> email | phone | age
+    print_summary("empty", [])                            # empty ->
+    ```
+  starter: |
+    def print_summary(form_id: str, fields: list[str]) -> None:
+        ...
+  harness: |
+    print_summary("signup", ["email", "phone", "age"])
+    print_summary("feedback", ["message"])
+    print_summary("empty", [])
+    print(print_summary("x", ["y"]))
+  expected: |
+    signup -> email | phone | age
+    feedback -> message
+    empty ->
+    x -> y
+    None
+  hints:
+    - "Перший print друкує id форми й стрілку, але не переводить рядок; другий друкує поля з потрібним роздільником."
+    - "print(form_id, end=\" -> \") і print(*fields, sep=\" | \")."
+  solution: |
+    def print_summary(form_id: str, fields: list[str]) -> None:
+        print(form_id, end=" -> ")
+        print(*fields, sep=" | ")
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Помилки окремо від попереджень"
+  prompt: |
+    Функція `split_messages(messages)` розкладає повідомлення валідатора на два списки: з префіксом `E:`
+    у помилки, решту в попередження, без префікса. Повертає кортеж `(errors, warnings)`.
+
+    У стартовому коді вже є реалізація, але вона повертає однакові списки. Знайдіть причину й виправте,
+    не міняючи логіку циклу.
+
+    ```python
+    split_messages(["E:email is required", "W:phone looks short"])
+    # (['email is required'], ['phone looks short'])
+    ```
+  starter: |
+    def split_messages(messages: list[str]) -> tuple[list[str], list[str]]:
+        errors = warnings = []
+        for message in messages:
+            if message.startswith("E:"):
+                errors.append(message[2:])
+            else:
+                warnings.append(message[2:])
+        return errors, warnings
+  harness: |
+    errors, warnings = split_messages(
+        ["E:email is required", "W:phone looks short", "E:age must be a number"]
+    )
+    print(errors)
+    print(warnings)
+    print(errors is warnings)
+    print(split_messages([]))
+  expected: |
+    ['email is required', 'age must be a number']
+    ['phone looks short']
+    False
+    ([], [])
+  hints:
+    - "Скільки списків створює перший рядок функції? Порахуйте не імена, а виклики []."
+    - "Ланцюжкове присвоєння прив'язує обидва імені до одного об'єкта. Потрібно два окремі: errors, warnings = [], []."
+  solution: |
+    def split_messages(messages: list[str]) -> tuple[list[str], list[str]]:
+        errors, warnings = [], []
+        for message in messages:
+            if message.startswith("E:"):
+                errors.append(message[2:])
+            else:
+                warnings.append(message[2:])
+        return errors, warnings
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Модуль рендерерів: імена й порядок"
+  prompt: |
+    Стартовий код це модуль, переписаний з JS: camelCase-імена й реєстр обробників угорі файлу,
+    як це працювало б завдяки hoisting. У Python він падає ще до перевірки.
+
+    Приведіть модуль до робочого стану:
+    - імена за PEP 8: `render_field`, `render_text`, `render_email`, параметр `field_type`, константа `DEFAULT_TYPE`;
+    - порядок визначень такий, щоб модуль виконувався зверху вниз без `NameError`;
+    - словник `RENDERERS` лишається словником на рівні модуля, не всередині функції.
+
+    Перевірка викликає функції за новими іменами:
+
+    ```python
+    render_field("email", "contact")   # '<input type="email" name="contact">'
+    render_field("phone", "mobile")    # невідомий тип -> рендерер за замовчуванням
+    ```
+  starter: |
+    defaultType = "text"
+
+    RENDERERS = {"text": renderText, "email": renderEmail}
+
+
+    def renderField(fieldType, name):
+        renderer = RENDERERS.get(fieldType, RENDERERS[defaultType])
+        return renderer(name)
+
+
+    def renderText(name):
+        return f'<input type="text" name="{name}">'
+
+
+    def renderEmail(name):
+        return f'<input type="email" name="{name}">'
+  harness: |
+    print(render_field("email", "contact"))
+    print(render_field("phone", "mobile"))
+    print(render_text("note"))
+    print(DEFAULT_TYPE, sorted(RENDERERS))
+  expected: |
+    <input type="email" name="contact">
+    <input type="text" name="mobile">
+    <input type="text" name="note">
+    text ['email', 'text']
+  hints:
+    - "Словник обчислюється в момент виконання свого рядка, тож усі функції, які він згадує, мусять бути визначені вище. Функція render_field може стояти будь-де: RENDERERS вона читає лише при виклику."
+    - "Порядок: DEFAULT_TYPE угорі, потім def render_text, def render_email, def render_field, і RENDERERS = {\"text\": render_text, \"email\": render_email} у самому низу."
+  solution: |
+    DEFAULT_TYPE = "text"
+
+
+    def render_text(name):
+        return f'<input type="text" name="{name}">'
+
+
+    def render_email(name):
+        return f'<input type="email" name="{name}">'
+
+
+    def render_field(field_type, name):
+        renderer = RENDERERS.get(field_type, RENDERERS[DEFAULT_TYPE])
+        return renderer(name)
+
+
+    RENDERERS = {"text": render_text, "email": render_email}
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Карусель і кількість сторінок без if"
+  prompt: |
+    Дві функції, кожна одним виразом у `return`, без `if`, без `math` і без `abs`.
+
+    `carousel_index(current, step, count)` повертає індекс слайда після зсуву на `step` (може бути від'ємним)
+    у каруселі з `count` слайдів, з переходом через край в обидва боки. У JS для від'ємного кроку
+    потрібна ідіома `((x % n) + n) % n`; у Python вистачає одного оператора.
+
+    `page_count(total, page_size)` повертає кількість сторінок для `total` елементів по `page_size`,
+    тобто ціле ділення з округленням угору.
+
+    ```python
+    carousel_index(0, -1, 5)   # 4
+    carousel_index(4, 1, 5)    # 0
+    page_count(7, 3)           # 3
+    page_count(0, 3)           # 0
+    ```
+  starter: |
+    def carousel_index(current: int, step: int, count: int) -> int:
+        ...
+
+
+    def page_count(total: int, page_size: int) -> int:
+        ...
+  harness: |
+    print(carousel_index(0, 1, 5), carousel_index(4, 1, 5), carousel_index(0, -1, 5))
+    print(carousel_index(2, -7, 5), carousel_index(1, 13, 5), carousel_index(3, 0, 5))
+    print(page_count(7, 3), page_count(6, 3), page_count(0, 3), page_count(1, 50))
+  expected: |
+    1 0 4
+    0 4 3
+    3 2 0 1
+  hints:
+    - "У Python % з додатним дільником завжди дає результат від 0 до дільник-1, навіть для від'ємного діленого. А // округлює вниз, тож округлення вгору можна отримати, двічі змінивши знак."
+    - "return (current + step) % count; return -(-total // page_size)."
+  solution: |
+    def carousel_index(current: int, step: int, count: int) -> int:
+        return (current + step) % count
+
+
+    def page_count(total: int, page_size: int) -> int:
+        return -(-total // page_size)
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "camelCase-ключі конфігу в snake_case"
+  prompt: |
+    Фронтенд надсилає конфіг поля з camelCase-ключами. Напишіть дві функції.
+
+    `camel_to_snake(name)` перетворює одне ім'я: кожна велика літера стає `_` плюс мала, але якщо велика
+    літера перша, підкреслення перед нею не ставиться. Абревіатур на кшталт `URL` у вхідних даних немає.
+
+    `to_snake_keys(payload)` повертає **новий** словник з перетвореними ключами й тими самими значеннями,
+    у тому самому порядку. Вхідний словник не змінюється. Ключі, що починаються з `_`, це службові поля
+    редактора (за тією самою конвенцією, що й `_name` у Python), у результат вони не потрапляють.
+
+    ```python
+    camel_to_snake("isRequired")   # 'is_required'
+    camel_to_snake("Label")        # 'label'
+    to_snake_keys({"fieldId": "email", "_editorState": {}})   # {'field_id': 'email'}
+    ```
+  starter: |
+    def camel_to_snake(name: str) -> str:
+        ...
+
+
+    def to_snake_keys(payload: dict) -> dict:
+        ...
+  harness: |
+    print(camel_to_snake("fieldId"), camel_to_snake("isRequired"), camel_to_snake("id"), camel_to_snake("Label"))
+    print(camel_to_snake("maxLengthInChars"))
+    payload = {"fieldId": "email", "isRequired": True, "_editorState": {"x": 1}, "maxLength": None}
+    converted = to_snake_keys(payload)
+    print(converted)
+    print(payload)
+    print(converted is payload, to_snake_keys({}))
+  expected: |
+    field_id is_required id label
+    max_length_in_chars
+    {'field_id': 'email', 'is_required': True, 'max_length': None}
+    {'fieldId': 'email', 'isRequired': True, '_editorState': {'x': 1}, 'maxLength': None}
+    False {}
+  hints:
+    - "Ім'я обходиться посимвольно циклом for; індекс символу дає enumerate, а перевірку регістру методи рядка isupper і lower. Для словника: новий порожній dict і цикл по payload.items()."
+    - "У camel_to_snake: if ch.isupper() and i > 0: result += \"_\" + ch.lower(), інакше result += ch.lower(). У to_snake_keys: if key.startswith(\"_\"): continue, інакше result[camel_to_snake(key)] = value."
+  solution: |
+    def camel_to_snake(name: str) -> str:
+        result = ""
+        for i, ch in enumerate(name):
+            if ch.isupper() and i > 0:
+                result += "_" + ch.lower()
+            else:
+                result += ch.lower()
+        return result
+
+
+    def to_snake_keys(payload: dict) -> dict:
+        result = {}
+        for key, value in payload.items():
+            if key.startswith("_"):
+                continue
+            result[camel_to_snake(key)] = value
+        return result
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    def total(price, tax):
+        return
+        price + tax
+
+    print(total(100, 20))
+    ```
+  options: ["120", "None", "SyntaxError", "IndentationError"]
+  answer: 1
+  explain: |
+    `return` без виразу це повна інструкція: інструкція закінчується разом з рядком, і функція повертає `None`.
+    Рядок `price + tax` стоїть з тим самим відступом у тому самому блоці, тож він легальний, просто недосяжний.
+    `120` це очікування, що вираз продовжиться на наступний рядок, як усередині дужок; поза дужками перенос
+    закінчує інструкцію. `SyntaxError` ні: мертвий код синтаксично допустимий. `IndentationError` ні: відступ
+    збігається з рівнем блоку. У JS результат той самий (`undefined` через ASI), але механізм інший.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class Field:
+        def __init__(self):
+            self._a = 1
+            self.__b = 2
+
+    f = Field()
+    print(hasattr(f, "_a"), hasattr(f, "__b"), hasattr(f, "_Field__b"))
+    ```
+  options: ["True False True", "True True False", "False False True", "AttributeError"]
+  answer: 0
+  explain: |
+    Одне підкреслення це лише конвенція: атрибут `_a` існує під своїм іменем, `True`. Два підкреслення в тілі класу
+    вмикають name mangling: компілятор записує атрибут як `_Field__b`, тому `__b` не знайдено, а `_Field__b` знайдено.
+    `True True False` це інтуїція "підкреслення ніщо не змінюють". `False False True` переносить на `_a` ідею
+    приватності, якої в Python немає. `AttributeError` ні: `hasattr` не кидає, а повертає `False`.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    x = 5
+    y = ++x
+    print(x, y)
+    ```
+  options: ["6 6", "5 6", "5 5", "SyntaxError"]
+  answer: 2
+  explain: |
+    Оператора інкременту в Python немає. `++x` це два унарні плюси, `+(+x)`, що дає `5` і нічого не присвоює,
+    тож `x` лишається `5`, `y` теж `5`. `6 6` це поведінка префіксного `++x` у JS. `5 6` плутає з тим, що
+    інкремент нібито стався лише для `y`. `SyntaxError` дав би постфіксний `x++`, а префіксна форма валідна,
+    і саме тому вона небезпечніша.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей модуль?
+    ```python
+    def main():
+        return helper()
+
+    def helper():
+        return "ok"
+
+    print(main())
+    ```
+  options: ["ok", "NameError: name 'helper' is not defined", "None", "SyntaxError"]
+  answer: 0
+  explain: |
+    `def main` лише створює функцію; ім'я `helper` у її тілі шукається в момент виклику. До рядка
+    `print(main())` обидва `def` уже виконались, тож `helper` існує, і результат `ok`. `NameError` з'явився б,
+    якби `print(main())` стояв між двома `def`: "немає hoisting" стосується моменту виклику, а не порядку
+    функцій у файлі. `None` і `SyntaxError` не мають підстав: обидві функції повертають значення, синтаксис коректний.

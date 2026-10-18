@@ -1,0 +1,376 @@
+- id: t1
+  type: code
+  title: "Перший аргумент без process.argv[2]"
+  prompt: |
+    Скрипт `check.py` приймає шлях до конфігу першим аргументом. Напишіть `target_from_argv(argv, default)`,
+    яка отримує список у форматі `sys.argv` і повертає перший аргумент після імені скрипта,
+    а якщо аргументів немає, повертає `default`. Решту аргументів ігнорувати.
+
+    Нагадування: у Python `argv[0]` це ім'я скрипта (або `-c`, або повний шлях при `-m`),
+    шляху до інтерпретатора в списку немає.
+
+    ```python
+    target_from_argv(["check.py", "contact.json"])   # 'contact.json'
+    target_from_argv(["check.py"])                   # 'form.json'
+    ```
+  starter: |
+    def target_from_argv(argv: list[str], default: str = "form.json") -> str:
+        ...
+  harness: |
+    print(target_from_argv(["check.py", "contact.json"]))
+    print(target_from_argv(["check.py"]))
+    print(target_from_argv(["/home/dev/tools/check.py", "a.json", "b.json"]))
+    print(target_from_argv(["-c", "x.json"], default="none"))
+    print(target_from_argv(["-c"], default="none"))
+  expected: |
+    contact.json
+    form.json
+    a.json
+    x.json
+    none
+  hints:
+    - "Аргументи користувача починаються з індексу 1, а не 2: інтерпретатора в sys.argv немає."
+    - "if len(argv) > 1: return argv[1], інакше default. Або через зріз: (argv[1:] or [default])[0]."
+  solution: |
+    def target_from_argv(argv: list[str], default: str = "form.json") -> str:
+        if len(argv) > 1:
+            return argv[1]
+        return default
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Розбір прапорців без argparse"
+  prompt: |
+    Напишіть `parse_argv(argv)`, яка розбирає список у форматі `sys.argv` на позиційні аргументи й опції
+    і повертає словник `{"args": [...], "options": {...}}`. Правила:
+
+    - `argv[0]` це ім'я скрипта, у результат не потрапляє;
+    - `--name=value` дає `options["name"] = "value"` (значення завжди рядок, навіть порожній);
+    - `--name` без `=` дає `options["name"] = True`;
+    - дефіси в імені опції замінюються на підкреслення: `--dry-run` стає `dry_run`, як це робить argparse;
+    - `--` окремим аргументом означає "далі лише позиційні", навіть якщо вони починаються з `--`;
+    - усе інше це позиційні аргументи в тому порядку, в якому прийшли.
+
+    ```python
+    parse_argv(["build.py", "form.json", "--out=dist", "--dry-run"])
+    # {'args': ['form.json'], 'options': {'out': 'dist', 'dry_run': True}}
+    ```
+
+    У реальному CLI це робить argparse (m6-l06); тут вправа на те, що саме лежить у `sys.argv`.
+  starter: |
+    def parse_argv(argv: list[str]) -> dict:
+        ...
+  harness: |
+    print(parse_argv(["build.py", "form.json", "--out=dist", "--dry-run"]))
+    print(parse_argv(["build.py"]))
+    print(parse_argv(["build.py", "--title=", "a.json", "b.json"]))
+    print(parse_argv(["build.py", "--level=a=b", "--", "--not-an-option", "c.json"]))
+    print(parse_argv(["-c", "--verbose", "x"]))
+  expected: |
+    {'args': ['form.json'], 'options': {'out': 'dist', 'dry_run': True}}
+    {'args': [], 'options': {}}
+    {'args': ['a.json', 'b.json'], 'options': {'title': ''}}
+    {'args': ['--not-an-option', 'c.json'], 'options': {'level': 'a=b'}}
+    {'args': ['x'], 'options': {'verbose': True}}
+  hints:
+    - "Ідіть по argv[1:] одним for і тримайте прапорець 'після --'. Опція це рядок, що починається з '--' і довший за два символи."
+    - "str.partition('=') розбиває лише по першому '=' і каже, чи він був: name, sep, value = arg[2:].partition('='). Якщо sep порожній, значення True."
+  solution: |
+    def parse_argv(argv: list[str]) -> dict:
+        args: list[str] = []
+        options: dict[str, str | bool] = {}
+        only_positional = False
+        for arg in argv[1:]:
+            if only_positional:
+                args.append(arg)
+            elif arg == "--":
+                only_positional = True
+            elif arg.startswith("--"):
+                name, sep, value = arg[2:].partition("=")
+                options[name.replace("-", "_")] = value if sep else True
+            else:
+                args.append(arg)
+        return {"args": args, "options": options}
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "main(argv) і коди завершення"
+  prompt: |
+    Напишіть `main(argv)` для скрипта `checkids.py FIELD_ID...`, який перевіряє ідентифікатори полів FormBuilder.
+    Функція нічого не викликає сама і не робить `sys.exit`: вона повертає код завершення, а `sys.exit(main(sys.argv))`
+    стоїть під `if __name__ == "__main__"` (у харнесі його імітує цикл з `except SystemExit`).
+
+    - Немає жодного id після імені скрипта: надрукувати в `sys.stderr` рядок `usage: <argv[0]> FIELD_ID...` і повернути `2`.
+    - Id валідний, якщо це ідентифікатор Python у нижньому регістрі: `"email"`, `"phone_2"`. Невалідні: `"Email"`, `"2phone"`, `"first-name"`.
+    - Для кожного невалідного id надрукувати в `sys.stderr` рядок `invalid: <id>`; перевірити всі, а не зупинитися на першому.
+    - Повернути `1`, якщо був хоч один невалідний, інакше `0`.
+
+    Харнес порівнює лише stdout, тобто коди завершення; що саме ви пишете в stderr, видно в консолі, але не перевіряється.
+  starter: |
+    import sys
+
+
+    def main(argv: list[str]) -> int:
+        ...
+  harness: |
+    import sys
+
+    for argv in [
+        ["checkids.py", "email", "phone_2"],
+        ["checkids.py"],
+        ["checkids.py", "email", "Email", "first-name"],
+        ["checkids.py", "2phone"],
+    ]:
+        try:
+            sys.exit(main(argv))
+        except SystemExit as e:
+            print(argv[1:], "->", e.code)
+  expected: |
+    ['email', 'phone_2'] -> 0
+    [] -> 2
+    ['email', 'Email', 'first-name'] -> 1
+    ['2phone'] -> 1
+  hints:
+    - "Спершу перевірка кількості аргументів з раннім return 2, потім цикл по argv[1:] з лічильником або списком помилок."
+    - "Валідність: field_id.isidentifier() and field_id == field_id.lower(). Друк у stderr: print(..., file=sys.stderr)."
+  solution: |
+    import sys
+
+
+    def main(argv: list[str]) -> int:
+        if len(argv) < 2:
+            print(f"usage: {argv[0]} FIELD_ID...", file=sys.stderr)
+            return 2
+        invalid = [fid for fid in argv[1:] if not (fid.isidentifier() and fid == fid.lower())]
+        for fid in invalid:
+            print(f"invalid: {fid}", file=sys.stderr)
+        return 1 if invalid else 0
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Що потрапить у sys.path[0]"
+  prompt: |
+    Напишіть `first_path_entry(command, cwd)`, яка за командою запуску інтерпретатора і поточною директорією
+    повертає, яким буде `sys.path[0]` у CPython 3.12. Команда приходить як список, `command[0]` це `"python"`.
+    Правила з уроку:
+
+    - `python path/to/script.py ...`: абсолютний шлях до директорії скрипта. Відносний шлях скрипта
+      відраховується від `cwd`; результат нормалізований (без `..`, `.` і кінцевого `/`).
+    - `python -m pkg.module ...`: `cwd`.
+    - `python -c "code" ...` і просто `python` (REPL): порожній рядок `""`.
+    - Перед режимом можуть стояти прапорці без значень: `-u`, `-O`, `-B`, `-i`. Їх пропустити.
+      `python -i script.py` поводиться як запуск скрипта.
+
+    Використовуйте `posixpath` (це `os.path` для POSIX-шляхів), щоб результат не залежав від ОС.
+
+    ```python
+    first_path_entry(["python", "src/app/main.py"], "/proj")   # '/proj/src/app'
+    first_path_entry(["python", "-m", "app.main"], "/proj/src")  # '/proj/src'
+    ```
+  starter: |
+    import posixpath
+
+
+    def first_path_entry(command: list[str], cwd: str) -> str:
+        ...
+  harness: |
+    print(repr(first_path_entry(["python", "src/app/main.py"], "/proj")))
+    print(repr(first_path_entry(["python", "-m", "app.main"], "/proj/src")))
+    print(repr(first_path_entry(["python", "-c", "print(1)"], "/proj")))
+    print(repr(first_path_entry(["python"], "/proj")))
+    print(repr(first_path_entry(["python", "-u", "-O", "tools/../check.py", "form.json"], "/proj")))
+    print(repr(first_path_entry(["python", "-i", "/opt/tools/build.py"], "/proj")))
+    print(repr(first_path_entry(["python", "-B", "-m", "pytest", "-q"], "/proj")))
+    print(repr(first_path_entry(["python", "main.py"], "/proj/src/app/")))
+  expected: |
+    '/proj/src/app'
+    '/proj/src'
+    ''
+    ''
+    '/proj'
+    '/opt/tools'
+    '/proj'
+    '/proj/src/app'
+  hints:
+    - "Пропустіть command[0], потім ідіть по аргументах: прапорці з множини {'-u', '-O', '-B', '-i'} пропускаєте, перший інший аргумент визначає режим."
+    - "Для скрипта: posixpath.normpath(posixpath.join(cwd, posixpath.dirname(script))). join з абсолютним другим аргументом сам відкидає cwd."
+  solution: |
+    import posixpath
+
+
+    def first_path_entry(command: list[str], cwd: str) -> str:
+        for arg in command[1:]:
+            if arg in {"-u", "-O", "-B", "-i"}:
+                continue
+            if arg == "-m":
+                return posixpath.normpath(cwd)
+            if arg == "-c":
+                return ""
+            return posixpath.normpath(posixpath.join(cwd, posixpath.dirname(arg)))
+        return ""
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    У директорії два файли. Що надрукує `python report.py`?
+    ```python
+    # labels.py
+    print("labels:", __name__)
+    ```
+    ```python
+    # report.py
+    import labels
+    print("report:", __name__)
+    ```
+  options:
+    - "`labels: labels` і `report: __main__`"
+    - "`labels: __main__` і `report: __main__`"
+    - "`labels: labels.py` і `report: report.py`"
+    - "лише `report: __main__`, бо `labels.py` не має guard"
+  answer: 0
+  explain: |
+    `__name__` модуля дорівнює імені, під яким його імпортували, тобто `"labels"` без `.py`. `"__main__"` отримує
+    лише той модуль, з якого почався запуск. Варіант з двома `__main__` це інтуїція "скрипт один, тож і ім'я одне",
+    але кожен модуль має своє. `.py` в імені з'являється лише в шляху `__file__`. Останній варіант плутає причину й наслідок:
+    guard не забороняє виконання модуля при імпорті, навпаки, без guard увесь верхній рівень виконується, і `print` спрацює.
+
+- id: q2
+  type: quiz
+  question: |
+    Що станеться при `python app.py`?
+    ```python
+    # app.py
+    def main() -> None:
+        print("building form")
+
+    if __name__ == "main":
+        main()
+    ```
+  options:
+    - "Нічого не надрукується, код завершення 0"
+    - "Надрукується `building form`"
+    - "`NameError: name 'main' is not defined`"
+    - "`SyntaxError` у рядку з `if`"
+  answer: 0
+  explain: |
+    При прямому запуску `__name__` дорівнює `"__main__"` з двома підкресленнями з кожного боку. Порівняння з `"main"`
+    просто дає `False`: це звичайне порівняння рядків, мова не знає, що ви мали на увазі. Тому `main()` не викликається,
+    скрипт мовчки завершується з кодом 0. `NameError` неможливий: `__name__` існує завжди, а функція `main` визначена.
+    `SyntaxError` теж ні, синтаксис коректний. Саме тому помилка підступна: ні traceback, ні ненульового коду.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує `python -O limits.py`?
+    ```python
+    # limits.py
+    def set_limit(n: int) -> int:
+        assert n > 0, "limit must be positive"
+        return n
+
+    print(set_limit(-5))
+    ```
+  options:
+    - "`-5`"
+    - "`AssertionError: limit must be positive`"
+    - "`0`"
+    - "`None`"
+  answer: 0
+  explain: |
+    `-O` вмикає оптимізований режим: `__debug__` стає `False`, і компілятор у байткод узагалі не вставляє інструкції для `assert`.
+    Перевірки немає, функція повертає `-5`. `AssertionError` це поведінка без `-O`, і саме вона змушує думати, що `assert`
+    придатний для валідації вхідних даних. `0` і `None` вигадують якусь "безпечну заміну", якої немає: `assert` просто зникає.
+    Для валідації пишуть `if ...: raise ValueError(...)`.
+
+- id: q4
+  type: quiz
+  question: |
+    Який код завершення покаже `echo $?` після цього скрипта?
+    ```python
+    # load.py
+    import sys
+
+    sys.exit("error: config not found")
+    ```
+  options: ["1", "0", "255", "Помилка: sys.exit приймає лише int"]
+  answer: 0
+  explain: |
+    `sys.exit` з рядком друкує цей рядок у stderr і завершує процес з кодом 1. `0` спокусливий, бо немає traceback
+    і виглядає як штатне завершення, але будь-який аргумент, крім `None` і цілого числа, означає помилку з кодом 1.
+    `255` це плутанина з `exit(-1)` у C і shell. Рядок як аргумент документований: `SystemExit` приймає будь-який об'єкт,
+    і саме так зручно завершувати CLI з повідомленням.
+
+- id: p1
+  type: project
+  title: "CLI-модуль fieldid з кодами завершення"
+  prompt: |
+    У корені курсу створіть `practice/m0-l03/fieldid.py`: модуль, який одночасно бібліотека й CLI.
+
+    - Функція `slugify(label: str) -> str` перетворює підпис поля на id: нижній регістр, слова через `_`
+      (`"Email Address"` дає `"email_address"`).
+    - Функція `main(argv: list[str] | None = None) -> int`: якщо `argv` не передали, бере `sys.argv`.
+      Для кожного аргументу друкує його id окремим рядком у stdout.
+    - Без аргументів: `usage: fieldid LABEL...` у stderr, код `2`.
+    - Якщо id якогось підпису не є валідним ідентифікатором Python (`"9 lives"` дає `"9_lives"`), повідомлення в stderr
+      і код `1`; валідні id при цьому все одно друкуються.
+    - Внизу ідіома `if __name__ == "__main__": sys.exit(main())`. Імпорт модуля нічого не друкує.
+
+    Запускається з директорії `practice/m0-l03` як `python -m fieldid "Email Address" Phone`.
+    Перевірте коди через `echo $?` вручну, перш ніж запускати `verify`. `verify` запускається з кореня
+    курсу: у підоболонці він додає `practice/m0-l03` у `PYTHONPATH`, і `-m fieldid` знаходить модуль так само,
+    як при запуску з його папки.
+  checklist:
+    - "`python -m fieldid \"Email Address\" Phone` друкує `email_address` і `phone`, код 0"
+    - "Без аргументів: usage у stderr, stdout порожній, код 2"
+    - "`python -m fieldid \"9 lives\"`: повідомлення в stderr, код 1"
+    - "`python -c \"import fieldid\"` нічого не друкує"
+    - "`python -c \"import fieldid; print(fieldid.main(['fieldid', 'Age']))\"` друкує `age` і `0`: main можна викликати з коду, не лише з терміналу"
+  verify: |
+    (export PYTHONPATH=practice/m0-l03; P=.venv/bin/python \
+      && test "$($P -m fieldid 'Email Address' Phone)" = "$(printf 'email_address\nphone')" \
+      && { $P -m fieldid 2>/dev/null; test $? -eq 2; } \
+      && test -z "$($P -m fieldid 2>/dev/null)" \
+      && { $P -m fieldid '9 lives' 2>/dev/null; test $? -eq 1; } \
+      && test -z "$($P -c 'import fieldid')" \
+      && test "$($P -c "import fieldid; print(fieldid.main(['fieldid', 'Age']))")" = "$(printf 'age\n0')" \
+      && echo OK)
+
+- id: p2
+  type: project
+  title: "Пакет у src, який імпортується без хаків"
+  prompt: |
+    У `practice/m0-l03/src/formtools/` створіть пакет із трьох файлів:
+
+    - `__init__.py` порожній;
+    - `slug.py` з функцією `slugify` (можна перенести з p1);
+    - `main.py`, який імпортує `slugify` абсолютним імпортом `from formtools.slug import slugify`,
+      друкує id для кожного аргументу командного рядка і має guard з `main()`.
+
+    Модуль має працювати двома способами: з директорії `src` як `python -m formtools.main "Email Address"`
+    і з кореня курсу як `PYTHONPATH=practice/m0-l03/src python -m formtools.main "Email Address"`.
+    Жодних `sys.path.insert` і `sys.path.append` у коді.
+
+    Потім запустіть `python practice/m0-l03/src/formtools/main.py "Email Address"` з кореня курсу, отримайте
+    `ModuleNotFoundError` і поясніть собі, яким був `sys.path[0]` у цьому запуску і чому там немає `formtools`.
+    Правильне вирішення через встановлення пакета буде в m0-l06.
+
+    `verify` запускається з кореня курсу: перевіряє запуск через `PYTHONPATH` і те, що запуск `main.py`
+    шляхом справді падає (так буває лише з абсолютним імпортом `formtools.slug`).
+  checklist:
+    - "`cd practice/m0-l03/src && python -m formtools.main \"Email Address\"` друкує `email_address`"
+    - "З кореня курсу `PYTHONPATH=practice/m0-l03/src python -m formtools.main \"Email Address\"` друкує те саме"
+    - "У коді пакета немає маніпуляцій `sys.path`"
+    - "Ви можете сказати, чому запуск `main.py` шляхом падає, а через `-m` працює"
+  verify: |
+    test "$(PYTHONPATH=practice/m0-l03/src .venv/bin/python -m formtools.main 'Email Address')" = email_address \
+      && ! .venv/bin/python practice/m0-l03/src/formtools/main.py 'Email Address' >/dev/null 2>&1 \
+      && ! grep -rq "sys\.path" practice/m0-l03/src \
+      && echo OK

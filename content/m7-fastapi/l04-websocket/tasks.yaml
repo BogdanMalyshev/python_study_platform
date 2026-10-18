@@ -1,0 +1,741 @@
+- id: q1
+  type: quiz
+  question: |
+    Клієнт підключається до цього ендпоінта. Що станеться?
+    ```python
+    @app.websocket("/ws/jobs/{job_id}")
+    async def job_status(websocket: WebSocket, job_id: str) -> None:
+        await websocket.send_json({"type": "queued", "job_id": job_id})
+        await websocket.accept()
+        await websocket.close()
+    ```
+  options:
+    - "Клієнт отримає `queued`, потім закриття з кодом 1000: `send_json` до `accept` просто буферизується, як `emit` у socket.io до підключення"
+    - "Сервер падає з `RuntimeError`: до `accept` дозволені лише `websocket.accept`, `websocket.close` або HTTP-відповідь, тож рукостискання не завершиться"
+    - "`send_json` чекає, поки хтось викличе `accept`, і ендпоінт зависає назавжди"
+    - "Клієнт отримає закриття з кодом 1008, бо повідомлення до рукостискання це порушення політики"
+  answer: 1
+  explain: |
+    `WebSocket` у Starlette веде стан з'єднання і перевіряє кожне ASGI-повідомлення. У стані
+    `CONNECTING` дозволені лише `websocket.accept`, `websocket.close` і `websocket.http.response.start`,
+    тому `send_json` кидає `RuntimeError: Expected ASGI message "websocket.accept", ... but got
+    'websocket.send'`. Буфера, як у клієнта socket.io, тут немає: це сервер, і до `accept` з'єднання
+    ще не існує. Нічого не чекає й не зависає, перевірка синхронна. Код 1008 з'являється лише тоді,
+    коли ендпоінт сам викликає `close(code=1008)` або залежність кидає `WebSocketException`.
+
+- id: t1
+  type: code
+  title: "Події статусу як discriminated union"
+  prompt: |
+    Опишіть протокол подій статусу генерації. Базова модель `EventBase` вже є: версія протоколу `v`
+    (лише `1`) і `job_id`. Додайте:
+
+    - `Running` з тегом `type: "running"` і полями `page: int`, `total: int`;
+    - `Done` з тегом `"done"` і полем `url: str`;
+    - `Failed` з тегом `"failed"` і полем `error: str`;
+    - `ServerEvent`: discriminated union `Queued | Running | Done | Failed` за полем `type`;
+    - `encode(event) -> str`: компактний JSON події;
+    - `decode(raw: str) -> EventBase`: розбір JSON-рядка в потрібну модель через `TypeAdapter`.
+
+    Тег у кожній моделі має значення за замовчуванням, щоб у коді писати `Running(job_id=..., page=1, total=2)`
+    без `type=`.
+
+    ```python
+    decode('{"type": "done", "job_id": "landing", "url": "/sites/landing/"}')
+    # Done(v=1, job_id='landing', type='done', url='/sites/landing/')
+    ```
+  starter: |
+    from typing import Annotated, Literal
+
+    from pydantic import BaseModel, Field, TypeAdapter
+
+
+    class EventBase(BaseModel):
+        v: Literal[1] = 1
+        job_id: str
+
+
+    class Queued(EventBase):
+        type: Literal["queued"] = "queued"
+
+
+    # Running, Done, Failed
+
+
+    ServerEvent = ...
+
+
+    def encode(event: EventBase) -> str:
+        ...
+
+
+    def decode(raw: str) -> EventBase:
+        ...
+  harness: |
+    from pydantic import ValidationError
+
+    print(encode(Running(job_id="landing", page=2, total=5)))
+    print(encode(Failed(job_id="landing", error="timeout")))
+    print(repr(decode('{"type": "done", "job_id": "landing", "url": "/sites/landing/"}')))
+    print(type(decode(encode(Queued(job_id="x")))).__name__)
+    for raw in [
+        '{"type": "paused", "job_id": "landing"}',
+        '{"type": "running", "job_id": "landing", "page": 1}',
+        '{"v": 2, "type": "queued", "job_id": "landing"}',
+    ]:
+        try:
+            decode(raw)
+        except ValidationError as exc:
+            err = exc.errors()[0]
+            print(err["type"], err["loc"])
+  expected: |
+    {"v":1,"job_id":"landing","type":"running","page":2,"total":5}
+    {"v":1,"job_id":"landing","type":"failed","error":"timeout"}
+    Done(v=1, job_id='landing', type='done', url='/sites/landing/')
+    Queued
+    union_tag_invalid ()
+    missing ('running', 'total')
+    literal_error ('queued', 'v')
+  hints:
+    - "Кожна модель успадковує `EventBase` і додає поле `type` з `Literal` одного значення. Union без моделі-обгортки валідується через `TypeAdapter`, створений один раз на рівні модуля."
+    - "`ServerEvent = Annotated[Queued | Running | Done | Failed, Field(discriminator=\"type\")]`. Помилка з `loc` `('running', 'total')` означає, що Pydantic обрав гілку за тегом і валідує лише її."
+    - "`encode` це `event.model_dump_json()`, `decode` це `_adapter.validate_json(raw)`, де `_adapter = TypeAdapter(ServerEvent)`."
+  solution: |
+    from typing import Annotated, Literal
+
+    from pydantic import BaseModel, Field, TypeAdapter
+
+
+    class EventBase(BaseModel):
+        v: Literal[1] = 1
+        job_id: str
+
+
+    class Queued(EventBase):
+        type: Literal["queued"] = "queued"
+
+
+    class Running(EventBase):
+        type: Literal["running"] = "running"
+        page: int
+        total: int
+
+
+    class Done(EventBase):
+        type: Literal["done"] = "done"
+        url: str
+
+
+    class Failed(EventBase):
+        type: Literal["failed"] = "failed"
+        error: str
+
+
+    ServerEvent = Annotated[Queued | Running | Done | Failed, Field(discriminator="type")]
+    _adapter = TypeAdapter(ServerEvent)
+
+
+    def encode(event: EventBase) -> str:
+        return event.model_dump_json()
+
+
+    def decode(raw: str) -> EventBase:
+        return _adapter.validate_json(raw)
+  requires: [pydantic]
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Відповідь на повідомлення клієнта"
+  prompt: |
+    Клієнт може надіслати два повідомлення: `{"type": "ping"}` і `{"type": "cancel", "reason": "..."}`
+    (`reason` необов'язковий, за замовчуванням `""`). Напишіть моделі `Ping` і `Cancel`, union
+    `ClientMessage` з дискримінатором `type` і функцію `reply(job_id: str, raw: str) -> str`, яка
+    повертає JSON-рядок відповіді:
+
+    - на `ping`: `{"type": "pong"}`;
+    - на `cancel`: `{"type": "cancelling", "job_id": ..., "reason": ...}`;
+    - на все невалідне (не JSON, невідомий тег, поле не того типу): `{"type": "error", "detail": "<type> at <loc>"}`,
+      де `<type>` і `<loc>` взяті з першої помилки `ValidationError`, `loc` склеєний через крапку, а
+      порожній `loc` записується як `<root>`.
+
+    Виняток назовні не вилітає ніколи: ендпоінт з цією функцією живе, хоч що надішле клієнт.
+    Відповідь серіалізуйте через `json.dumps` (з пробілами після `:` і `,`, як за замовчуванням).
+    Розгалуження за типом повідомлення зручно писати через `match` з class pattern.
+  starter: |
+    import json
+    from typing import Annotated, Literal
+
+    from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+
+
+    def reply(job_id: str, raw: str) -> str:
+        ...
+  harness: |
+    print(reply("landing", '{"type": "ping"}'))
+    print(reply("landing", '{"type": "cancel", "reason": "wrong theme"}'))
+    print(reply("landing", '{"type": "cancel"}'))
+    print(reply("landing", '{"type": "subscribe", "room": "landing"}'))
+    print(reply("landing", '{"type": "cancel", "reason": 42}'))
+    print(reply("landing", 'ping'))
+  expected: |
+    {"type": "pong"}
+    {"type": "cancelling", "job_id": "landing", "reason": "wrong theme"}
+    {"type": "cancelling", "job_id": "landing", "reason": ""}
+    {"type": "error", "detail": "union_tag_invalid at <root>"}
+    {"type": "error", "detail": "string_type at cancel.reason"}
+    {"type": "error", "detail": "json_invalid at <root>"}
+  hints:
+    - "Валідація JSON-рядка через `TypeAdapter(ClientMessage).validate_json(raw)` ловить і зламаний JSON, і невідомий тег, і поле не того типу: усе це `ValidationError`."
+    - "`err = exc.errors()[0]`; `loc = \".\".join(str(part) for part in err[\"loc\"])`. Для discriminated union перший елемент `loc` це тег гілки, тому для `reason: 42` виходить `cancel.reason`."
+    - "Після `try/except` розгалуження: `match message:` з `case Ping():` і `case Cancel(reason=reason):`, у кожній гілці `return json.dumps({...})`."
+  solution: |
+    import json
+    from typing import Annotated, Literal
+
+    from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+
+
+    class Ping(BaseModel):
+        type: Literal["ping"]
+
+
+    class Cancel(BaseModel):
+        type: Literal["cancel"]
+        reason: str = ""
+
+
+    ClientMessage = Annotated[Ping | Cancel, Field(discriminator="type")]
+    _client = TypeAdapter(ClientMessage)
+
+
+    def reply(job_id: str, raw: str) -> str:
+        try:
+            message = _client.validate_json(raw)
+        except ValidationError as exc:
+            err = exc.errors()[0]
+            loc = ".".join(str(part) for part in err["loc"])
+            return json.dumps({"type": "error", "detail": f"{err['type']} at {loc or '<root>'}"})
+        match message:
+            case Ping():
+                return json.dumps({"type": "pong"})
+            case Cancel(reason=reason):
+                return json.dumps({"type": "cancelling", "job_id": job_id, "reason": reason})
+  requires: [pydantic]
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Менеджер з'єднань з прибиранням"
+  prompt: |
+    Напишіть `ConnectionManager`, аналог кімнат socket.io для fake-сокетів. `FakeSocket` уже є в
+    стартері: `accept()`, `send_json(message)`, який для мертвого сокета (`alive=False`) кидає
+    `ConnectionError`.
+
+    - `rooms: dict[str, set[FakeSocket]]`, атрибут екземпляра;
+    - `async connect(job_id, ws)`: викликає `ws.accept()` і додає сокет у кімнату;
+    - `disconnect(job_id, ws)`: прибирає сокет; повторний виклик і невідома кімната не помилка;
+      порожня кімната видаляється зі словника;
+    - `async broadcast(job_id, message) -> int`: шле повідомлення всім сокетам кімнати по черзі,
+      мертві прибирає через `disconnect`, повертає кількість успішних відправок; для невідомої
+      кімнати повертає `0` і не створює її.
+
+    Розсилка не повинна падати з `RuntimeError: Set changed size during iteration`.
+  starter: |
+    import asyncio
+
+
+    class FakeSocket:
+        def __init__(self, name: str, alive: bool = True) -> None:
+            self.name = name
+            self.alive = alive
+            self.accepted = False
+            self.inbox: list[str] = []
+
+        async def accept(self) -> None:
+            self.accepted = True
+
+        async def send_json(self, message: dict) -> None:
+            await asyncio.sleep(0)
+            if not self.alive:
+                raise ConnectionError(f"{self.name} is gone")
+            self.inbox.append(message["type"])
+
+        def __repr__(self) -> str:
+            return self.name
+
+
+    class ConnectionManager:
+        def __init__(self) -> None:
+            self.rooms: dict[str, set[FakeSocket]] = {}
+
+        async def connect(self, job_id: str, ws: FakeSocket) -> None:
+            ...
+
+        def disconnect(self, job_id: str, ws: FakeSocket) -> None:
+            ...
+
+        async def broadcast(self, job_id: str, message: dict) -> int:
+            ...
+  harness: |
+    async def main() -> None:
+        manager = ConnectionManager()
+        a, b, c, other = FakeSocket("a"), FakeSocket("b"), FakeSocket("c"), FakeSocket("o")
+        for ws in (a, b, c):
+            await manager.connect("landing", ws)
+        await manager.connect("signup", other)
+        print(a.accepted, sorted(manager.rooms))
+
+        b.alive = False
+        print("sent:", await manager.broadcast("landing", {"type": "running"}))
+        print(sorted(manager.rooms["landing"], key=repr))
+
+        manager.disconnect("landing", a)
+        manager.disconnect("landing", a)
+        manager.disconnect("ghost", a)
+        print("sent:", await manager.broadcast("landing", {"type": "done"}))
+        manager.disconnect("landing", c)
+        print(sorted(manager.rooms))
+        print("sent:", await manager.broadcast("landing", {"type": "done"}))
+        print(sorted(manager.rooms))
+        print(a.inbox, b.inbox, c.inbox, other.inbox)
+
+    asyncio.run(main())
+  expected: |
+    True ['landing', 'signup']
+    sent: 2
+    [a, c]
+    sent: 1
+    ['signup']
+    sent: 0
+    ['signup']
+    ['running'] [] ['running', 'done'] []
+  hints:
+    - "У `broadcast` ітеруйте не саму множину, а її копію: `disconnect` усередині циклу змінює множину, а наступний крок ітератора по ній падає."
+    - "`self.rooms.setdefault(job_id, set()).add(ws)` для `connect`; `self.rooms.get(job_id)` у `disconnect` і `broadcast`, щоб не створювати кімнати для невідомих id."
+    - "`for ws in list(self.rooms.get(job_id, ())):` з `try: await ws.send_json(message); sent += 1` і `except ConnectionError: self.disconnect(job_id, ws)`; у `disconnect` після `discard` перевірка `if not sockets: del self.rooms[job_id]`."
+  solution: |
+    import asyncio
+
+
+    class FakeSocket:
+        def __init__(self, name: str, alive: bool = True) -> None:
+            self.name = name
+            self.alive = alive
+            self.accepted = False
+            self.inbox: list[str] = []
+
+        async def accept(self) -> None:
+            self.accepted = True
+
+        async def send_json(self, message: dict) -> None:
+            await asyncio.sleep(0)
+            if not self.alive:
+                raise ConnectionError(f"{self.name} is gone")
+            self.inbox.append(message["type"])
+
+        def __repr__(self) -> str:
+            return self.name
+
+
+    class ConnectionManager:
+        def __init__(self) -> None:
+            self.rooms: dict[str, set[FakeSocket]] = {}
+
+        async def connect(self, job_id: str, ws: FakeSocket) -> None:
+            await ws.accept()
+            self.rooms.setdefault(job_id, set()).add(ws)
+
+        def disconnect(self, job_id: str, ws: FakeSocket) -> None:
+            sockets = self.rooms.get(job_id)
+            if sockets is None:
+                return
+            sockets.discard(ws)
+            if not sockets:
+                del self.rooms[job_id]
+
+        async def broadcast(self, job_id: str, message: dict) -> int:
+            sent = 0
+            for ws in list(self.rooms.get(job_id, ())):
+                try:
+                    await ws.send_json(message)
+                    sent += 1
+                except ConnectionError:
+                    self.disconnect(job_id, ws)
+            return sent
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Конкурентний broadcast з таймаутом"
+  prompt: |
+    Послідовний broadcast чекає кожного клієнта по черзі, і одна повільна вкладка затримує всіх.
+    Напишіть `async broadcast(sockets: set[FakeSocket], message: dict, timeout: float) -> list[str]`:
+
+    - відправки всім сокетам ідуть конкурентно, у `TaskGroup` (або `gather`);
+    - кожна відправка обмежена `timeout` секунд; сокет, який не встиг, вважається мертвим так само,
+      як сокет, що кинув `ConnectionError`;
+    - мертві сокети видаляються з `sockets` (множина змінюється на місці);
+    - повертається відсортований список імен видалених сокетів;
+    - жоден виняток з окремої відправки не валить розсилку й не скасовує відправки іншим.
+
+    `FakeSocket` у стартері чекає `delay` секунд і друкує доставку, тому порядок рядків у виводі
+    визначається затримками (20, 40 і 60 мс), а не порядком множини: це й доводить конкурентність.
+    Харнес обмежує першу розсилку 0.2 с: послідовна реалізація займе близько 0.23 с і надрукує
+    `too slow`.
+  starter: |
+    import asyncio
+
+
+    class FakeSocket:
+        def __init__(self, name: str, delay: float, alive: bool = True) -> None:
+            self.name = name
+            self.delay = delay
+            self.alive = alive
+
+        async def send_json(self, message: dict) -> None:
+            await asyncio.sleep(self.delay)
+            if not self.alive:
+                raise ConnectionError(f"{self.name} is gone")
+            print(f"{self.name} <- {message['type']}")
+
+
+    async def broadcast(sockets: set[FakeSocket], message: dict, timeout: float) -> list[str]:
+        ...
+  harness: |
+    async def main() -> None:
+        sockets = {
+            FakeSocket("slow", 0.30),
+            FakeSocket("c", 0.06),
+            FakeSocket("a", 0.02),
+            FakeSocket("dead", 0.01, alive=False),
+            FakeSocket("b", 0.04),
+        }
+        try:
+            async with asyncio.timeout(0.2):
+                print("dropped:", await broadcast(sockets, {"type": "running"}, timeout=0.1))
+        except TimeoutError:
+            print("too slow: sends must run concurrently")
+        print("left:", sorted(ws.name for ws in sockets))
+        print("dropped:", await broadcast(sockets, {"type": "done"}, timeout=0.1))
+        print("dropped:", await broadcast(set(), {"type": "done"}, timeout=0.1))
+
+    asyncio.run(main())
+  expected: |
+    a <- running
+    b <- running
+    c <- running
+    dropped: ['dead', 'slow']
+    left: ['a', 'b', 'c']
+    a <- done
+    b <- done
+    c <- done
+    dropped: []
+    dropped: []
+  hints:
+    - "Загорніть одну відправку у внутрішню корутину `deliver(ws) -> bool`, яка сама ловить `ConnectionError` і `TimeoutError` і повертає, чи вдалося. Тоді жоден виняток не дійде до `TaskGroup`, і група не скасує інші відправки."
+    - "Таймаут на одну відправку: `async with asyncio.timeout(timeout): await ws.send_json(message)`. Задачі створюйте в `async with asyncio.TaskGroup() as tg:` і запам'ятайте в словнику `{ws: task}`."
+    - "Після виходу з групи всі задачі завершені: `dropped = [ws for ws, task in tasks.items() if not task.result()]`, далі `sockets.discard(ws)` для кожного і `sorted(ws.name for ws in dropped)`."
+  solution: |
+    import asyncio
+
+
+    class FakeSocket:
+        def __init__(self, name: str, delay: float, alive: bool = True) -> None:
+            self.name = name
+            self.delay = delay
+            self.alive = alive
+
+        async def send_json(self, message: dict) -> None:
+            await asyncio.sleep(self.delay)
+            if not self.alive:
+                raise ConnectionError(f"{self.name} is gone")
+            print(f"{self.name} <- {message['type']}")
+
+
+    async def broadcast(sockets: set[FakeSocket], message: dict, timeout: float) -> list[str]:
+        async def deliver(ws: FakeSocket) -> bool:
+            try:
+                async with asyncio.timeout(timeout):
+                    await ws.send_json(message)
+            except (ConnectionError, TimeoutError):
+                return False
+            return True
+
+        async with asyncio.TaskGroup() as tg:
+            tasks = {ws: tg.create_task(deliver(ws)) for ws in sockets}
+        dropped = [ws for ws, task in tasks.items() if not task.result()]
+        for ws in dropped:
+            sockets.discard(ws)
+        return sorted(ws.name for ws in dropped)
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Клієнт закриває вкладку посеред стріму. Що станеться на сервері?
+    ```python
+    @app.websocket("/ws/jobs/{job_id}")
+    async def job_status(websocket: WebSocket, job_id: str) -> None:
+        await websocket.accept()
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(read_client(websocket))   # loops on receive_text()
+                await stream(websocket)                  # sends an event every 50 ms
+        except WebSocketDisconnect:
+            print("client left")
+    ```
+  options:
+    - "Надрукується `client left`: `read_client` кинув `WebSocketDisconnect`, і `except` його зловив"
+    - "`stream` продовжить слати події до кінця, бо падіння однієї задачі групи не зачіпає тіло `async with`"
+    - "`stream` буде скасовано, а назовні вилетить `ExceptionGroup`, який `except WebSocketDisconnect` не ловить; у лозі uvicorn буде `Exception in ASGI application`"
+    - "Нічого: `TaskGroup` ковтає винятки дочірніх задач, як `Promise.allSettled`"
+  answer: 2
+  explain: |
+    Коли дочірня задача падає, `TaskGroup` скасовує решту задач і саме тіло `async with`, тому
+    `stream` зупиняється на найближчому `await`. Потім група піднімає `ExceptionGroup` з усіма
+    помилками, навіть якщо помилка одна, і `except WebSocketDisconnect` повз нього пролітає:
+    `ExceptionGroup` не є підкласом `WebSocketDisconnect`. Перевірено запуском: `TestClient`
+    отримує `ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)`. Правильно ловити
+    `except* WebSocketDisconnect:`. Аналогія з `Promise.allSettled` хибна: група поводиться як
+    `Promise.all` зі скасуванням решти.
+
+- id: t5
+  type: code
+  title: "Сесія: читач і письменник в одній TaskGroup"
+  prompt: |
+    Зберіть ендпоінт статусу без FastAPI, на fake-сокеті. Напишіть `async session(ws, events) -> str`:
+
+    - паралельно з потоком подій читає клієнта: на `{"type": "ping"}` відповідає `{"type": "pong"}`,
+      інші повідомлення ігнорує;
+    - шле кожну подію з асинхронного ітератора `events` як JSON (`json.dumps(event)`) і зупиняється
+      після першої термінальної (`done` або `failed`), навіть якщо джерело має ще події;
+    - після термінальної події закриває сокет (`await ws.close()`) і повертає `"finished"`;
+    - якщо клієнт відключився (`receive_text` кинув `Disconnect`), припиняє стрім, сокет не закриває
+      і повертає `"client left"`;
+    - джерело подій закривається в обох випадках до повернення з `session`: харнес друкує
+      `events closed` у `finally` генератора, і цей рядок мусить з'явитися перед результатом.
+
+    Події в харнесі приходять кожні 30 мс; ping приходить на 45 мс, відключення на 75 мс, тому
+    порядок у виводі визначений.
+  starter: |
+    import asyncio
+    import json
+    from collections.abc import AsyncIterator
+    from contextlib import aclosing
+
+
+    class Disconnect(Exception):
+        pass
+
+
+    class FakeSocket:
+        def __init__(self, script: list[tuple[float, str | None]]) -> None:
+            self.script = script          # (pause, text); text None means "client closed the tab"
+            self.sent: list[str] = []
+            self.closed = False
+
+        async def receive_text(self) -> str:
+            if not self.script:
+                await asyncio.sleep(3600)  # the client stays silent
+            pause, text = self.script.pop(0)
+            await asyncio.sleep(pause)
+            if text is None:
+                raise Disconnect()
+            return text
+
+        async def send_text(self, text: str) -> None:
+            if self.closed:
+                raise RuntimeError("send after close")
+            self.sent.append(json.loads(text)["type"])
+
+        async def close(self) -> None:
+            self.closed = True
+
+
+    TERMINAL = {"done", "failed"}
+
+
+    async def session(ws: FakeSocket, events: AsyncIterator[dict]) -> str:
+        ...
+  harness: |
+    async def job_events(statuses: list[str]):
+        try:
+            for status in statuses:
+                await asyncio.sleep(0.03)
+                yield {"type": status}
+        finally:
+            print("  events closed")
+
+
+    async def run(title: str, script: list, statuses: list[str]) -> None:
+        print(title)
+        ws = FakeSocket(script)
+        result = await session(ws, job_events(statuses))
+        print(" ", result, ws.sent, "closed" if ws.closed else "open")
+
+
+    async def main() -> None:
+        await run("ping in the middle:", [(0.045, '{"type": "ping"}')],
+                  ["queued", "running", "running", "done"])
+        await run("tab closed:", [(0.075, None)],
+                  ["queued", "running", "running", "done"])
+        await run("failed, extra events ignored:", [],
+                  ["queued", "failed", "running"])
+
+    asyncio.run(main())
+  expected: |
+    ping in the middle:
+      events closed
+      finished ['queued', 'pong', 'running', 'running', 'done'] closed
+    tab closed:
+      events closed
+      client left ['queued', 'running'] open
+    failed, extra events ignored:
+      events closed
+      finished ['queued', 'failed'] closed
+  hints:
+    - "Читач це окрема корутина з `while True` навколо `receive_text()`, запущена як задача в `TaskGroup`; письменник працює прямо в тілі `async with`. Після термінальної події читача треба скасувати, інакше група чекатиме його вічно."
+    - "Відключення приходить з групи як `ExceptionGroup`, тож потрібен `except* Disconnect:`. `return` у `except*` заборонений синтаксисом: поставте прапорець `left = True` і поверніть результат після `try`."
+    - "`async with aclosing(events) as stream: async for event in stream: await ws.send_text(json.dumps(event)); if event['type'] in TERMINAL: break`, потім `reader.cancel()`. `aclosing` закриває генератор одразу після `break` або скасування, тому `events closed` друкується вчасно."
+  solution: |
+    import asyncio
+    import json
+    from collections.abc import AsyncIterator
+    from contextlib import aclosing
+
+
+    class Disconnect(Exception):
+        pass
+
+
+    class FakeSocket:
+        def __init__(self, script: list[tuple[float, str | None]]) -> None:
+            self.script = script          # (pause, text); text None means "client closed the tab"
+            self.sent: list[str] = []
+            self.closed = False
+
+        async def receive_text(self) -> str:
+            if not self.script:
+                await asyncio.sleep(3600)  # the client stays silent
+            pause, text = self.script.pop(0)
+            await asyncio.sleep(pause)
+            if text is None:
+                raise Disconnect()
+            return text
+
+        async def send_text(self, text: str) -> None:
+            if self.closed:
+                raise RuntimeError("send after close")
+            self.sent.append(json.loads(text)["type"])
+
+        async def close(self) -> None:
+            self.closed = True
+
+
+    TERMINAL = {"done", "failed"}
+
+
+    async def read_client(ws: FakeSocket) -> None:
+        while True:
+            message = json.loads(await ws.receive_text())
+            if message.get("type") == "ping":
+                await ws.send_text(json.dumps({"type": "pong"}))
+
+
+    async def session(ws: FakeSocket, events: AsyncIterator[dict]) -> str:
+        left = False
+        try:
+            async with asyncio.TaskGroup() as tg:
+                reader = tg.create_task(read_client(ws))
+                async with aclosing(events) as stream:
+                    async for event in stream:
+                        await ws.send_text(json.dumps(event))
+                        if event["type"] in TERMINAL:
+                            break
+                reader.cancel()
+        except* Disconnect:
+            left = True
+        if left:
+            return "client left"
+        await ws.close()
+        return "finished"
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Капстоун запустили як `uvicorn formbuilder.api.app:app --workers 2`. Вкладка A потрапила в процес 1,
+    вкладка B у процес 2; обидві дивляться задачу `landing`, яку рендерить воркер у процесі 1 і
+    публікує події через `hub.publish(...)`. Що побачать вкладки?
+  options:
+    - "Обидві отримають усі події: `hub` це модульна змінна, а модуль імпортується один раз"
+    - "A отримає всі події, B не отримає жодної і не побачить жодної помилки"
+    - "B отримає `WebSocketDisconnect`, бо її кімнати немає в процесі 1"
+    - "uvicorn сам синхронізує пам'ять воркерів через спільний event loop"
+  answer: 1
+  explain: |
+    `--workers 2` запускає два окремі процеси Python. Модуль імпортується один раз у кожному
+    процесі, тож `hub` і словник підписок існують у двох незалежних копіях, а спільного event loop між
+    процесами немає. Публікація в процесі 1 доходить лише до черг процесу 1; у процесі 2 підписка B
+    існує і чекає, нічого не ламається, тому й помилки немає, лише тиша. Розв'язок для кількох
+    процесів це зовнішня шина pub/sub (Redis), як `@socket.io/redis-adapter` у світі Node.
+
+- id: p1
+  type: project
+  title: "Протокол подій і WebSocket-ендпоінт статусу"
+  prompt: |
+    У капстоуні додайте статус генерації через WebSocket. FastAPI уже в основних залежностях (m3-l02),
+    `httpx2` у dev-залежностях з m7-l01.
+
+    - `src/formbuilder/hub.py`: `EventBase(v: Literal[1] = 1, job_id)`, моделі `Queued`,
+      `Running(page, total)`, `Done(url, finished_at: datetime)`, `Failed(error)`, union `ServerEvent`
+      з дискримінатором `type`, `TERMINAL = {"done", "failed"}`; клас `JobEvents` з розділу "Для капстоуну"
+      (`publish`, `watch`, `watchers`), модульний екземпляр `hub` і залежність `get_hub()`. `watch` це
+      звичайний метод, який реєструє чергу в момент виклику й повертає асинхронний генератор; модуль
+      не імпортує FastAPI. `JobEvents` з `worker.py` (m7-l03) переїжджає сюди, воркер імпортує його звідси.
+    - `src/formbuilder/api/ws.py`: вхідне повідомлення клієнта `Ping` і відповіді `Pong`,
+      `ProtocolError(detail)`, `client_messages = TypeAdapter(...)`; `router` з
+      `@router.websocket("/ws/jobs/{job_id}")`: `accept`,
+      читач у `TaskGroup` (ping → pong, невалідне повідомлення → `ProtocolError`, з'єднання при цьому
+      живе), стрім `hub.watch(job_id)` під `aclosing`, `close()` з 1000 після термінальної події,
+      `except* WebSocketDisconnect` при розриві. Підключіть роутер у `create_app` з m7-l01.
+    - `tests/test_ws.py`: тести ендпоінта через `TestClient.websocket_connect` з
+      `app.dependency_overrides[get_hub]` на fake-хаб зі сценарієм подій.
+  checklist:
+    - "Тест: для сценарію `queued → running 1/2 → running 2/2 → done` клієнт отримує рівно ці чотири події в цьому порядку, а наступний `receive_json` кидає `WebSocketDisconnect` з кодом 1000"
+    - "Тест: сценарій з `failed` так само закриває з'єднання з 1000, а подія містить `error`"
+    - "Тест: `{\"type\": \"ping\"}` посеред стріму дає `{\"type\": \"pong\"}`; `{\"type\": \"subscribe\"}` і рядок не-JSON дають подію `error`, після чого стрім триває"
+    - "Тест: клієнт, що вийшов посеред стріму, не лишає незакритого джерела: `finally` fake-генератора виконався (прапорець `closed` у fake-хабі)"
+    - "Події серіалізуються через `model_dump_json()`; `send_json` з моделлю в коді немає"
+    - "`uv run mypy src` і `uv run ruff check` без помилок"
+  verify: "cd capstone && uv run pytest tests/test_ws.py -q"
+
+- id: p2
+  type: project
+  title: "Хаб подій: кілька вкладок, пізній глядач і HTML-клієнт"
+  prompt: |
+    Доведіть хаб подій до стану, коли його можна підключити до воркера з m7-l03.
+
+    - Воркер (m7-l03) публікує в хаб `Queued` при постановці, `Running(page, total)` після кожної сторінки,
+      `Done` або `Failed` наприкінці.
+    - Пізній глядач: `JobEvents.watch(job_id, first: ServerEvent | None = None)` реєструє чергу й кладе
+      в неї `first` ще до повернення генератора, тож генератор віддає `first` першим і завершується одразу,
+      якщо `first` термінальний.
+      Ендпоінт бере `first` із залежності `get_last_event` (у продакшені останній статус задачі зі
+      сховища m7-l03) синхронно, без `await` між читанням стану й реєстрацією, щоб подія не загубилась
+      між ними.
+    - Dev-роут `GET /dev/ws` з `HTMLResponse`, що віддає клієнт з уроку (`ws_client.html` поруч із
+      модулем), лише коли застосунок запущено в dev-режимі (налаштування з m6-l06).
+    - Тести хаба в `tests/test_ws.py` без FastAPI, через `asyncio.run`.
+  checklist:
+    - "Тест: дві задачі-вкладки на одну задачу отримують однакові повні послідовності подій"
+    - "Тест: подія, опублікована між викликом `hub.watch(job_id)` і першим `__anext__`, доходить до глядача"
+    - "Тест: після термінальної події і після `aclose()` генератора, з якого вже прочитали подію, `hub.watchers(job_id) == 0`, а `job_id` немає у внутрішньому словнику"
+    - "Тест: `publish` для задачі без глядачів повертає 0 і не створює кімнату"
+    - "Тест: глядач, що підключився до вже завершеної задачі, отримує термінальну подію і закриття 1000, а не висить"
+    - "Руками: `uv run uvicorn ...`, сторінка `/dev/ws`, запуск генерації, у списку `pong`, `queued`, кілька `running`, `done`, `closed 1000`"
+  verify: "cd capstone && uv run pytest tests/test_ws.py -q"

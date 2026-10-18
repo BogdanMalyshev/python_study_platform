@@ -1,0 +1,510 @@
+- id: t1
+  type: code
+  title: "int() без падіння: safe_int"
+  prompt: |
+    Напишіть `safe_int(value, default=None)`, яка повертає `int(value)`, а якщо перетворення неможливе,
+    повертає `default`. "Неможливе" означає рівно два винятки, які кидає `int()`: `ValueError` для рядка,
+    що не є цілим числом, і `TypeError` для значення невідповідного типу, наприклад `None`.
+
+    Будь-який інший виняток має пройти крізь функцію далі: це баг, а не "некоректне значення".
+    Тобто ні голого `except:`, ні `except Exception:`.
+
+    ```python
+    safe_int("42")          # 42
+    safe_int("4.2")         # None
+    safe_int(None, 0)       # 0
+    ```
+  starter: |
+    def safe_int(value: object, default: int | None = None) -> int | None:
+        ...
+  harness: |
+    print(safe_int("42"))
+    print(safe_int(" 7 "))
+    print(safe_int(3.9))
+    print(safe_int("4.2"))
+    print(safe_int("abc", -1))
+    print(safe_int(None, 0))
+
+
+    class Broken:
+        def __int__(self):
+            raise RuntimeError("bug inside __int__")
+
+
+    try:
+        print(safe_int(Broken()))
+    except RuntimeError as e:
+        print("propagated:", e)
+  expected: |
+    42
+    7
+    3
+    None
+    -1
+    0
+    propagated: bug inside __int__
+  hints:
+    - "Один try з одним except, який перелічує обидва типи. Порядок у кортежі не важливий."
+    - "try: return int(value) / except (TypeError, ValueError): return default"
+  solution: |
+    def safe_int(value: object, default: int | None = None) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Глибокий доступ до конфігу через LookupError"
+  prompt: |
+    Напишіть `get_path(data, path, default=None)`: пройти по вкладених словниках і списках за шляхом
+    `path` (список ключів і індексів) і повернути знайдене значення або `default`, якщо шлях обривається.
+
+    Шлях обривається трьома способами: немає ключа в словнику, немає індексу в списку, або на шляху
+    трапилось значення, яке не індексується цим ключем (`None`, число, список з рядковим ключем).
+    Перевірок `in`, `len` і `isinstance` не писати: стиль EAFP, один `try` навколо обходу.
+    Пам'ятайте, що `KeyError` і `IndexError` мають спільного батька.
+
+    ```python
+    config = {"pages": [{"fields": [{"id": "email"}]}]}
+    get_path(config, ["pages", 0, "fields", 0, "id"])      # 'email'
+    get_path(config, ["pages", 3, "fields"], "n/a")        # 'n/a'
+    ```
+  starter: |
+    def get_path(data: object, path: list, default: object = None) -> object:
+        ...
+  harness: |
+    config = {
+        "title": "Contact",
+        "pages": [
+            {"fields": [{"id": "email", "rules": None}, {"id": "age", "rules": {"min": 18}}]},
+        ],
+    }
+    print(get_path(config, ["pages", 0, "fields", 1, "id"]))
+    print(get_path(config, ["pages", 0, "fields", 1, "rules", "min"]))
+    print(get_path(config, ["pages", 0, "fields", -1, "id"]))
+    print(get_path(config, []) is config)
+    print(get_path(config, ["pages", 5, "fields"], "no page"))
+    print(get_path(config, ["pages", 0, "label"], "no label"))
+    print(get_path(config, ["pages", 0, "fields", 0, "rules", "min"], "no rules"))
+    print(get_path(config, ["pages", "first"], "bad index"))
+    print(get_path(config, ["title", 0]))
+    print(get_path(config, ["title", 0, 0, 0, 0]))
+  expected: |
+    age
+    18
+    age
+    True
+    no page
+    no label
+    no rules
+    bad index
+    C
+    C
+  hints:
+    - "У циклі по path замінюйте поточне значення на current[step]. Усі збої обходу це або LookupError, або TypeError."
+    - "try: for step in path: current = current[step] / except (LookupError, TypeError): return default / else: return current"
+  solution: |
+    def get_path(data: object, path: list, default: object = None) -> object:
+        current = data
+        try:
+            for step in path:
+                current = current[step]
+        except (LookupError, TypeError):
+            return default
+        else:
+            return current
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Крок пайплайна: else, finally і що летить далі"
+  prompt: |
+    Напишіть `run_step(name, fn, log)`, яка виконує `fn()` і веде журнал у списку `log`:
+
+    - перед викликом додає `"start <name>"`;
+    - якщо `fn()` кинула `ValueError`, додає `"fail <name>: <текст винятку>"` і повертає `None`;
+    - якщо винятку не було, додає `"ok <name>"` і повертає результат `fn()`;
+    - у будь-якому разі останнім додає `"end <name>"`, навіть якщо виняток іншого типу летить далі;
+    - винятки, крім `ValueError`, не ловить: вони мають вилетіти з `run_step` назовні.
+
+    `try` має охоплювати лише виклик `fn()`. Запис `"ok ..."` і `return` результату поставте в `else`.
+
+    ```python
+    log = []
+    run_step("parse", lambda: int("42"), log)   # 42
+    log   # ['start parse', 'ok parse', 'end parse']
+    ```
+  starter: |
+    from collections.abc import Callable
+
+
+    def run_step(name: str, fn: Callable[[], object], log: list[str]) -> object:
+        ...
+  harness: |
+    log = []
+    print(run_step("parse", lambda: int("42"), log))
+    print(run_step("parse-bad", lambda: int("x"), log))
+    try:
+        run_step("lookup", lambda: {}["id"], log)
+    except KeyError as e:
+        print("propagated KeyError:", e)
+    for line in log:
+        print(line)
+  expected: |
+    42
+    None
+    propagated KeyError: 'id'
+    start parse
+    ok parse
+    end parse
+    start parse-bad
+    fail parse-bad: invalid literal for int() with base 10: 'x'
+    end parse-bad
+    start lookup
+    end lookup
+  hints:
+    - "Чотири гілки try / except ValueError / else / finally, і кожна відповідає одному пункту умови. KeyError ніхто не ловить, і finally все одно виконається."
+    - "log.append(f\"start {name}\") до try; у try лише result = fn(); except ValueError as e: log.append(f\"fail {name}: {e}\"); return None; else: log.append(f\"ok {name}\"); return result; finally: log.append(f\"end {name}\")"
+  solution: |
+    from collections.abc import Callable
+
+
+    def run_step(name: str, fn: Callable[[], object], log: list[str]) -> object:
+        log.append(f"start {name}")
+        try:
+            result = fn()
+        except ValueError as e:
+            log.append(f"fail {name}: {e}")
+            return None
+        else:
+            log.append(f"ok {name}")
+            return result
+        finally:
+            log.append(f"end {name}")
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Ієрархія винятків конфігу"
+  prompt: |
+    Опишіть ієрархію винятків для конфігу форми і функцію перевірки елементів.
+
+    - `ConfigError(Exception)`: базовий клас, без власного `__init__`.
+    - `UnknownElementType(ConfigError)`: конструктор `(element_id, type_name)`, зберігає обидва
+      значення як атрибути з тими самими іменами, повідомлення `element '<id>': unknown type '<type>'`.
+    - `DuplicateElementId(ConfigError)`: конструктор `(element_id)`, атрибут `element_id`,
+      повідомлення `duplicate element id '<id>'`.
+
+    Повідомлення передавайте в `super().__init__`, щоб `str(e)` і `e.args` працювали як у вбудованих винятків.
+    Лапки навколо значень у повідомленні це `!r` у f-рядку.
+
+    `check_elements(elements, known_types)` йде по елементах по черзі й кидає перший знайдений виняток:
+    спочатку перевіряє тип елемента, потім унікальність `id`. Якщо все гаразд, повертає `None`.
+
+    ```python
+    check_elements([{"id": "dob", "type": "date"}], {"text"})
+    # UnknownElementType: element 'dob': unknown type 'date'
+    ```
+  starter: |
+    class ConfigError(Exception):
+        ...
+
+
+    class UnknownElementType(ConfigError):
+        ...
+
+
+    class DuplicateElementId(ConfigError):
+        ...
+
+
+    def check_elements(elements: list[dict], known_types: set[str]) -> None:
+        ...
+  harness: |
+    known = {"text", "number", "select"}
+    cases = [
+        [{"id": "email", "type": "text"}, {"id": "age", "type": "number"}],
+        [{"id": "email", "type": "text"}, {"id": "dob", "type": "date"}],
+        [{"id": "email", "type": "text"}, {"id": "email", "type": "number"}],
+        [{"id": "x", "type": "date"}, {"id": "x", "type": "text"}],
+    ]
+    for elements in cases:
+        try:
+            print(check_elements(elements, known))
+        except ConfigError as e:
+            print(f"{type(e).__name__}: {e} | args={e.args}")
+            if isinstance(e, UnknownElementType):
+                print("  attrs:", e.element_id, e.type_name)
+            if isinstance(e, DuplicateElementId):
+                print("  attrs:", e.element_id)
+    print(issubclass(UnknownElementType, ConfigError), issubclass(DuplicateElementId, ConfigError))
+    print(issubclass(ConfigError, Exception), issubclass(UnknownElementType, DuplicateElementId))
+  expected: |
+    None
+    UnknownElementType: element 'dob': unknown type 'date' | args=("element 'dob': unknown type 'date'",)
+      attrs: dob date
+    DuplicateElementId: duplicate element id 'email' | args=("duplicate element id 'email'",)
+      attrs: email
+    UnknownElementType: element 'x': unknown type 'date' | args=("element 'x': unknown type 'date'",)
+      attrs: x date
+    True True
+    True False
+  hints:
+    - "Базовому класу достатньо docstring або pass. Нащадки викликають super().__init__(message) і лише потім присвоюють self.<атрибут>."
+    - "def __init__(self, element_id, type_name): super().__init__(f\"element {element_id!r}: unknown type {type_name!r}\"); self.element_id = element_id; self.type_name = type_name. У check_elements множина seen і raise замість return."
+  solution: |
+    class ConfigError(Exception):
+        """Base class for form config errors."""
+
+
+    class UnknownElementType(ConfigError):
+        def __init__(self, element_id: str, type_name: str) -> None:
+            super().__init__(f"element {element_id!r}: unknown type {type_name!r}")
+            self.element_id = element_id
+            self.type_name = type_name
+
+
+    class DuplicateElementId(ConfigError):
+        def __init__(self, element_id: str) -> None:
+            super().__init__(f"duplicate element id {element_id!r}")
+            self.element_id = element_id
+
+
+    def check_elements(elements: list[dict], known_types: set[str]) -> None:
+        seen: set[str] = set()
+        for element in elements:
+            if element["type"] not in known_types:
+                raise UnknownElementType(element["id"], element["type"])
+            if element["id"] in seen:
+                raise DuplicateElementId(element["id"])
+            seen.add(element["id"])
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Межа API: from e, from None і один except"
+  prompt: |
+    Ієрархія `ConfigError` уже є в стартовому коді. Напишіть дві функції.
+
+    `parse_config(text) -> dict` розбирає JSON-рядок конфігу:
+
+    - некоректний JSON (`json.JSONDecodeError`) перетворюється на
+      `ConfigError("invalid JSON at line <L>, column <C>")` з ланцюжком `from e`; рядок і колонка є
+      атрибутами `lineno` і `colno` у `JSONDecodeError`;
+    - якщо в результаті немає ключа `"elements"` або результат взагалі не словник
+      (`data["elements"]` кидає `KeyError` або `TypeError`), кидає `ConfigError("missing 'elements'")`
+      з `from None`: технічна причина тут нікому не потрібна;
+    - якщо тип якогось елемента не входить у `KNOWN_TYPES`, кидає `UnknownElementType`;
+    - інакше повертає розібраний словник.
+
+    `handle(text) -> dict` це межа API, єдине місце, де `ConfigError` ловиться:
+
+    - успіх: `{"status": 200, "elements": <кількість елементів>}`;
+    - `ConfigError` або нащадок: `{"status": 422, "kind": <ім'я класу винятку>, "error": <str(e)>}`;
+    - усе інше не ловить: якщо `text` не рядок, `json.loads` кине `TypeError`, і він має вилетіти з `handle`.
+  starter: |
+    import json
+
+
+    class ConfigError(Exception):
+        """Base class for form config errors."""
+
+
+    class UnknownElementType(ConfigError):
+        def __init__(self, element_id: str, type_name: str) -> None:
+            super().__init__(f"element {element_id!r}: unknown type {type_name!r}")
+            self.element_id = element_id
+            self.type_name = type_name
+
+
+    KNOWN_TYPES = {"text", "number", "select"}
+
+
+    def parse_config(text: str) -> dict:
+        ...
+
+
+    def handle(text: str) -> dict:
+        ...
+  harness: |
+    inputs = [
+        '{"elements": [{"id": "email", "type": "text"}, {"id": "age", "type": "number"}]}',
+        '{"elements": []}',
+        '{"elements": [{"id": "dob", "type": "date"}]}',
+        '{"title": "Contact"}',
+        '["not", "a", "dict"]',
+        '{"elements": [}',
+        '{\n  "elements": [\n    {"id": "a" "type": "text"}\n  ]\n}',
+    ]
+    for text in inputs:
+        print(handle(text))
+
+    try:
+        parse_config("{oops")
+    except ConfigError as e:
+        print("cause:", type(e.__cause__).__name__)
+
+    try:
+        parse_config('{"title": "Contact"}')
+    except ConfigError as e:
+        print("cause:", e.__cause__, "| suppress_context:", e.__suppress_context__)
+
+    try:
+        handle(None)
+    except TypeError:
+        print("propagated: TypeError")
+  expected: |
+    {'status': 200, 'elements': 2}
+    {'status': 200, 'elements': 0}
+    {'status': 422, 'kind': 'UnknownElementType', 'error': "element 'dob': unknown type 'date'"}
+    {'status': 422, 'kind': 'ConfigError', 'error': "missing 'elements'"}
+    {'status': 422, 'kind': 'ConfigError', 'error': "missing 'elements'"}
+    {'status': 422, 'kind': 'ConfigError', 'error': 'invalid JSON at line 1, column 15'}
+    {'status': 422, 'kind': 'ConfigError', 'error': 'invalid JSON at line 3, column 16'}
+    cause: JSONDecodeError
+    cause: None | suppress_context: True
+    propagated: TypeError
+  hints:
+    - "У parse_config три окремі вузькі try: навколо json.loads, навколо data[\"elements\"], а перевірка типів елементів уже поза try. У handle один try навколо parse_config, except ConfigError і else з успішною відповіддю."
+    - "except json.JSONDecodeError as e: raise ConfigError(f\"invalid JSON at line {e.lineno}, column {e.colno}\") from e. Для ключа: except (KeyError, TypeError): raise ConfigError(\"missing 'elements'\") from None. У handle: \"kind\": type(e).__name__."
+  solution: |
+    import json
+
+
+    class ConfigError(Exception):
+        """Base class for form config errors."""
+
+
+    class UnknownElementType(ConfigError):
+        def __init__(self, element_id: str, type_name: str) -> None:
+            super().__init__(f"element {element_id!r}: unknown type {type_name!r}")
+            self.element_id = element_id
+            self.type_name = type_name
+
+
+    KNOWN_TYPES = {"text", "number", "select"}
+
+
+    def parse_config(text: str) -> dict:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ConfigError(f"invalid JSON at line {e.lineno}, column {e.colno}") from e
+        try:
+            elements = data["elements"]
+        except (KeyError, TypeError):
+            raise ConfigError("missing 'elements'") from None
+        for element in elements:
+            if element["type"] not in KNOWN_TYPES:
+                raise UnknownElementType(element["id"], element["type"])
+        return data
+
+
+    def handle(text: str) -> dict:
+        try:
+            config = parse_config(text)
+        except ConfigError as e:
+            return {"status": 422, "kind": type(e).__name__, "error": str(e)}
+        else:
+            return {"status": 200, "elements": len(config["elements"])}
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    def save():
+        try:
+            print("a")
+            return "b"
+        finally:
+            print("c")
+
+    print(save())
+    ```
+  options: ["a, c, b", "a, b, c", "a, b", "c, a, b"]
+  answer: 0
+  explain: |
+    `return "b"` обчислює значення і відкладає його, потім виконується `finally` і друкує `c`, і лише
+    після цього функція справді повертає `"b"`, яке друкує зовнішній `print`. `a, b, c` це інтуїція
+    "return миттєво виходить з функції, а finally десь потім"; але `print(save())` не може надрукувати
+    результат раніше, ніж функція завершилась, а завершується вона після `finally`. `a, b` забуває, що
+    `finally` виконується завжди, зокрема при `return`. `c, a, b` плутає `finally` з чимось, що
+    виконується до `try`. У JS порядок той самий.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    try:
+        int("x")
+    except Exception:
+        print("Exception")
+    except ValueError:
+        print("ValueError")
+    ```
+  options: ["Exception", "ValueError", "Exception, потім ValueError", "SyntaxError: недосяжний except"]
+  answer: 0
+  explain: |
+    `except`-гілки перевіряються зверху вниз, і виконується перша, чий тип підходить за `isinstance`.
+    `ValueError` є нащадком `Exception`, тому перша гілка підходить, а друга вже ніколи не спрацює.
+    `ValueError` спокусливий з інтуїції "вибирається найточніший тип", як перевантаження в TS, але
+    Python не шукає найкращий збіг, він бере перший. Двох гілок не буде ніколи: обробляє одна.
+    `SyntaxError` теж ні: інтерпретатор не аналізує ієрархію під час компіляції, такий код ловить
+    лише лінтер. Правило: від конкретних типів до загальних.
+
+- id: q3
+  type: quiz
+  question: |
+    Що станеться під час запуску?
+    ```python
+    percent = 150
+    assert (0 <= percent <= 100, "percent out of range")
+    print("ok")
+    ```
+  options:
+    - "Надрукує ok; компілятор лише видасть SyntaxWarning"
+    - "AssertionError: percent out of range"
+    - "AssertionError: (False, 'percent out of range')"
+    - "TypeError: assert очікує bool"
+  answer: 0
+  explain: |
+    Дужки перетворили умову й повідомлення на один кортеж з двох елементів, а непорожній кортеж
+    завжди truthy. `assert` нічого не перевіряє, і код друкує `ok`. Python 3.12 попереджає про це
+    `SyntaxWarning: assertion is always true, perhaps remove parentheses?`, але це попередження, а не помилка.
+    Обидва варіанти з `AssertionError` це інтуїція `console.assert(cond, msg)` з JS, де дужки належать
+    виклику функції; `assert` у Python це оператор, а не функція. `TypeError` ні: `assert` приймає
+    будь-яке значення і перевіряє його truthiness.
+
+- id: q4
+  type: quiz
+  question: |
+    Який рядок з'явиться між двома traceback, коли цей код впаде?
+    ```python
+    fields = {}
+    try:
+        fields["id"]
+    except KeyError as e:
+        raise ValueError("field has no id") from e
+    ```
+  options:
+    - "The above exception was the direct cause of the following exception:"
+    - "During handling of the above exception, another exception occurred:"
+    - "Жодного: буде лише traceback ValueError"
+    - "Жодного: буде лише traceback KeyError"
+  answer: 0
+  explain: |
+    `from e` записує `KeyError` у `__cause__` нового винятку, і Python друкує обидва traceback з фразою
+    "direct cause": ви явно сказали, що `ValueError` це переклад `KeyError`. Фраза "During handling" буде,
+    якщо написати `raise` без `from`: тоді Python лише фіксує, що новий виняток стався всередині `except`,
+    і читач traceback не знає, навмисно це чи баг в обробнику. Лише `ValueError` дає `from None`.
+    Лише `KeyError` був би, якби `except` не кидав нічого нового і просто робив `raise`.

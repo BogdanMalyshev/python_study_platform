@@ -1,0 +1,405 @@
+- id: t1
+  type: code
+  title: "Найпопулярніші типи елементів"
+  prompt: |
+    Напишіть `top_types(elements, n)`, яка повертає список із `n` найчастіших типів елементів форми
+    (поле `"type"` кожного елемента), від найчастішого до найрідшого. Якщо типів менше за `n`, повернути всі.
+
+    При однаковій кількості типи йдуть за алфавітом. Голий `most_common(n)` для цього не підходить:
+    рівні лічильники він віддає в порядку першої появи, а не за алфавітом.
+
+    ```python
+    top_types([{"type": "text"}, {"type": "email"}, {"type": "text"}], 1)   # ['text']
+    top_types([{"type": "select"}, {"type": "email"}], 2)                  # ['email', 'select']
+    top_types([], 3)                                                        # []
+    ```
+  starter: |
+    from collections import Counter
+
+    def top_types(elements: list[dict[str, str]], n: int) -> list[str]:
+        ...
+  harness: |
+    form = [
+        {"id": "name", "type": "text"},
+        {"id": "plan", "type": "select"},
+        {"id": "bio", "type": "text"},
+        {"id": "email", "type": "email"},
+        {"id": "size", "type": "select"},
+        {"id": "work_email", "type": "email"},
+        {"id": "terms", "type": "checkbox"},
+    ]
+    print(top_types(form, 2))
+    print(top_types(form, 10))
+    print(top_types([{"id": "a", "type": "file"}, {"id": "b", "type": "text"}, {"id": "c", "type": "file"}], 1))
+    print(top_types([], 3))
+  expected: |
+    ['email', 'select']
+    ['email', 'select', 'text', 'checkbox']
+    ['file']
+    []
+  hints:
+    - "Порахуйте типи через Counter з генераторного виразу, а потім відсортуйте пари (тип, кількість) самі: спершу за кількістю за спаданням, потім за назвою."
+    - "sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])) дає потрібний порядок; лишається взяти перші n і залишити лише назви."
+  solution: |
+    from collections import Counter
+
+    def top_types(elements: list[dict[str, str]], n: int) -> list[str]:
+        counts = Counter(el["type"] for el in elements)
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        return [el_type for el_type, _ in ranked[:n]]
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Що змінилось між версіями форми"
+  prompt: |
+    Напишіть `type_changes(old, new)`: на вхід два списки типів елементів, старої й нової версії форми.
+    Поверніть словник "тип → зміна кількості" зі знаком: додатне число, якщо таких елементів стало більше,
+    від'ємне, якщо менше. Типи без змін у результат не потрапляють. Ключі в алфавітному порядку.
+
+    Оператор `-` між лічильниками тут не допоможе: він відкидає від'ємні результати.
+
+    ```python
+    type_changes(["text", "select"], ["text", "text"])   # {'select': -1, 'text': 1}
+    type_changes(["text"], ["text"])                      # {}
+    ```
+  starter: |
+    from collections import Counter
+
+    def type_changes(old: list[str], new: list[str]) -> dict[str, int]:
+        ...
+  harness: |
+    print(type_changes(["text", "text", "email", "select"], ["text", "email", "email", "checkbox"]))
+    print(type_changes(["text"], ["text"]))
+    print(type_changes([], ["file", "file"]))
+    print(type_changes(["select", "select"], []))
+  expected: |
+    {'checkbox': 1, 'email': 1, 'select': -1, 'text': -1}
+    {}
+    {'file': 2}
+    {'select': -2}
+  hints:
+    - "Потрібен метод Counter, який віднімає на місці й зберігає нулі та від'ємні значення; нулі потім відфільтруйте самі."
+    - "diff = Counter(new); diff.subtract(old); далі dict comprehension по sorted(diff.items()) з умовою count != 0."
+  solution: |
+    from collections import Counter
+
+    def type_changes(old: list[str], new: list[str]) -> dict[str, int]:
+        diff = Counter(new)
+        diff.subtract(old)
+        return {el_type: count for el_type, count in sorted(diff.items()) if count != 0}
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Елементи по сторінках"
+  prompt: |
+    Напишіть `group_by_page(elements)`, яка повертає словник "номер сторінки → список `id` елементів".
+
+    - Елементи всередині сторінки в порядку появи у вхідному списку.
+    - Сторінки в порядку зростання номера, незалежно від порядку вводу.
+    - Елемент без ключа `"page"` належить сторінці 1.
+    - Результат звичайний `dict`, не `defaultdict`: звернення до неіснуючої сторінки має давати `KeyError`.
+
+    ```python
+    group_by_page([{"id": "plan", "page": 2}, {"id": "email"}])   # {1: ['email'], 2: ['plan']}
+    ```
+  starter: |
+    from collections import defaultdict
+
+    def group_by_page(elements: list[dict]) -> dict[int, list[str]]:
+        ...
+  harness: |
+    elements = [
+        {"id": "plan", "page": 2},
+        {"id": "email"},
+        {"id": "terms", "page": 3},
+        {"id": "phone", "page": 1},
+        {"id": "coupon", "page": 2},
+    ]
+    pages = group_by_page(elements)
+    print(pages)
+    print(type(pages).__name__)
+    try:
+        pages[9]
+    except KeyError as e:
+        print("KeyError:", e)
+    print(9 in pages, len(pages))
+    print(group_by_page([]))
+  expected: |
+    {1: ['email', 'phone'], 2: ['plan', 'coupon'], 3: ['terms']}
+    dict
+    KeyError: 9
+    False 3
+    {}
+  hints:
+    - "defaultdict(list) прибирає перевірку ключа при наповненні; номер сторінки бере el.get з default. Порядок сторінок і тип результату виправляються на виході."
+    - "for el in elements: by_page[el.get(\"page\", 1)].append(el[\"id\"]); return dict(sorted(by_page.items()))"
+  solution: |
+    from collections import defaultdict
+
+    def group_by_page(elements: list[dict]) -> dict[int, list[str]]:
+        by_page: defaultdict[int, list[str]] = defaultdict(list)
+        for el in elements:
+            by_page[el.get("page", 1)].append(el["id"])
+        return dict(sorted(by_page.items()))
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Черга генерації з повторами"
+  prompt: |
+    Черга задач генерації сторінок. Задача це `Job(form_id, attempt)`, де `attempt` номер спроби, починаючи з 1.
+    Напишіть `run_queue(form_ids, failures, max_attempts)`, яка імітує воркер і повертає журнал подій.
+
+    - Черга стартує з `Job(form_id)` для кожного id у порядку списку.
+    - Воркер бере задачу з голови черги. Задача падає, якщо `failures.get(form_id, 0) >= attempt`
+      (тобто `failures[form_id]` це кількість перших спроб, які впадуть).
+    - Успіх: у журнал `"ok <id> #<attempt>"`.
+    - Падіння при `attempt < max_attempts`: у журнал `"fail <id> #<attempt>"`, а в хвіст черги нова задача
+      з `attempt + 1` (через `_replace`, `Job` незмінний).
+    - Падіння на останній дозволеній спробі: у журнал `"drop <id> #<attempt>"`, задача більше не повертається.
+
+    Чергу тримайте в `deque[Job]`: `list.pop(0)` дає правильний результат, але це O(n) на кожну задачу.
+    Словник `failures` не змінювати.
+
+    ```python
+    run_queue(["a", "b"], {"b": 1}, 3)   # ['ok a #1', 'fail b #1', 'ok b #2']
+    ```
+  starter: |
+    from collections import deque
+    from typing import NamedTuple
+
+    class Job(NamedTuple):
+        form_id: str
+        attempt: int = 1
+
+    def run_queue(form_ids: list[str], failures: dict[str, int], max_attempts: int) -> list[str]:
+        ...
+  harness: |
+    failures = {"b": 1, "c": 5}
+    for line in run_queue(["a", "b", "c"], failures, 3):
+        print(line)
+    print(failures)
+    print(run_queue(["x"], {"x": 1}, 1))
+    print(run_queue([], {}, 3))
+  expected: |
+    ok a #1
+    fail b #1
+    fail c #1
+    ok b #2
+    fail c #2
+    drop c #3
+    {'b': 1, 'c': 5}
+    ['drop x #1']
+    []
+  hints:
+    - "Цикл while queue: з popleft на початку; задача, що впала, але ще має спроби, повертається в хвіст через append, тож вона дочекається своєї черги після інших."
+    - "job = queue.popleft(); if failures.get(job.form_id, 0) < job.attempt: ok; elif job.attempt < max_attempts: queue.append(job._replace(attempt=job.attempt + 1)); else: drop."
+  solution: |
+    from collections import deque
+    from typing import NamedTuple
+
+    class Job(NamedTuple):
+        form_id: str
+        attempt: int = 1
+
+    def run_queue(form_ids: list[str], failures: dict[str, int], max_attempts: int) -> list[str]:
+        queue: deque[Job] = deque(Job(form_id) for form_id in form_ids)
+        log: list[str] = []
+        while queue:
+            job = queue.popleft()
+            if failures.get(job.form_id, 0) < job.attempt:
+                log.append(f"ok {job.form_id} #{job.attempt}")
+            elif job.attempt < max_attempts:
+                log.append(f"fail {job.form_id} #{job.attempt}")
+                queue.append(job._replace(attempt=job.attempt + 1))
+            else:
+                log.append(f"drop {job.form_id} #{job.attempt}")
+        return log
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Тема форми як Computed у DevTools"
+  prompt: |
+    Стилі елемента складаються з трьох шарів, від сильнішого до слабшого: `style` самого елемента (ключ може
+    бути відсутній), тема проєкту `theme`, базові значення `defaults`. Напишіть `resolve_theme(defaults, theme, elements)`,
+    яка повертає `Resolved(styles, sources)`:
+
+    - `styles`: словник "id елемента → підсумкові стилі", властивості в алфавітному порядку, елементи в порядку вводу.
+    - `sources`: `Counter` з ключами `"element"`, `"theme"`, `"defaults"`: скільки властивостей по всій формі
+      взято з кожного шару. Як вкладка Computed у DevTools, що показує, звідки прийшло значення.
+
+    Шари не зливайте копіюванням: використайте `ChainMap` і його `maps`. Вхідні словники не змінювати
+    (зокрема не додавати `style` елементам, у яких його немає).
+
+    ```python
+    r = resolve_theme({"color": "#111"}, {}, [{"id": "a", "style": {"color": "red"}}])
+    r.styles    # {'a': {'color': 'red'}}
+    r.sources   # Counter({'element': 1})
+    ```
+  starter: |
+    from collections import ChainMap, Counter
+    from typing import NamedTuple
+
+    class Resolved(NamedTuple):
+        styles: dict[str, dict[str, str]]
+        sources: Counter[str]
+
+    def resolve_theme(defaults: dict[str, str], theme: dict[str, str], elements: list[dict]) -> Resolved:
+        ...
+  harness: |
+    defaults = {"color": "#111", "font": "Inter", "radius": "4px"}
+    theme = {"color": "#0a58ca", "radius": "8px"}
+    elements = [
+        {"id": "email"},
+        {"id": "submit", "style": {"color": "white", "background": "#0a58ca"}},
+        {"id": "plan", "style": {"radius": "999px"}},
+    ]
+    result = resolve_theme(defaults, theme, elements)
+    for el_id, style in result.styles.items():
+        print(el_id, style)
+    print(result.sources["element"], result.sources["theme"], result.sources["defaults"])
+    print(defaults)
+    print(theme)
+    print(elements[0])
+    print(isinstance(result, tuple), result._fields)
+  expected: |
+    email {'color': '#0a58ca', 'font': 'Inter', 'radius': '8px'}
+    submit {'background': '#0a58ca', 'color': 'white', 'font': 'Inter', 'radius': '8px'}
+    plan {'color': '#0a58ca', 'font': 'Inter', 'radius': '999px'}
+    3 4 3
+    {'color': '#111', 'font': 'Inter', 'radius': '4px'}
+    {'color': '#0a58ca', 'radius': '8px'}
+    {'id': 'email'}
+    True ('styles', 'sources')
+  hints:
+    - "Для кожного елемента ChainMap(style, theme, defaults) дає підсумкові значення. Шар, з якого прийшла властивість, це перший словник у chain.maps, де є ключ; назви шарів можна пройти паралельно через zip."
+    - "chain = ChainMap(el.get(\"style\", {}), theme, defaults); styles[el[\"id\"]] = dict(sorted(chain.items())); for key in chain: for name, layer in zip((\"element\", \"theme\", \"defaults\"), chain.maps): if key in layer: sources[name] += 1; break"
+  solution: |
+    from collections import ChainMap, Counter
+    from typing import NamedTuple
+
+    class Resolved(NamedTuple):
+        styles: dict[str, dict[str, str]]
+        sources: Counter[str]
+
+    LAYERS = ("element", "theme", "defaults")
+
+    def resolve_theme(defaults: dict[str, str], theme: dict[str, str], elements: list[dict]) -> Resolved:
+        styles: dict[str, dict[str, str]] = {}
+        sources: Counter[str] = Counter()
+        for el in elements:
+            chain = ChainMap(el.get("style", {}), theme, defaults)
+            styles[el["id"]] = dict(sorted(chain.items()))
+            for key in chain:
+                for name, layer in zip(LAYERS, chain.maps):
+                    if key in layer:
+                        sources[name] += 1
+                        break
+        return Resolved(styles, sources)
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from collections import Counter
+
+    a = Counter(text=3, email=1)
+    b = Counter(text=1, email=2)
+    print(a - b)
+    ```
+  options:
+    - "Counter({'text': 2})"
+    - "Counter({'text': 2, 'email': -1})"
+    - "Counter({'text': 2, 'email': 0})"
+    - "TypeError: unsupported operand type(s) for -"
+  answer: 0
+  explain: |
+    Бінарні операції між лічильниками працюють як над мультимножинами й викидають елементи з результатом нуль
+    або менше, тому `email` (1 - 2 = -1) зникає. `{'email': -1}` це результат `a.subtract(b)`, методу, який
+    зберігає від'ємні значення; інтуїція "це ж просто словник чисел, віднімемо поелементно" веде саме туди.
+    Нуль теж не зберігається, а `TypeError` був би для звичайних `dict`, у яких оператора `-` немає.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from collections import defaultdict
+
+    groups = defaultdict(list)
+    if groups["page-2"]:
+        print("has items")
+    print(len(groups), "page-2" in groups)
+    ```
+  options:
+    - "1 True"
+    - "0 False"
+    - "KeyError: 'page-2'"
+    - "has items, а потім 1 True"
+  answer: 0
+  explain: |
+    `groups["page-2"]` для відсутнього ключа викликає фабрику `list()`, записує порожній список під цим ключем
+    і повертає його. Порожній список хибний, тому `has items` не друкується, але ключ уже створено: `len` дорівнює 1.
+    `0 False` це інтуїція з JS, де читання відсутньої властивості дає `undefined` і нічого не змінює; так поводяться
+    `groups.get("page-2")` і `"page-2" in groups`. `KeyError` дав би звичайний `dict`.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from typing import NamedTuple
+
+    class Point(NamedTuple):
+        x: int
+        y: int
+
+    class Size(NamedTuple):
+        width: int
+        height: int
+
+    print(Point(1, 2) == (1, 2), Point(1, 2) == Size(1, 2))
+    ```
+  options: ["True True", "True False", "False False", "False True"]
+  answer: 0
+  explain: |
+    `NamedTuple` це підклас `tuple`, і `==` успадковано від кортежу: порівнюються лише значення за позиціями,
+    без класу й імен полів. Тому він дорівнює і звичайному кортежу, і будь-якому іншому namedtuple з тими самими
+    значеннями. `True False` очікують ті, хто думає про номінальну типізацію, `False False` ті, хто переносить
+    JS-інтуїцію "два різні об'єкти не рівні". `dataclass` з m2-l05 дав би `False` в обох випадках.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from collections import ChainMap
+
+    defaults = {"color": "black"}
+    theme = {"color": "navy"}
+    chain = ChainMap(theme, defaults)
+    chain["color"] = "red"
+    del chain["color"]
+    print(chain["color"], theme, defaults["color"])
+    ```
+  options:
+    - "black {} black"
+    - "navy {'color': 'navy'} black"
+    - "KeyError: 'color'"
+    - "red {} red"
+  answer: 0
+  explain: |
+    Запис і видалення в `ChainMap` торкаються лише першого словника. `chain["color"] = "red"` перезаписав
+    `navy` у `theme`, а не створив окремий шар, тому `navy` втрачено. `del` прибрав ключ з `theme`, і пошук
+    дійшов до `defaults`, де лишилось `black`. Варіант з `navy` очікує, що запис живе в окремому шарі поверх
+    теми; так працює `new_child()`, але не пряме присвоєння. `KeyError` був би, якби ключа не було в першому словнику.

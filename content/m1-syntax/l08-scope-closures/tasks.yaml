@@ -1,0 +1,423 @@
+- id: t1
+  type: code
+  title: "Тема форми без UnboundLocalError і без global"
+  prompt: |
+    Функція `resolve_theme` має повертати `override`, якщо його передано, інакше модульну `DEFAULT_THEME`.
+    Зараз виклик без аргументу падає з `UnboundLocalError`. Виправте функцію.
+
+    Обмеження: `DEFAULT_THEME` не має змінюватись. `global DEFAULT_THEME` прибере помилку, але тоді один
+    виклик з `"dark"` змінить тему для всіх наступних викликів, і харнес це помітить.
+
+    ```python
+    resolve_theme()         # 'light'
+    resolve_theme("dark")   # 'dark'
+    resolve_theme()         # 'light', а не 'dark'
+    ```
+  starter: |
+    DEFAULT_THEME = "light"
+
+    def resolve_theme(override: str | None = None) -> str:
+        if override:
+            DEFAULT_THEME = override
+        return DEFAULT_THEME
+  harness: |
+    print(resolve_theme())
+    print(resolve_theme("dark"))
+    print(resolve_theme())
+    print(resolve_theme(""))
+    print(DEFAULT_THEME)
+  expected: |
+    light
+    dark
+    light
+    light
+    light
+  hints:
+    - "Присвоєння DEFAULT_THEME у тілі робить це ім'я локальним на всю функцію, тому return його не знаходить. Потрібне інше ім'я для результату."
+    - "theme = override or DEFAULT_THEME; return theme. Глобальну змінну функція лише читає."
+  solution: |
+    DEFAULT_THEME = "light"
+
+    def resolve_theme(override: str | None = None) -> str:
+        theme = override or DEFAULT_THEME
+        return theme
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Лічильник через nonlocal"
+  prompt: |
+    Напишіть `make_counter(start=0, step=1)`, яка повертає функцію без аргументів. Перший виклик
+    повертає `start`, кожен наступний на `step` більше. Різні лічильники незалежні.
+
+    Стан тримайте в змінній `make_counter` і змінюйте її через `nonlocal`. Прийом з коробкою
+    `[0]` або словником не підходить: харнес перевіряє, що в замиканні немає списків і словників.
+
+    ```python
+    ids = make_counter()
+    ids(), ids(), ids()       # (0, 1, 2)
+    evens = make_counter(10, 2)
+    evens(), evens()          # (10, 12)
+    ```
+  starter: |
+    def make_counter(start: int = 0, step: int = 1):
+        ...
+  harness: |
+    ids = make_counter()
+    print(ids(), ids(), ids())
+    evens = make_counter(start=10, step=2)
+    print(evens(), evens())
+    print(ids())
+    down = make_counter(3, -1)
+    print(down(), down(), down(), down())
+    print(all(not isinstance(c.cell_contents, (list, dict)) for c in ids.__closure__))
+  expected: |
+    0 1 2
+    10 12
+    3
+    3 2 1 0
+    True
+  hints:
+    - "Внутрішня функція має переприсвоювати змінну зовнішньої. Без декларації присвоєння зробить її локальною і дасть UnboundLocalError."
+    - "Збережіть поточне значення в локальну змінну, збільште зовнішню на step після nonlocal current, поверніть збережене."
+  solution: |
+    def make_counter(start: int = 0, step: int = 1):
+        current = start
+
+        def next_value() -> int:
+            nonlocal current
+            value = current
+            current += step
+            return value
+
+        return next_value
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Що лежить у замиканні"
+  prompt: |
+    Напишіть `closure_vars(fn)`, яка повертає словник `{ім'я: поточне значення}` для всіх free variables
+    функції `fn`. Імена беріть з `fn.__code__.co_freevars`, значення з `cell_contents` відповідних
+    елементів `fn.__closure__`, порядок ключів як у `co_freevars`. Для функції без замикання
+    `__closure__` дорівнює `None`, результат тоді `{}`.
+
+    ```python
+    closure_vars(make_multiplier(3))   # {'n': 3}
+    ```
+
+    Зверніть увагу на виклик з лічильником у харнесі: функція покаже поточне значення змінної, а не те,
+    з яким замикання створювалось.
+  starter: |
+    def closure_vars(fn) -> dict[str, object]:
+        ...
+  harness: |
+    def make_multiplier(n):
+        def multiply(x):
+            return x * n
+        return multiply
+
+    def make_range_check(lo, hi):
+        def check(x):
+            return lo <= x <= hi
+        return check
+
+    def make_counter():
+        count = 0
+        def increment():
+            nonlocal count
+            count += 1
+            return count
+        return increment
+
+    def plain(x):
+        return x
+
+    def make_handlers():
+        return [lambda: i for i in range(3)]
+
+    print(closure_vars(make_multiplier(3)))
+    print(closure_vars(make_range_check(1, 10)))
+    counter = make_counter()
+    print(closure_vars(counter))
+    counter()
+    counter()
+    print(closure_vars(counter))
+    print(closure_vars(plain))
+    print(closure_vars(make_handlers()[0]))
+  expected: |
+    {'n': 3}
+    {'hi': 10, 'lo': 1}
+    {'count': 0}
+    {'count': 2}
+    {}
+    {'i': 2}
+  hints:
+    - "co_freevars і __closure__ ідуть паралельно: i-те ім'я відповідає i-му cell. Їх можна обійти разом."
+    - "dict(zip(fn.__code__.co_freevars, ...)) з cell.cell_contents для кожного cell; замість None підставте порожній кортеж: fn.__closure__ or ()."
+  solution: |
+    def closure_vars(fn) -> dict[str, object]:
+        cells = fn.__closure__ or ()
+        return {name: cell.cell_contents for name, cell in zip(fn.__code__.co_freevars, cells)}
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Форматери одиниць без пізнього зв'язування"
+  prompt: |
+    `make_formatters(units)` отримує словник `{field_id: unit}` і має повернути словник
+    `{field_id: formatter}`, де `formatter(value)` повертає рядок `"<value> <unit>"` зі своєю одиницею.
+    Поточна версія повертає всім полям останню одиницю. Виправте її.
+
+    Додаткова вимога: форматер приймає рівно один аргумент. Виклик `formatter(70, "lbs")` має кидати
+    `TypeError`, а не підміняти одиницю. Тому прийом `lambda value, unit=unit: ...` тут не підходить:
+    він робить `unit` публічним параметром. Скористайтесь `functools.partial` або фабрикою.
+
+    ```python
+    fmt = make_formatters({"weight": "kg", "height": "cm"})
+    fmt["weight"](70)    # '70 kg'
+    fmt["height"](180)   # '180 cm'
+    ```
+  starter: |
+    def make_formatters(units: dict[str, str]) -> dict:
+        formatters = {}
+        for field_id, unit in units.items():
+            formatters[field_id] = lambda value: f"{value} {unit}"
+        return formatters
+  harness: |
+    fmt = make_formatters({"weight": "kg", "height": "cm", "age": "years"})
+    print(fmt["weight"](70))
+    print(fmt["height"](180))
+    print(fmt["age"](30))
+    print(make_formatters({}))
+    try:
+        fmt["weight"](70, "lbs")
+        print("unit was overridden")
+    except TypeError:
+        print("TypeError: unit is fixed")
+  expected: |
+    70 kg
+    180 cm
+    30 years
+    {}
+    TypeError: unit is fixed
+  hints:
+    - "Усі lambda замикають одну змінну unit, і читають її при виклику, коли цикл уже закінчився. Значення треба скопіювати в момент створення в місце, яке не змінюється і не є параметром."
+    - "def format_value(value, *, unit): return f\"{value} {unit}\" і partial(format_value, unit=unit). Або фабрика def make_formatter(unit): return lambda value: ..."
+  solution: |
+    from functools import partial
+
+    def format_value(value: object, *, unit: str) -> str:
+        return f"{value} {unit}"
+
+    def make_formatters(units: dict[str, str]) -> dict:
+        formatters = {}
+        for field_id, unit in units.items():
+            formatters[field_id] = partial(format_value, unit=unit)
+        return formatters
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Унікальні id для дерева елементів форми"
+  prompt: |
+    Елементи форми FormBuilder це словники `{"type": str}` з необов'язковими `"id": str` і
+    `"children": list`. Напишіть `assign_ids(elements, prefix)`, яка повертає нове дерево, де кожен
+    елемент має `id`.
+
+    Правила:
+    - наявний `id` зберігається як є;
+    - новий `id` має вигляд `"<prefix>-<type>-<n>"`, де `n` рахується окремо для кожного типу з 1;
+    - номер, який дав би `id`, що вже є будь-де у вхідному дереві, пропускається;
+    - `id` видаються в порядку обходу: спершу елемент, потім його діти, сусіди зліва направо;
+    - вхідні словники не змінюються, повертаються нові;
+    - без `global`: два виклики `assign_ids` незалежні, і нумерація в кожному починається з 1.
+
+    ```python
+    assign_ids([{"type": "input"}, {"type": "input", "id": "f-input-2"}, {"type": "input"}], "f")
+    # id: f-input-1, f-input-2 (наявний), f-input-3 (2 зайнятий)
+    ```
+  starter: |
+    def assign_ids(elements: list[dict], prefix: str) -> list[dict]:
+        ...
+  harness: |
+    def show(elements, depth=0):
+        for el in elements:
+            print("  " * depth + f"{el['type']} {el['id']}")
+            show(el.get("children", []), depth + 1)
+
+    form = [
+        {"type": "group", "children": [
+            {"type": "input"},
+            {"type": "input", "id": "f-input-2"},
+            {"type": "text"},
+        ]},
+        {"type": "input"},
+        {"type": "group", "id": "contacts", "children": [{"type": "input"}]},
+    ]
+    show(assign_ids(form, "f"))
+    print("id" in form[0], "id" in form[0]["children"][0])
+    show(assign_ids([{"type": "input"}], "f"))
+    show(assign_ids(form, "x"))
+    print(assign_ids([], "f"))
+  expected: |
+    group f-group-1
+      input f-input-1
+      input f-input-2
+      text f-text-1
+    input f-input-3
+    group contacts
+      input f-input-4
+    False False
+    input f-input-1
+    group x-group-1
+      input x-input-1
+      input f-input-2
+      text x-text-1
+    input x-input-2
+    group contacts
+      input x-input-3
+    []
+  hints:
+    - "Два проходи. Перший збирає всі наявні id у множину. Другий будує нове дерево і видає id. Стан обох (множина зайнятих, лічильники по типах) живе всередині assign_ids, а не в модулі."
+    - "Внутрішня функція next_id(kind) мутує словник counters і множину taken з assign_ids; nonlocal не потрібен, бо це мутація, а не переприсвоєння. Рекурсивна walk(items) копіює кожен елемент через dict(el), ставить id до обходу дітей."
+    - "def next_id(kind): while True: counters[kind] = counters.get(kind, 0) + 1; candidate = f\"{prefix}-{kind}-{counters[kind]}\"; if candidate not in taken: taken.add(candidate); return candidate"
+  solution: |
+    def assign_ids(elements: list[dict], prefix: str) -> list[dict]:
+        taken: set[str] = set()
+        counters: dict[str, int] = {}
+
+        def collect(items: list[dict]) -> None:
+            for el in items:
+                if "id" in el:
+                    taken.add(el["id"])
+                collect(el.get("children", []))
+
+        def next_id(kind: str) -> str:
+            while True:
+                counters[kind] = counters.get(kind, 0) + 1
+                candidate = f"{prefix}-{kind}-{counters[kind]}"
+                if candidate not in taken:
+                    taken.add(candidate)
+                    return candidate
+
+        def walk(items: list[dict]) -> list[dict]:
+            result = []
+            for el in items:
+                new = dict(el)
+                if "id" not in new:
+                    new["id"] = next_id(new["type"])
+                if "children" in el:
+                    new["children"] = walk(el["children"])
+                result.append(new)
+            return result
+
+        collect(elements)
+        return walk(elements)
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    name = "global"
+
+    def show():
+        for name in []:
+            pass
+        return name
+
+    print(show())
+    ```
+  options: ["global", "UnboundLocalError", "NameError", "None"]
+  answer: 1
+  explain: |
+    Ціль `for` це зв'язування імені, тож компілятор робить `name` локальною на всю функцію `show`.
+    Цикл по порожньому списку не виконав жодного присвоєння, і `return name` читає локальну без значення:
+    `UnboundLocalError`. `global` спокусливий з думки "цикл нічого не присвоїв, отже видно зовнішню", але
+    локальність вирішується при компіляції, а не при виконанні. `NameError` був би на рівні модуля, де немає
+    локальних імен; `UnboundLocalError` його підклас. `None` це інтуїція `var` з JS, де оголошена змінна
+    має `undefined`.
+
+- id: q2
+  type: quiz
+  question: |
+    Який із викликів кидає `UnboundLocalError`?
+    ```python
+    def outer():
+        items = []
+        count = 0
+
+        def a():
+            items.append(1)
+
+        def b():
+            items[len(items):] = [2]
+
+        def c():
+            return count + 1
+
+        def d():
+            items += [3]
+
+        return a, b, c, d
+    ```
+  options: ["a()", "b()", "c()", "d()"]
+  answer: 3
+  explain: |
+    `items += [3]` це розширене присвоєння імені `items`, тож у `d` вона локальна, і `+=` пробує прочитати
+    її до значення. Те, що для списку `+=` мутує об'єкт на місці, на рішення компілятора не впливає.
+    `a` викликає метод знайденого через LEGB об'єкта, `b` пише у зріз, а не в ім'я, `c` лише читає:
+    жодна з них ім'я не зв'язує, тож усі три працюють без `nonlocal`. `b` найспокусливіший варіант,
+    бо там є `=`, але ліворуч стоїть `items[...]`, а не голе ім'я.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    theme = "light"
+
+    def render():
+        return theme
+
+    handler = render
+    theme = "dark"
+    print(handler())
+    ```
+  options: ["light", "dark", "UnboundLocalError", "NameError"]
+  answer: 1
+  explain: |
+    Функція не запам'ятовує значення імен при створенні або при присвоєнні `handler = render`. `theme`
+    шукається через LEGB у момент виклику, і в модулі на той момент `"dark"`. Те саме пізнє зв'язування,
+    що й у замиканнях, тільки на рівні G. `light` це інтуїція "функція захопила значення". `UnboundLocalError`
+    був би, якби `render` присвоювала `theme`; тут вона лише читає. `NameError` ні: ім'я є в модулі.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    def peak(values):
+        max = 0
+        for v in values:
+            if v > max:
+                max = v
+        return max
+
+    print(peak([3, 7, 5]))
+    print(max([1, 2]))
+    ```
+  options: ["7, потім 2", "7, потім TypeError", "TypeError на першому print", "UnboundLocalError"]
+  answer: 0
+  explain: |
+    `max = 0` у функції створює локальне ім'я, яке затінює вбудований `max` лише всередині `peak`.
+    Глобальний простір імен воно не чіпає, тож `max([1, 2])` на рівні модуля знаходить вбудовану
+    функцію в builtins і повертає `2`. `TypeError: 'int' object is not callable` був би, якби
+    `max = 0` стояло на рівні модуля. `UnboundLocalError` ні: `max` присвоєно до першого читання.

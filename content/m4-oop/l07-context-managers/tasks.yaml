@@ -1,0 +1,556 @@
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    import io
+
+    with io.StringIO("data") as f:
+        text = f.read()
+    print(text, f.closed)
+    ```
+  options:
+    - "data True"
+    - "NameError: name 'f' is not defined"
+    - "data False"
+    - "NameError: name 'text' is not defined"
+  answer: 0
+  explain: |
+    `with` не створює scope: і `f`, і `text` лишаються доступними після блоку, тому обидва варіанти з `NameError`
+    це інтуїція з `using` у TS, де змінна зникає разом з блоком. `f` після блоку вказує на той самий об'єкт,
+    але його `__exit__` уже викликав `close()`, тож `f.closed` дорівнює `True`. `False` було б, якби `with`
+    лише давав ім'я ресурсу і нічого не робив на виході.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class Quiet:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            print("exit:", exc_type.__name__ if exc_type else None)
+            return "cleaned"
+
+    with Quiet():
+        raise ValueError("boom")
+    print("after")
+    ```
+  options:
+    - "`exit: ValueError`, потім `after`"
+    - "`exit: ValueError`, потім traceback з `ValueError: boom`"
+    - "Лише traceback з `ValueError: boom`: `__exit__` не викликається, бо виняток"
+    - "`TypeError`: `__exit__` має повертати bool"
+  answer: 0
+  explain: |
+    `with` перевіряє truthiness результату `__exit__`, а не рівність `True`. Непорожній рядок `"cleaned"` істинний,
+    тож виняток вважається обробленим і проковтнутим, і виконання йде до `print("after")`. Варіант з traceback був би
+    правильним, якби `__exit__` повертав `None` або `False`. `__exit__` викликається завжди, саме для винятків він
+    і потрібен. Перевірки типу результату Python не робить, тому й `TypeError` немає.
+
+- id: q3
+  type: quiz
+  question: |
+    Генераторні менеджери одноразові. Що надрукує цей код?
+    ```python
+    from contextlib import contextmanager
+
+    @contextmanager
+    def step(name):
+        print("start", name)
+        yield
+        print("end", name)
+
+    @step("render")
+    def render():
+        print("rendering")
+
+    render()
+    render()
+    ```
+  options:
+    - "Двічі `start render`, `rendering`, `end render`"
+    - "Перший виклик відпрацьовує, другий падає з `AttributeError`, бо менеджер одноразовий"
+    - "`start render` один раз під час декорування, потім двічі `rendering` і `end render` один раз"
+    - "`TypeError`: об'єкт менеджера не можна викликати як функцію"
+  answer: 0
+  explain: |
+    Менеджери з `@contextmanager` наслідують `ContextDecorator`, і в декораторній формі перед кожним викликом функції
+    створюється новий менеджер зі свіжим генератором. Тому одноразовість не заважає: кожен виклик `render()`
+    отримує власний вхід і вихід. `AttributeError` буває, коли той самий збережений об'єкт менеджера
+    використовують у `with` удруге. Під час декорування тіло генератора не виконується взагалі, а `TypeError`
+    немає, бо `ContextDecorator` реалізує `__call__`, що загортає функцію.
+
+- id: t1
+  type: code
+  title: "Тег, який закривається завжди"
+  prompt: |
+    Напишіть клас-менеджер `Tag(out, name)`. На вході він додає в список `out` рядок `"<name>"`,
+    на виході `"</name>"`, причому закривальний тег з'являється і тоді, коли тіло кинуло виняток.
+    Виняток при цьому не ковтається. `__enter__` повертає сам екземпляр, у якого є атрибут `name`.
+
+    ```python
+    out = []
+    with Tag(out, "form") as t:
+        out.append("text")
+    out       # ['<form>', 'text', '</form>']
+    t.name    # 'form'
+    ```
+  starter: |
+    class Tag:
+        def __init__(self, out: list[str], name: str) -> None:
+            ...
+  harness: |
+    out = []
+    with Tag(out, "form") as t:
+        out.append("text")
+    print(out, t.name)
+
+    out = []
+    with Tag(out, "div"):
+        with Tag(out, "p"):
+            out.append("hi")
+    print(out)
+
+    out = []
+    try:
+        with Tag(out, "ul"):
+            out.append("li")
+            raise ValueError("render failed")
+    except ValueError as e:
+        print("error:", e)
+    print(out)
+  expected: |
+    ['<form>', 'text', '</form>'] form
+    ['<div>', '<p>', 'hi', '</p>', '</div>']
+    error: render failed
+    ['<ul>', 'li', '</ul>']
+  hints:
+    - "Потрібні три методи: __init__ зберігає список і ім'я, __enter__ пише відкривальний тег, __exit__ закривальний."
+    - "__exit__(self, exc_type, exc, tb) викликається і при винятку; щоб не проковтнути виняток, не повертайте з нього нічого істинного: return None або просто без return."
+  solution: |
+    class Tag:
+        def __init__(self, out: list[str], name: str) -> None:
+            self.out = out
+            self.name = name
+
+        def __enter__(self) -> "Tag":
+            self.out.append(f"<{self.name}>")
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            self.out.append(f"</{self.name}>")
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Ignore, який пам'ятає проковтнутий виняток"
+  prompt: |
+    Напишіть клас-менеджер `Ignore(*exc_types)`, схожий на `contextlib.suppress`, але з пам'яттю.
+    Він ковтає винятки перелічених типів і їхніх нащадків і зберігає проковтнутий виняток в атрибуті `error`.
+    Якщо винятку не було, `error` дорівнює `None`. Винятки інших типів летять далі.
+    `__enter__` повертає сам менеджер, щоб `error` можна було прочитати після блоку.
+
+    ```python
+    with Ignore(KeyError) as ign:
+        {}["label"]
+    ign.error         # KeyError('label')
+
+    with Ignore(KeyError):
+        int("x")      # ValueError летить далі
+    ```
+  starter: |
+    class Ignore:
+        def __init__(self, *exc_types: type[BaseException]) -> None:
+            ...
+  harness: |
+    with Ignore(KeyError) as ign:
+        print("before")
+        {}["label"]
+        print("not reached")
+    print("error:", repr(ign.error))
+
+    with Ignore(LookupError) as ign:
+        [][3]
+    print("subclass:", repr(ign.error))
+
+    with Ignore(KeyError, ValueError) as ign:
+        pass
+    print("no exception:", ign.error)
+
+    try:
+        with Ignore(KeyError) as ign:
+            int("x")
+    except ValueError as e:
+        print("propagated:", type(e).__name__, "| error:", ign.error)
+  expected: |
+    before
+    error: KeyError('label')
+    subclass: IndexError('list index out of range')
+    no exception: None
+    propagated: ValueError | error: None
+  hints:
+    - "Рішення приймає __exit__: його результат каже, ковтати виняток чи ні. Перевірка типу з урахуванням нащадків це issubclass, і він приймає кортеж типів."
+    - "if exc_type is not None and issubclass(exc_type, self.exc_types): self.error = exc; return True. Інакше return False. Не забудьте ініціалізувати self.error = None."
+  solution: |
+    class Ignore:
+        def __init__(self, *exc_types: type[BaseException]) -> None:
+            self.exc_types = exc_types
+            self.error: BaseException | None = None
+
+        def __enter__(self) -> "Ignore":
+            self.error = None
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            if exc_type is not None and issubclass(exc_type, self.exc_types):
+                self.error = exc
+                return True
+            return False
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Тимчасове перевизначення ключів словника"
+  prompt: |
+    Напишіть через `@contextmanager` функцію `override(mapping, **changes)`. На вході вона записує
+    в `mapping` значення з `changes` і віддає `mapping` в `as`. На виході повертає словник у початковий
+    стан: ключі, які існували, отримують старі значення, а ключі, яких не було, видаляються.
+    Відновлення відбувається і тоді, коли тіло кинуло виняток; сам виняток летить далі.
+    Так влаштований `unittest.mock.patch.dict`.
+
+    ```python
+    settings = {"debug": False}
+    with override(settings, debug=True, theme="dark") as s:
+        s          # {'debug': True, 'theme': 'dark'}
+    settings       # {'debug': False}
+    ```
+  starter: |
+    from collections.abc import Iterator
+    from contextlib import contextmanager
+
+    @contextmanager
+    def override(mapping: dict, **changes) -> Iterator[dict]:
+        ...
+  harness: |
+    settings = {"debug": False, "lang": "uk"}
+    with override(settings, debug=True, theme="dark") as s:
+        print(s is settings, settings)
+    print(settings)
+
+    try:
+        with override(settings, lang="en"):
+            print(settings["lang"])
+            raise RuntimeError("render failed")
+    except RuntimeError as e:
+        print("error:", e)
+    print(settings)
+
+    with override(settings, debug=True):
+        with override(settings, debug="verbose", extra=1):
+            print(settings)
+        print(settings)
+    print(settings)
+  expected: |
+    True {'debug': True, 'lang': 'uk', 'theme': 'dark'}
+    {'debug': False, 'lang': 'uk'}
+    en
+    error: render failed
+    {'debug': False, 'lang': 'uk'}
+    {'debug': 'verbose', 'lang': 'uk', 'extra': 1}
+    {'debug': True, 'lang': 'uk'}
+    {'debug': False, 'lang': 'uk'}
+  hints:
+    - "До yield запам'ятайте, що було: для кожного ключа зі changes або старе значення, або позначку, що ключа не було. Відновлення має стояти у finally."
+    - "missing = object() як маркер; saved = {k: mapping.get(k, missing) for k in changes}; mapping.update(changes); try: yield mapping; finally: для кожного k, old: якщо old is missing, mapping.pop(k, None), інакше mapping[k] = old."
+  solution: |
+    from collections.abc import Iterator
+    from contextlib import contextmanager
+
+    _MISSING = object()
+
+    @contextmanager
+    def override(mapping: dict, **changes) -> Iterator[dict]:
+        saved = {key: mapping.get(key, _MISSING) for key in changes}
+        mapping.update(changes)
+        try:
+            yield mapping
+        finally:
+            for key, old in saved.items():
+                if old is _MISSING:
+                    mapping.pop(key, None)
+                else:
+                    mapping[key] = old
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Транзакція над конфігом"
+  prompt: |
+    Напишіть через `@contextmanager` функцію `transaction(config, log)`. Вона віддає в `as` чернетку,
+    глибоку копію `config`, яку тіло вільно змінює.
+
+    - Тіло завершилось без винятку: вміст `config` замінюється вмістом чернетки (сам об'єкт `config`
+      той самий, змінюється вміст), у `log` додається `"commit"`.
+    - Тіло кинуло виняток: `config` лишається таким, яким був, у `log` додається `"rollback: <ТипВинятку>"`,
+      виняток летить далі.
+
+    ```python
+    config = {"title": "Contact", "fields": ["email"]}
+    log = []
+    with transaction(config, log) as draft:
+        draft["fields"].append("phone")
+    config    # {'title': 'Contact', 'fields': ['email', 'phone']}
+    log       # ['commit']
+    ```
+  starter: |
+    import copy
+    from collections.abc import Iterator
+    from contextlib import contextmanager
+
+    @contextmanager
+    def transaction(config: dict, log: list[str]) -> Iterator[dict]:
+        ...
+  harness: |
+    config = {"title": "Contact", "fields": ["email"]}
+    original = config
+    log = []
+
+    with transaction(config, log) as draft:
+        draft["fields"].append("phone")
+        draft["title"] = "Contact us"
+        print("inside:", config)
+    print(config, config is original, log)
+
+    try:
+        with transaction(config, log) as draft:
+            draft["fields"].append("age")
+            del draft["title"]
+            draft["missing"]["x"]
+    except KeyError as e:
+        print("error:", repr(e))
+    print(config, log)
+
+    with transaction(config, log) as draft:
+        draft.clear()
+    print(config, config is original, log)
+  expected: |
+    inside: {'title': 'Contact', 'fields': ['email']}
+    {'title': 'Contact us', 'fields': ['email', 'phone']} True ['commit']
+    error: KeyError('missing')
+    {'title': 'Contact us', 'fields': ['email', 'phone']} ['commit', 'rollback: KeyError']
+    {} True ['commit', 'rollback: KeyError', 'commit']
+  hints:
+    - "Чернетка мусить бути глибокою копією: з поверхневою append у вкладений список змінить і оригінал. Виняток з тіла з'явиться в рядку yield, тож yield треба обгорнути в try з except і else."
+    - "draft = copy.deepcopy(config); try: yield draft; except Exception as e: log.append(f\"rollback: {type(e).__name__}\"); raise; else: config.clear(); config.update(draft); log.append(\"commit\")."
+  solution: |
+    import copy
+    from collections.abc import Iterator
+    from contextlib import contextmanager
+
+    @contextmanager
+    def transaction(config: dict, log: list[str]) -> Iterator[dict]:
+        draft = copy.deepcopy(config)
+        try:
+            yield draft
+        except Exception as e:
+            log.append(f"rollback: {type(e).__name__}")
+            raise
+        else:
+            config.clear()
+            config.update(draft)
+            log.append("commit")
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Відкрити всі шаблони або жодного"
+  prompt: |
+    Напишіть через `@contextmanager` функцію `open_all(names, opener)`. Для кожного імені вона викликає
+    `opener(name)`, який повертає менеджер-ресурс (наприклад, файл), входить у нього і віддає в `as`
+    словник `{name: ресурс}` у порядку `names`.
+
+    - На виході всі ресурси закриваються у зворотному порядку.
+    - Якщо `opener` упав на якомусь імені, ресурси, відкриті до нього, закриваються, а виняток летить далі.
+    - Якщо впало тіло, усі ресурси теж закриваються.
+
+    Кількість ресурсів відома лише під час виконання, тож `with` через кому не підійде. У перевірці
+    `opener` повертає `io.StringIO`, який друкує, коли його закривають, а наприкінці перевірка показує,
+    чи лишився відкритим хоч один ресурс.
+  starter: |
+    from collections.abc import Callable, Iterator
+    from contextlib import ExitStack, contextmanager
+    from typing import IO
+
+    @contextmanager
+    def open_all(names: list[str], opener: Callable[[str], IO[str]]) -> Iterator[dict[str, IO[str]]]:
+        ...
+  harness: |
+    import io
+
+    class LoggedIO(io.StringIO):
+        def __init__(self, name: str, text: str) -> None:
+            super().__init__(text)
+            self.name = name
+
+        def close(self) -> None:
+            if not self.closed:
+                print("close", self.name)
+            super().close()
+
+    store = {"page.html": "<main>", "field.html": "<input>", "footer.html": "<footer>"}
+    opened: list[LoggedIO] = []
+
+    def opener(name: str) -> LoggedIO:
+        print("open", name)
+        f = LoggedIO(name, store[name])
+        opened.append(f)
+        return f
+
+    with open_all(["page.html", "field.html", "footer.html"], opener) as files:
+        print({name: f.read() for name, f in files.items()})
+
+    try:
+        with open_all(["page.html", "missing.html", "footer.html"], opener) as files:
+            print("not reached")
+    except KeyError as e:
+        print("error:", repr(e))
+
+    try:
+        with open_all(["field.html", "page.html"], opener) as files:
+            raise RuntimeError("render failed")
+    except RuntimeError as e:
+        print("error:", e)
+
+    with open_all([], opener) as files:
+        print(files)
+    print("left open:", [f.name for f in opened if not f.closed])
+  expected: |
+    open page.html
+    open field.html
+    open footer.html
+    {'page.html': '<main>', 'field.html': '<input>', 'footer.html': '<footer>'}
+    close footer.html
+    close field.html
+    close page.html
+    open page.html
+    open missing.html
+    close page.html
+    error: KeyError('missing.html')
+    open field.html
+    open page.html
+    close page.html
+    close field.html
+    error: render failed
+    {}
+    left open: []
+  hints:
+    - "ExitStack усередині генератора: відкривайте кожен ресурс через stack.enter_context і робіть yield, поки стек ще відкритий."
+    - "with ExitStack() as stack: yield {name: stack.enter_context(opener(name)) for name in names}"
+  solution: |
+    from collections.abc import Callable, Iterator
+    from contextlib import ExitStack, contextmanager
+    from typing import IO
+
+    @contextmanager
+    def open_all(names: list[str], opener: Callable[[str], IO[str]]) -> Iterator[dict[str, IO[str]]]:
+        with ExitStack() as stack:
+            yield {name: stack.enter_context(opener(name)) for name in names}
+  requires: []
+  runtime: browser
+
+- id: t6
+  type: code
+  title: "StageTimer: етапи генерації з годинником-параметром"
+  prompt: |
+    Напишіть клас `StageTimer(clock)`, де `clock` це функція без аргументів, що повертає час у секундах.
+    Метод `stage(name)` повертає контекстний менеджер, який міряє тривалість блоку і додає рядок у список
+    `self.report`:
+
+    - успіх: `"<name>: <секунди з двома знаками>s ok"`, наприклад `"validate: 0.50s ok"`;
+    - виняток: `"<name>: <секунди>s failed (<ТипВинятку>)"`, а сам виняток летить далі.
+
+    Етапи можна вкладати (внутрішній запишеться першим), а `stage(...)` можна використати як декоратор
+    функції: тоді кожен її виклик міряється окремо. Час брати лише з `clock`, у перевірці це фальшивий
+    годинник, що щоразу віддає значення на 0.5 більше.
+
+    ```python
+    timer = StageTimer(clock)
+    with timer.stage("validate"):
+        ...
+    timer.report   # ['validate: 0.50s ok']
+    ```
+  starter: |
+    from collections.abc import Callable, Iterator
+    from contextlib import contextmanager
+
+    class StageTimer:
+        def __init__(self, clock: Callable[[], float]) -> None:
+            ...
+  harness: |
+    from itertools import count
+
+    timer = StageTimer(count(start=0.0, step=0.5).__next__)
+
+    with timer.stage("validate"):
+        pass
+
+    with timer.stage("build"):
+        with timer.stage("render"):
+            pass
+
+    try:
+        with timer.stage("upload"):
+            raise ConnectionError("cdn down")
+    except ConnectionError as e:
+        print("error:", e)
+
+    @timer.stage("publish")
+    def publish(page: str) -> str:
+        return page.upper()
+
+    print(publish("contact"), publish("about"))
+
+    for line in timer.report:
+        print(line)
+  expected: |
+    error: cdn down
+    CONTACT ABOUT
+    validate: 0.50s ok
+    render: 0.50s ok
+    build: 1.50s ok
+    upload: 0.50s failed (ConnectionError)
+    publish: 0.50s ok
+    publish: 0.50s ok
+  hints:
+    - "Найкоротше: метод stage як генератор під @contextmanager. Такий менеджер уже вміє бути декоратором і створюється заново на кожен виклик, тож вкладеність і повторні виклики працюють без додаткового стану."
+    - "start = self.clock(); try: yield; except Exception as e: self.report.append(f\"{name}: {self.clock() - start:.2f}s failed ({type(e).__name__})\"); raise; else: аналогічний рядок з ok."
+  solution: |
+    from collections.abc import Callable, Iterator
+    from contextlib import contextmanager
+
+    class StageTimer:
+        def __init__(self, clock: Callable[[], float]) -> None:
+            self.clock = clock
+            self.report: list[str] = []
+
+        @contextmanager
+        def stage(self, name: str) -> Iterator[None]:
+            start = self.clock()
+            try:
+                yield
+            except Exception as e:
+                elapsed = self.clock() - start
+                self.report.append(f"{name}: {elapsed:.2f}s failed ({type(e).__name__})")
+                raise
+            else:
+                elapsed = self.clock() - start
+                self.report.append(f"{name}: {elapsed:.2f}s ok")
+  requires: []
+  runtime: browser

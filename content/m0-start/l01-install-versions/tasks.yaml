@@ -1,0 +1,296 @@
+- id: q1
+  type: quiz
+  question: |
+    Новий термінал на Mac з уроку, ви поза будь-яким проєктом, `python3` у `PATH` це `/usr/bin/python3`.
+    Що станеться після цієї команди?
+    ```bash
+    python3 -m pip install requests
+    ```
+  options:
+    - "pip відмовить з `externally-managed-environment`: системний Python захищений PEP 668"
+    - "Пакет ляже в `~/Library/Python/3.9` і стане видимим усім скриптам, які запускає системний `python3`"
+    - "Пакет ляже в `site-packages` поточного каталогу, як `npm install` кладе `node_modules` поруч"
+    - "Помилка `Permission denied`, без `sudo` нічого не встановиться"
+  answer: 1
+  explain: |
+    Apple-івський 3.9 не має маркера `EXTERNALLY-MANAGED`, тому PEP 668 тут не спрацьовує: відмову
+    ви побачите лише на Homebrew- або uv-Python. Системний `site-packages` належить `root`, але pip
+    не падає з `Permission denied`, а сам перемикається на user-встановлення з повідомленням
+    `Defaulting to user installation because normal site-packages is not writeable`. Локального
+    каталогу пакетів поруч із проєктом pip не створює ніколи: для цього потрібне віртуальне оточення (m0-l02).
+    Результат найгірший з чотирьох: тиха установка в спільне для всіх проєктів місце.
+
+- id: t1
+  type: code
+  title: "Рядок версії з sys.version_info"
+  prompt: |
+    `sys.version_info` це кортеж з п'яти полів: `(major, minor, micro, releaselevel, serial)`.
+    `releaselevel` буває `"alpha"`, `"beta"`, `"candidate"` або `"final"`.
+
+    Напишіть `format_version(info)`, яка повертає версію в тому вигляді, як її друкує `python --version`:
+    для `"final"` лише три числа, для інших рівнів суфікс `a`, `b` або `rc` і номер `serial`.
+
+    ```python
+    format_version((3, 12, 12, "final", 0))     # '3.12.12'
+    format_version((3, 15, 0, "alpha", 5))      # '3.15.0a5'
+    format_version((3, 13, 0, "candidate", 3))  # '3.13.0rc3'
+    ```
+
+    Останній рядок перевірки звіряє вашу функцію зі справжнім `sys.version` інтерпретатора,
+    в якому виконується код.
+  starter: |
+    def format_version(info: tuple[int, int, int, str, int]) -> str:
+        ...
+  harness: |
+    print(format_version((3, 12, 12, "final", 0)))
+    print(format_version((3, 9, 6, "final", 0)))
+    print(format_version((3, 15, 0, "alpha", 5)))
+    print(format_version((3, 14, 0, "beta", 1)))
+    print(format_version((3, 13, 0, "candidate", 3)))
+
+    import sys
+    print(format_version(tuple(sys.version_info)) == sys.version.split()[0])
+  expected: |
+    3.12.12
+    3.9.6
+    3.15.0a5
+    3.14.0b1
+    3.13.0rc3
+    True
+  hints:
+    - "Кортеж розпаковується в п'ять змінних одним присвоєнням, як деструктуризація масиву в JS. Суфікс залежить лише від releaselevel."
+    - "Словник {\"alpha\": \"a\", \"beta\": \"b\", \"candidate\": \"rc\"} дає суфікс; для \"final\" його в словнику немає, і тоді повертається лише f\"{major}.{minor}.{micro}\"."
+  solution: |
+    def format_version(info: tuple[int, int, int, str, int]) -> str:
+        major, minor, micro, level, serial = info
+        base = f"{major}.{minor}.{micro}"
+        if level == "final":
+            return base
+        suffix = {"alpha": "a", "beta": "b", "candidate": "rc"}[level]
+        return f"{base}{suffix}{serial}"
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    На Mac з уроку ви виконали `uv python install 3.12`, відкрили новий термінал і перебуваєте
+    поза будь-яким проєктом. `PATH` той самий: `~/.local/bin`, потім `/usr/bin`, потім `/opt/homebrew/bin`.
+    Що надрукує ця команда?
+    ```bash
+    python3 --version
+    ```
+  options:
+    - "Python 3.12.12"
+    - "Python 3.9.6"
+    - "Python 3.14.5"
+    - "zsh: command not found: python3"
+  answer: 1
+  explain: |
+    uv кладе в `~/.local/bin` лише версійне посилання `python3.12`, а `python3` не чіпає, тому перший
+    `python3` у `PATH` лишається Apple-івським у `/usr/bin`. 3.12.12 ви отримаєте через `python3.12`
+    або `uv run python`, але uv не перемикає версію для shell, як `nvm use`. 3.14.5 з Homebrew теж
+    називається `python3`, але `/opt/homebrew/bin` стоїть у `PATH` пізніше за `/usr/bin`. "Command not
+    found" це доля команди `python`, а не `python3`.
+
+- id: q3
+  type: quiz
+  question: |
+    Та сама машина: Apple-івський 3.9.6 перший у `PATH` як `python3`, Homebrew 3.14.5 далі в `PATH`,
+    uv-керовані 3.10.19 і 3.12.12. Ви в каталозі без `.python-version` і без `pyproject.toml`.
+    Що надрукує ця команда?
+    ```bash
+    uv run python --version
+    ```
+  options:
+    - "Python 3.9.6"
+    - "Python 3.14.5"
+    - "Python 3.12.12"
+    - "Python 3.10.19"
+  answer: 2
+  explain: |
+    Без прапорця `--python` і без конфігу проєкту uv за замовчуванням віддає перевагу своїм керованим
+    версіям перед тим, що лежить у `PATH`, і з них бере найновішу, тобто 3.12.12. Перший `python3` у `PATH`
+    (3.9.6) важливий для shell, а не для uv. Найновіший 3.14.5 з Homebrew теж не вибирається:
+    "найновіший взагалі" не правило uv, керовані версії йдуть першими. 3.10.19 керована, але старша за 3.12.12.
+
+- id: q4
+  type: quiz
+  question: |
+    У каталозі проєкту `.python-version` містить `3.10`, а `pyproject.toml` такий:
+    ```toml
+    [project]
+    name = "versions-demo"
+    version = "0.1.0"
+    requires-python = ">=3.12"
+    ```
+    На машині встановлені 3.10.19 і 3.12.12. Що зробить `uv run python --version`?
+  options:
+    - "Надрукує `Python 3.10.19` і попередження про несумісність, як npm з `engines`"
+    - "Мовчки візьме 3.12.12, бо `requires-python` важливіший за `.python-version`"
+    - "Завершиться помилкою про конфлікт `.python-version` з `requires-python`, Python не запуститься"
+    - "Завантажить ще одну 3.10, бо в `.python-version` вказана версія без patch-номера"
+  answer: 2
+  explain: |
+    uv бере інтерпретатор з `.python-version`, бачить, що 3.10.19 не задовольняє `>=3.12`, і зупиняється
+    з `error: The Python request from .python-version resolved to Python 3.10.19, which is incompatible
+    with the project's Python requirement`. Це не warning, як `engines` у npm: код не запускається взагалі.
+    Тихо підмінити версію uv теж не стане, бо `.python-version` це ваше явне рішення, і суперечність
+    треба розв'язати руками через `uv python pin 3.12`. `3.10` без patch-номера означає "будь-яка 3.10",
+    і встановлена 3.10.19 під це підходить, тож нічого не завантажується.
+
+- id: t2
+  type: code
+  title: "Чи задовольняє версія мінімальній вимозі"
+  prompt: |
+    Напишіть `satisfies(version, minimum)`, яка повертає `True`, якщо версія `version` не старша
+    за `minimum`. Обидві приходять рядками з довільною кількістю частин: `"3.12"`, `"3.12.12"`.
+    Так працює найпростіша частина `requires-python = ">=3.12"`.
+
+    ```python
+    satisfies("3.12.12", "3.12")   # True
+    satisfies("3.10.19", "3.9")    # True
+    satisfies("3.9.6", "3.12")     # False
+    satisfies("3.12", "3.12.1")    # False
+    ```
+
+    Порівняння рядків `version >= minimum` проходить частину перевірок і ламається на `"3.9"` проти `"3.10"`.
+  starter: |
+    def satisfies(version: str, minimum: str) -> bool:
+        ...
+  harness: |
+    print(satisfies("3.12.12", "3.12"))
+    print(satisfies("3.9.6", "3.12"))
+    print(satisfies("3.10.19", "3.9"))
+    print(satisfies("3.14.5", "3.12"))
+    print(satisfies("3.12", "3.12.1"))
+    print(satisfies("3.12.0", "3.12"))
+  expected: |
+    True
+    False
+    True
+    True
+    False
+    True
+  hints:
+    - "Кортежі порівнюються поелементно, як sys.version_info >= (3, 12). Перетворіть обидва рядки на кортежі цілих."
+    - "tuple(int(part) for part in version.split(\".\")) і так само для minimum, далі звичайне >=."
+  solution: |
+    def satisfies(version: str, minimum: str) -> bool:
+        def as_tuple(v: str) -> tuple[int, ...]:
+            return tuple(int(part) for part in v.split("."))
+
+        return as_tuple(version) >= as_tuple(minimum)
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Встановлені версії з виводу uv python list"
+  prompt: |
+    `uv python list` друкує рядок на кожну відому uv версію: ключ інтерпретатора і шлях до нього,
+    або `<download available>`, якщо версію ще не встановлено. Одна версія може трапитись кілька
+    разів, якщо на неї є кілька посилань.
+
+    Напишіть `installed_versions(listing)`, яка повертає список версій CPython, що справді встановлені,
+    без повторів, від найновішої до найстарішої. PyPy, GraalPy і `<download available>` пропускаються.
+    Версія це друга частина ключа після `cpython-`: з `cpython-3.12.12-macos-aarch64-none` це `"3.12.12"`.
+
+    ```python
+    installed_versions(LISTING)   # ['3.14.5', '3.12.12', '3.11.15', '3.10.19', '3.9.6']
+    ```
+
+    Зверніть увагу на порядок: `"3.9.6"` має опинитись останнім.
+  starter: |
+    def installed_versions(listing: str) -> list[str]:
+        ...
+  harness: |
+    LISTING = """\
+    cpython-3.15.0a5-macos-aarch64-none                 <download available>
+    cpython-3.14.5-macos-aarch64-none                   /opt/homebrew/bin/python3.14 -> ../Cellar/python@3.14/3.14.5/bin/python3.14
+    cpython-3.14.5-macos-aarch64-none                   /opt/homebrew/bin/python3 -> ../Cellar/python@3.14/3.14.5/bin/python3
+    cpython-3.13.11-macos-aarch64-none                  <download available>
+    cpython-3.12.12-macos-aarch64-none                  /Users/mac/.local/bin/python3.12 -> /Users/mac/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/bin/python3.12
+    cpython-3.12.12-macos-aarch64-none                  /Users/mac/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/bin/python3.12
+    cpython-3.11.15-macos-aarch64-none                  /opt/homebrew/bin/python3.11 -> ../Cellar/python@3.11/3.11.15_1/bin/python3.11
+    cpython-3.10.19-macos-aarch64-none                  /Users/mac/.local/share/uv/python/cpython-3.10.19-macos-aarch64-none/bin/python3.10
+    cpython-3.9.6-macos-aarch64-none                    /usr/bin/python3
+    pypy-3.11.13-macos-aarch64-none                     <download available>
+    """
+    print(installed_versions(LISTING))
+    print(installed_versions(""))
+    print(installed_versions("pypy-3.10.16-macos-aarch64-none    /opt/pypy/bin/pypy3\ncpython-3.12.12-macos-aarch64-none    <download available>"))
+  expected: |
+    ['3.14.5', '3.12.12', '3.11.15', '3.10.19', '3.9.6']
+    []
+    []
+  hints:
+    - "Розбийте вивід на рядки, а кожен рядок на слова через split() без аргументів: перше слово ключ, друге або шлях, або \"<download\". Повтори прибирає множина."
+    - "Сортувати рядки версій не можна: \"3.9.6\" > \"3.14.5\" як рядки. Ключ сортування: tuple(int(p) for p in v.split(\".\")), плюс reverse=True."
+  solution: |
+    def installed_versions(listing: str) -> list[str]:
+        found = set()
+        for line in listing.splitlines():
+            parts = line.split()
+            if len(parts) < 2 or parts[1] == "<download":
+                continue
+            name = parts[0]
+            if not name.startswith("cpython-"):
+                continue
+            found.add(name.split("-")[1])
+        return sorted(found, key=lambda v: tuple(int(p) for p in v.split(".")), reverse=True)
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "Скрипт, що не залежить від python3 у PATH"
+  prompt: |
+    Створіть у корені курсу каталог `practice/m0-l01/` і в ньому виконуваний файл
+    `pyinfo.py`, який друкує реалізацію й версію інтерпретатора, наприклад `CPython 3.12.12`.
+
+    Скрипт має запускатися як `./pyinfo.py` з будь-якого каталогу й щоразу потрапляти в 3.12,
+    незалежно від того, що лежить у `PATH` під іменем `python3`. Для цього shebang з uv і блок
+    `# /// script` з `requires-python = "==3.12.*"`.
+
+    Окремо: якщо хтось запустить файл старим інтерпретатором напряму (`/usr/bin/python3 pyinfo.py`),
+    скрипт має завершитись ненульовим кодом і повідомленням `need Python 3.12+, got <версія>`,
+    а не надрукувати версію 3.9. Подумайте, чому ця перевірка спрацює лише доти, доки файл
+    синтаксично сумісний із 3.9.
+
+    `verify` запускається з кореня курсу і викликає скрипт шляхом `practice/m0-l01/pyinfo.py`.
+  checklist:
+    - "Перший рядок `#!/usr/bin/env -S uv run --script`, файл має право на виконання (`chmod +x`)"
+    - "Блок `# /// script` з `requires-python = \"==3.12.*\"`"
+    - "`./pyinfo.py` друкує `CPython 3.12.` і patch-номер, у тому числі якщо запустити його з `/`"
+    - "`/usr/bin/python3 pyinfo.py` завершується з ненульовим кодом через `sys.exit` з повідомленням"
+    - "Версія в повідомленні береться з `platform.python_version()` або `sys.version_info`, а не пишеться руками"
+  verify: "practice/m0-l01/pyinfo.py | grep -E '^CPython 3\\.12\\.' && ! /usr/bin/python3 practice/m0-l01/pyinfo.py"
+
+- id: p2
+  type: project
+  title: "Пісочниця з закріпленою версією"
+  prompt: |
+    У тому самому каталозі `practice/m0-l01/` зробіть його проєктом з закріпленим Python 3.12
+    (усі команди нижче виконуються з цього каталогу):
+
+    1. `uv python pin 3.12`, щоб з'явився `.python-version`.
+    2. Руками (без `uv init`, він з m0-l02) створіть `pyproject.toml` з секцією `[project]`:
+       `name = "m0-l01-sandbox"`, `version = "0.1.0"`, `requires-python = ">=3.12"`.
+    3. Файл `check.py`, який друкує `platform.python_implementation()` і версію з `sys.version`
+       через пробіл, наприклад `CPython 3.12.12`.
+    4. Запустіть `uv run python check.py`. Після першого запуску в каталозі з'являться `.venv` і `uv.lock`,
+       це очікувано, детально в m0-l02.
+
+    Потім перевірте суперечність руками: поставте в `.python-version` значення `3.10` (через редактор,
+    бо `uv python pin 3.10` уже відмовить), запустіть `uv run python check.py`, прочитайте помилку
+    і поверніть `3.12`.
+
+    Завдання про uv, тому `verify` переходить у каталог проєкту (`cd practice/m0-l01`) і запускає
+    `uv run`, а не `.venv/bin/python` з кореня курсу: потрібне оточення цього проєкту, а не курсу.
+  checklist:
+    - "`.python-version` містить рівно `3.12`"
+    - "`pyproject.toml` має `requires-python = \">=3.12\"`"
+    - "`uv run python check.py` друкує `CPython 3.12.` і patch-номер"
+    - "Ви бачили помилку uv про несумісність `.python-version` і `requires-python` і можете пояснити, хто з них за що відповідає"
+  verify: "cd practice/m0-l01 && test \"$(cat .python-version)\" = \"3.12\" && grep -q 'requires-python = \">=3.12\"' pyproject.toml && uv run python check.py | grep -E '^CPython 3\\.12\\.'"

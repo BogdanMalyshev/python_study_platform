@@ -1,0 +1,686 @@
+- id: t1
+  type: code
+  title: "argv для рендерера списком"
+  prompt: |
+    Напишіть `render_argv(config_path, *, out_dir=None, minify=False, locales=None)`, яка повертає список
+    аргументів для `subprocess.run`: спершу `"node"`, `"render.js"`, шлях до конфігу, далі опції.
+
+    - `out_dir` не `None` додає `"--out", out_dir` (навіть порожній рядок: це значення, а не відсутність);
+    - `minify=True` додає `"--minify"`;
+    - кожна локаль зі списку додає пару `"--locale", <локаль>` у тому самому порядку.
+
+    Ніяких лапок і склеювання рядків: значення з пробілами чи `;` мають лишитися одним елементом списку.
+    Харнес друкує список і `shlex.join(argv)`, тобто рядок для лога.
+
+    ```python
+    render_argv("forms/contact.json")
+    # ['node', 'render.js', 'forms/contact.json']
+    render_argv("my form.json", out_dir="dist", minify=True, locales=["uk", "en"])
+    # ['node', 'render.js', 'my form.json', '--out', 'dist', '--minify', '--locale', 'uk', '--locale', 'en']
+    ```
+  starter: |
+    def render_argv(
+        config_path: str,
+        *,
+        out_dir: str | None = None,
+        minify: bool = False,
+        locales: list[str] | None = None,
+    ) -> list[str]:
+        ...
+  harness: |
+    import shlex
+
+    argv = render_argv("forms/contact.json")
+    print(argv)
+    argv = render_argv("forms/my form.json", out_dir="dist", minify=True, locales=["uk", "en"])
+    print(argv)
+    print(shlex.join(argv))
+    argv = render_argv("x.json; rm -rf ~", out_dir="")
+    print(argv)
+    print(shlex.join(argv))
+  expected: |
+    ['node', 'render.js', 'forms/contact.json']
+    ['node', 'render.js', 'forms/my form.json', '--out', 'dist', '--minify', '--locale', 'uk', '--locale', 'en']
+    node render.js 'forms/my form.json' --out dist --minify --locale uk --locale en
+    ['node', 'render.js', 'x.json; rm -rf ~', '--out', '']
+    node render.js 'x.json; rm -rf ~' --out ''
+  hints:
+    - "Почніть зі списку з трьох елементів і дописуйте опції по черзі. Перевірка на out_dir має відрізняти None від порожнього рядка."
+    - "argv += [\"--out\", out_dir] під `if out_dir is not None`, а для локалей цикл `for locale in locales or []`."
+  solution: |
+    def render_argv(
+        config_path: str,
+        *,
+        out_dir: str | None = None,
+        minify: bool = False,
+        locales: list[str] | None = None,
+    ) -> list[str]:
+        argv = ["node", "render.js", config_path]
+        if out_dir is not None:
+            argv += ["--out", out_dir]
+        if minify:
+            argv.append("--minify")
+        for locale in locales or []:
+            argv += ["--locale", locale]
+        return argv
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що станеться на macOS або Linux?
+    ```python
+    import subprocess
+    subprocess.run("node render.js config.json")
+    ```
+  options:
+    - "Node запуститься з аргументами `render.js` і `config.json`"
+    - "`FileNotFoundError: [Errno 2] No such file or directory: 'node render.js config.json'`"
+    - "Рядок виконається через `/bin/sh`, як у `child_process.exec`"
+    - "`TypeError`: `run` приймає лише список"
+  answer: 1
+  explain: |
+    Без `shell=True` рядок на POSIX вважається іменем програми цілком, і Python шукає в `PATH` файл, що буквально
+    називається `node render.js config.json`. На слова рядок ніхто не розбиває: розбиває shell, а його тут немає.
+    Варіант з `/bin/sh` це поведінка `exec` у Node і `shell=True` у Python, але не значення за замовчуванням.
+    `TypeError` не буде, бо рядок формально дозволений (як ім'я програми без аргументів).
+
+- id: t2
+  type: code
+  title: "Команда з конфігу: shlex.split без shell"
+  prompt: |
+    Команда рендерера приходить з налаштувань рядком, наприклад `node render.js --title 'Contact form'`.
+    Напишіть `split_command(cmd)`, яка повертає список аргументів для запуску **без** shell.
+
+    - Розбирати за правилами `sh` через `shlex.split` (лапки, екранування). Незакриті лапки дають `ValueError`
+      від самого `shlex`, його не перехоплювати.
+    - Порожня команда (лише пробіли): `ValueError("empty command")`.
+    - Без shell оператори не працюють, а потрапляють у програму буквальними аргументами. Тому якщо будь-який
+      елемент дорівнює одному з `|`, `||`, `&`, `&&`, `;`, `>`, `>>`, `<`, `2>`, `2>&1`, кинути
+      `ValueError(f"shell operator {token!r} needs a shell; pass a plain command")` для першого такого елемента.
+
+    ```python
+    split_command("node render.js --title 'Contact form'")
+    # ['node', 'render.js', '--title', 'Contact form']
+    split_command("node render.js | gzip")
+    # ValueError: shell operator '|' needs a shell; pass a plain command
+    ```
+  starter: |
+    import shlex
+
+    def split_command(cmd: str) -> list[str]:
+        ...
+  harness: |
+    print(split_command("node render.js --title 'Contact form'"))
+    print(split_command('node  render.js  --out "dist/my site"  --minify'))
+    print(split_command("python -m formbuilder.render --mode=static"))
+    for bad in ["node render.js | gzip", "node a.js && node b.js", "   ", "node render.js --title 'oops"]:
+        try:
+            split_command(bad)
+        except ValueError as e:
+            print("ValueError:", e)
+  expected: |
+    ['node', 'render.js', '--title', 'Contact form']
+    ['node', 'render.js', '--out', 'dist/my site', '--minify']
+    ['python', '-m', 'formbuilder.render', '--mode=static']
+    ValueError: shell operator '|' needs a shell; pass a plain command
+    ValueError: shell operator '&&' needs a shell; pass a plain command
+    ValueError: empty command
+    ValueError: No closing quotation
+  hints:
+    - "Спершу розбийте рядок, потім перевірте результат: порожній список і елементи, що збігаються з операторами з множини."
+    - "argv = shlex.split(cmd); if not argv: raise ValueError(\"empty command\"); далі for token in argv: if token in SHELL_OPERATORS: raise ..."
+  solution: |
+    import shlex
+
+    SHELL_OPERATORS = {"|", "||", "&", "&&", ";", ">", ">>", "<", "2>", "2>&1"}
+
+    def split_command(cmd: str) -> list[str]:
+        argv = shlex.split(cmd)
+        if not argv:
+            raise ValueError("empty command")
+        for token in argv:
+            if token in SHELL_OPERATORS:
+                raise ValueError(f"shell operator {token!r} needs a shell; pass a plain command")
+        return argv
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Рендерер пише в stdout близько мегабайта HTML і кілька рядків у stderr. Який варіант може зависнути назавжди?
+  options:
+    - "`subprocess.run(argv, capture_output=True)`"
+    - "`p = Popen(argv, stdout=PIPE, stderr=PIPE)`, потім `p.wait()`, потім `p.stdout.read()`"
+    - "`p = Popen(argv, stdout=PIPE, stderr=PIPE)`, потім `out, err = p.communicate()`"
+    - "`p = Popen(argv, stdout=PIPE, stderr=STDOUT)`, потім `for line in p.stdout: ...`, потім `p.wait()`"
+  answer: 1
+  explain: |
+    Пайп це буфер ядра обмеженого розміру. У другому варіанті батько чекає завершення, нічого не читаючи;
+    дитина заповнює буфер stdout і блокується на `write`, тож не завершиться ніколи. Це класичний deadlock.
+    `run` усередині використовує `communicate`, який читає обидва пайпи одночасно, тому перший і третій варіанти
+    безпечні. Четвертий теж: потік один (stderr злитий у stdout), читач є постійно, а `wait` викликається вже
+    після кінця потоку. У Node такої проблеми немає, бо libuv вичитує пайпи у фоні, звідси й хибна інтуїція.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код на Linux або macOS?
+    ```python
+    p = subprocess.Popen(["node", "-e", "setInterval(() => {}, 1000)"])
+    p.terminate()
+    print(p.wait())
+    ```
+  options: ["`143`", "`-15`", "`15`", "`None`"]
+  answer: 1
+  explain: |
+    Процес, убитий сигналом, не має коду виходу, і Python на POSIX кодує це від'ємним номером сигналу:
+    `-15` означає `SIGTERM`. `143` (128 + 15) так само означає `SIGTERM`, але в записі shell, яким ви його бачите
+    в `$?` або в коді виходу Docker-контейнера. `15` виглядав би як звичайний `exit(15)`, і саме тому Python
+    обрав знак мінус. `None` повертає `poll()` до завершення, а `wait()` чекає, тож `None` не буде. У Node та сама
+    інформація прийшла б у подію `exit` як `code === null` і `signal === "SIGTERM"`.
+
+- id: t3
+  type: code
+  title: "Людський опис результату процесу"
+  prompt: |
+    Напишіть `describe_exit(result)` для `subprocess.CompletedProcess`, що повертає рядок для статусу генерації:
+
+    - `returncode == 0`: `"ok"`;
+    - від'ємний код: `"killed by <ІМ'Я СИГНАЛУ>"`, ім'я через `signal.Signals(...)` (наприклад `-15` дає `killed by SIGTERM`);
+    - додатний код: `"exit <код>: <останній непорожній рядок stderr без пробілів по краях>"`, або просто
+      `"exit <код>"`, якщо в stderr нічого немає.
+
+    `stderr` може бути `str`, `bytes` (процес запускали без `text=True`) або `None` (stderr не захоплювали).
+    Байти декодуйте як UTF-8 з `errors="replace"`: битий байт не має ламати опис помилки.
+
+    ```python
+    describe_exit(CompletedProcess(["node"], 2, "", "config.fields must be an array\n"))
+    # 'exit 2: config.fields must be an array'
+    describe_exit(CompletedProcess(["node"], -9, "", ""))
+    # 'killed by SIGKILL'
+    ```
+  starter: |
+    import signal
+    import subprocess
+
+    def describe_exit(result: subprocess.CompletedProcess) -> str:
+        ...
+  harness: |
+    cases = [
+        subprocess.CompletedProcess(["node", "render.js"], 0, "<form>", ""),
+        subprocess.CompletedProcess(["node", "render.js"], 2, "", "config.fields must be an array\n"),
+        subprocess.CompletedProcess(["node", "render.js"], 1, "", "at render.js:12\n  TypeError: x is undefined  \n\n"),
+        subprocess.CompletedProcess(["node", "render.js"], 1, "", ""),
+        subprocess.CompletedProcess(["node", "render.js"], 3, b"", b"bad label: caf\xe9\n"),
+        subprocess.CompletedProcess(["node", "render.js"], -15, None, None),
+        subprocess.CompletedProcess(["node", "render.js"], -9, "", ""),
+    ]
+    for r in cases:
+        print(describe_exit(r))
+  expected: |
+    ok
+    exit 2: config.fields must be an array
+    exit 1: TypeError: x is undefined
+    exit 1
+    exit 3: bad label: caf�
+    killed by SIGTERM
+    killed by SIGKILL
+  hints:
+    - "Три гілки за знаком returncode. Для додатного коду спершу приведіть stderr до str (None стає порожнім рядком, bytes декодуються), потім шукайте останній непорожній рядок."
+    - "signal.Signals(-rc).name дає 'SIGTERM'. Для stderr: `lines = [l.strip() for l in stderr.splitlines() if l.strip()]`, далі `lines[-1]`, якщо список не порожній."
+  solution: |
+    import signal
+    import subprocess
+
+    def describe_exit(result: subprocess.CompletedProcess) -> str:
+        rc = result.returncode
+        if rc == 0:
+            return "ok"
+        if rc < 0:
+            return f"killed by {signal.Signals(-rc).name}"
+        stderr = result.stderr or ""
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+        return f"exit {rc}: {lines[-1]}" if lines else f"exit {rc}"
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Події прогресу з потоку байтів"
+  prompt: |
+    Рендерер пише в stdout рядки прогресу: JSON-об'єкт на рядок, а між ними іноді звичайний текст.
+    Вивід приходить шматками `bytes` довільного розміру, як із `proc.stdout.read(n)`: межа шматка може
+    пройти посеред рядка і навіть посеред багатобайтової літери.
+
+    Напишіть генератор `read_events(chunks)`, який віддає по одному словнику на кожен рядок:
+
+    - рядок, що парситься як JSON-**об'єкт**, віддається як є (`dict`);
+    - будь-який інший рядок (не JSON, або JSON, але не об'єкт, як `42`) віддається як `{"log": рядок}`;
+    - роздільник рядків `\n`, сам роздільник і `\r` перед ним у результат не входять;
+    - останній рядок без `\n` наприкінці теж віддається, якщо він не порожній;
+    - декодування UTF-8 через інкрементальний декодер `codecs.getincrementaldecoder("utf-8")(errors="replace")`,
+      щоб кирилиця на межі шматків не ламалась, а битий байт ставав `�`.
+
+    ```python
+    list(read_events([b'{"progress": 10}\nwarn', b": no label\n"]))
+    # [{'progress': 10}, {'log': 'warn: no label'}]
+    ```
+  starter: |
+    import codecs
+    import json
+    from collections.abc import Iterable, Iterator
+
+    def read_events(chunks: Iterable[bytes]) -> Iterator[dict]:
+        ...
+  harness: |
+    kyiv = "Київ".encode()
+    chunks = [
+        b'{"progress": 10}\n{"prog',
+        b'ress": 60, "page": "',
+        kyiv[:3],
+        kyiv[3:] + b'"}\nwarn: label missing\r\n',
+        b"caf\xe9\n",
+        b'42\n{"progress": 100}',
+    ]
+    for event in read_events(chunks):
+        print(event)
+    print(list(read_events([])))
+    print(list(read_events([b"", b"done"])))
+  expected: |
+    {'progress': 10}
+    {'progress': 60, 'page': 'Київ'}
+    {'log': 'warn: label missing'}
+    {'log': 'caf�'}
+    {'log': '42'}
+    {'progress': 100}
+    []
+    [{'log': 'done'}]
+  hints:
+    - "Тримайте рядковий буфер між шматками. Кожен шматок спершу декодуйте інкрементальним декодером і додайте до буфера, потім віддайте всі повні рядки, а незавершений хвіст лиште в буфері. Після циклу не забудьте decode(b\"\", final=True) і залишок."
+    - "`*lines, buffer = buffer.split(\"\\n\")` розділяє повні рядки й хвіст за один рядок коду. Розбір одного рядка винесіть у функцію: `rstrip(\"\\r\")`, `json.loads` у try/except `json.JSONDecodeError`, перевірка `isinstance(event, dict)`."
+  solution: |
+    import codecs
+    import json
+    from collections.abc import Iterable, Iterator
+
+    def read_events(chunks: Iterable[bytes]) -> Iterator[dict]:
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        buffer = ""
+        for chunk in chunks:
+            buffer += decoder.decode(chunk)
+            *lines, buffer = buffer.split("\n")
+            for line in lines:
+                yield parse_line(line)
+        buffer += decoder.decode(b"", final=True)
+        if buffer:
+            yield parse_line(buffer)
+
+    def parse_line(line: str) -> dict:
+        line = line.rstrip("\r")
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            return {"log": line}
+        return event if isinstance(event, dict) else {"log": line}
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Node-рендерер завис. Що з ним після того, як цей код надрукував `timeout`?
+    ```python
+    proc = await asyncio.create_subprocess_exec("node", "render.js", stdin=PIPE, stdout=PIPE)
+    try:
+        async with asyncio.timeout(10):
+            out, _ = await proc.communicate(data)
+    except TimeoutError:
+        print("timeout")
+    ```
+  options:
+    - "asyncio убив його через `SIGKILL`, як це робить `subprocess.run(timeout=)`"
+    - "Отримав `SIGTERM` і завершується"
+    - "Працює далі: `proc.returncode is None`, і після завершення скрипта він лишиться сиротою"
+    - "Став зомбі й чекає `wait()`"
+  answer: 2
+  explain: |
+    Таймаут скасовує корутину `communicate`, тобто очікування, а не процес. Ні `SIGKILL`, ні `SIGTERM` ніхто не
+    надсилав, тож процес живий і переживе навіть `asyncio.run`. Зомбі стає лише процес, що вже завершився,
+    а цей не завершувався. Аналогія з `subprocess.run(timeout=)` хибна: той сам вбиває дитину, а asyncio
+    лишає це вам. Правильно: `proc.kill()` і `await proc.wait()` у `finally`, якщо `returncode is None`.
+
+- id: t5
+  type: code
+  title: "run_tool: обгортка над subprocess.run"
+  runtime: local
+  prompt: |
+    Створіть у корені курсу папку `practice/m6-l05/` і в ній `run_tool.py` з функцією
+    `run_tool(argv, *, input=None, timeout=10.0, cwd=None) -> str`, яка запускає програму без shell і
+    перетворює всі способи впасти на один виняток `ToolError` (клас дано в стартовому коді).
+
+    - Успіх: повернути stdout як `str`. Декодувати UTF-8 з `errors="replace"`.
+    - `input`, якщо передано, іде в stdin.
+    - Ненульовий код: `ToolError(argv, returncode, f"exit {code}: " + " | ".join(tail))`, де `tail` це останні
+      три непорожні рядки stderr.
+    - Таймаут: `ToolError(argv, None, f"timed out after {timeout}s")`; процес до цього моменту має бути вбитий
+      (`run` робить це сам).
+    - Немає виконуваного файлу: `ToolError(argv, None, f"not found: {e.filename}")`.
+    - Оригінальний виняток лишайте в ланцюжку через `raise ... from e`.
+
+    Поруч покладіть `test_run_tool.py` з таким вмістом. Fake-інструмент пишеться в `tmp_path` і запускається через
+    `sys.executable`, тож нічого, крім Python, не потрібно.
+
+    ```python
+    import sys
+    import time
+    from pathlib import Path
+
+    import pytest
+
+    from run_tool import ToolError, run_tool
+
+    FAKE = r"""
+    import sys, time
+    mode = sys.argv[1]
+    if mode == "echo":
+        data = sys.stdin.read()
+        print(data.upper(), end="")
+    elif mode == "args":
+        print(sys.argv[2:])
+    elif mode == "cwd":
+        import os; print(os.path.basename(os.getcwd()))
+    elif mode == "fail":
+        for i in range(5):
+            print(f"line {i}", file=sys.stderr)
+        sys.exit(4)
+    elif mode == "bytes":
+        sys.stdout.buffer.write(b"caf\xe9\n")
+    elif mode == "sleep":
+        time.sleep(30)
+    """
+
+
+    @pytest.fixture
+    def fake(tmp_path: Path) -> list[str]:
+        script = tmp_path / "fake_tool.py"
+        script.write_text(FAKE)
+        return [sys.executable, str(script)]
+
+
+    def test_stdin_to_stdout(fake: list[str]) -> None:
+        assert run_tool([*fake, "echo"], input="привіт, form") == "ПРИВІТ, FORM"
+
+
+    def test_arguments_are_not_split(fake: list[str]) -> None:
+        out = run_tool([*fake, "args", "my form.json", "; rm -rf ~"])
+        assert out == "['my form.json', '; rm -rf ~']\n"
+
+
+    def test_cwd(fake: list[str], tmp_path: Path) -> None:
+        work = tmp_path / "workdir"
+        work.mkdir()
+        assert run_tool([*fake, "cwd"], cwd=str(work)) == "workdir\n"
+
+
+    def test_nonzero_exit_keeps_stderr_tail(fake: list[str]) -> None:
+        with pytest.raises(ToolError) as info:
+            run_tool([*fake, "fail"])
+        assert info.value.returncode == 4
+        assert str(info.value).endswith("exit 4: line 2 | line 3 | line 4")
+
+
+    def test_invalid_utf8_does_not_crash(fake: list[str]) -> None:
+        assert run_tool([*fake, "bytes"]) == "caf\ufffd\n"
+
+
+    def test_timeout_is_tool_error(fake: list[str]) -> None:
+        t0 = time.monotonic()
+        with pytest.raises(ToolError) as info:
+            run_tool([*fake, "sleep"], timeout=0.5)
+        assert time.monotonic() - t0 < 5
+        assert info.value.returncode is None
+        assert "timed out after 0.5s" in str(info.value)
+
+
+    def test_missing_executable() -> None:
+        with pytest.raises(ToolError) as info:
+            run_tool(["formbuilder-no-such-tool", "x"])
+        assert info.value.returncode is None
+        assert str(info.value) == "formbuilder-no-such-tool: not found: formbuilder-no-such-tool"
+    ```
+  starter: |
+    import subprocess
+    from collections.abc import Sequence
+
+
+    class ToolError(Exception):
+        def __init__(self, argv: Sequence[str], returncode: int | None, detail: str) -> None:
+            self.argv = list(argv)
+            self.returncode = returncode
+            self.detail = detail
+            super().__init__(f"{self.argv[0]}: {detail}")
+
+
+    def run_tool(
+        argv: Sequence[str],
+        *,
+        input: str | None = None,
+        timeout: float = 10.0,
+        cwd: str | None = None,
+    ) -> str:
+        ...
+  hints:
+    - "Один виклик subprocess.run з capture_output, encoding, errors, timeout і cwd. Навколо нього try з двома except: FileNotFoundError і subprocess.TimeoutExpired. Ненульовий код перевіряйте вже після try."
+    - "tail = [line for line in result.stderr.splitlines() if line.strip()][-3:]; raise ToolError(argv, result.returncode, f\"exit {result.returncode}: \" + \" | \".join(tail))"
+  solution: |
+    import subprocess
+    from collections.abc import Sequence
+
+
+    class ToolError(Exception):
+        def __init__(self, argv: Sequence[str], returncode: int | None, detail: str) -> None:
+            self.argv = list(argv)
+            self.returncode = returncode
+            self.detail = detail
+            super().__init__(f"{self.argv[0]}: {detail}")
+
+
+    def run_tool(
+        argv: Sequence[str],
+        *,
+        input: str | None = None,
+        timeout: float = 10.0,
+        cwd: str | None = None,
+    ) -> str:
+        try:
+            result = subprocess.run(
+                list(argv),
+                input=input,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                cwd=cwd,
+            )
+        except FileNotFoundError as e:
+            raise ToolError(argv, None, f"not found: {e.filename}") from e
+        except subprocess.TimeoutExpired as e:
+            raise ToolError(argv, None, f"timed out after {timeout}s") from e
+        if result.returncode != 0:
+            tail = [line for line in result.stderr.splitlines() if line.strip()][-3:]
+            raise ToolError(argv, result.returncode, f"exit {result.returncode}: " + " | ".join(tail))
+        return result.stdout
+  requires: []
+  verify: ".venv/bin/pytest practice/m6-l05/test_run_tool.py -q"
+
+- id: t6
+  type: code
+  title: "Пул рендерів на asyncio з лімітом і таймаутом"
+  runtime: local
+  prompt: |
+    У `practice/m6-l05/render_pool.py` напишіть
+    `async def render_all(configs, argv, *, limit=2, timeout=5.0) -> tuple[dict[str, str], dict[str, str]]`.
+
+    Кожен конфіг (словник з ключем `"id"`) рендериться окремим процесом `argv`: конфіг JSON-ом у stdin, HTML зі
+    stdout. Повернути пару `(pages, errors)`: `pages[id]` це stdout успішних рендерів, `errors[id]` це рядок
+    помилки для невдалих.
+
+    - Процеси запускати через `asyncio.create_subprocess_exec`, одночасно не більше `limit` (Semaphore).
+    - Задачі створювати в `asyncio.TaskGroup`. Помилка одного рендера не має скасовувати інші: ловіть її
+      всередині задачі й записуйте в `errors`.
+    - Ненульовий код: `errors[id] = f"exit {code}: {останній рядок stderr}"`.
+    - Таймаут на один рендер через `asyncio.timeout`: `errors[id] = f"timed out after {timeout}s"`, і процес
+      має бути **вбитий** та дочеканий (`kill()` + `await proc.wait()`), тест це перевіряє за PID.
+    - Відсутній виконуваний файл: `errors[id] = str(e)` для `OSError`.
+
+    Поруч покладіть `test_render_pool.py`:
+
+    ```python
+    import asyncio
+    import os
+    import sys
+    import time
+    from pathlib import Path
+
+    import pytest
+
+    from render_pool import render_all
+
+    FAKE = r"""
+    import json, os, sys, time
+    config = json.load(sys.stdin)
+    if "pid_file" in config:
+        with open(config["pid_file"], "w") as f:
+            f.write(str(os.getpid()))
+    time.sleep(config.get("sleep", 0))
+    if config.get("crash"):
+        print("render.js:7 TypeError: fields is not iterable", file=sys.stderr)
+        sys.exit(1)
+    print(f"<form id={config['id']!r}>")
+    """
+
+
+    @pytest.fixture
+    def fake(tmp_path: Path) -> list[str]:
+        script = tmp_path / "fake_render.py"
+        script.write_text(FAKE)
+        return [sys.executable, str(script)]
+
+
+    def test_renders_every_config(fake: list[str]) -> None:
+        configs = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+        pages, errors = asyncio.run(render_all(configs, fake))
+        assert errors == {}
+        assert pages == {"a": "<form id='a'>\n", "b": "<form id='b'>\n", "c": "<form id='c'>\n"}
+
+
+    def test_one_failure_does_not_cancel_others(fake: list[str]) -> None:
+        configs = [{"id": "ok1", "sleep": 0.3}, {"id": "bad", "crash": True}, {"id": "ok2", "sleep": 0.3}]
+        pages, errors = asyncio.run(render_all(configs, fake, limit=3))
+        assert sorted(pages) == ["ok1", "ok2"]
+        assert errors == {"bad": "exit 1: render.js:7 TypeError: fields is not iterable"}
+
+
+    def test_limit_is_respected(fake: list[str]) -> None:
+        configs = [{"id": str(i), "sleep": 0.4} for i in range(4)]
+        t0 = time.monotonic()
+        pages, _ = asyncio.run(render_all(configs, fake, limit=2))
+        elapsed = time.monotonic() - t0
+        assert len(pages) == 4
+        assert 0.75 < elapsed < 2.0, f"4 jobs x 0.4s with limit=2 took {elapsed:.2f}s"
+
+
+    def test_timeout_kills_the_process(fake: list[str], tmp_path: Path) -> None:
+        pid_file = tmp_path / "slow.pid"
+        configs = [{"id": "slow", "sleep": 30, "pid_file": str(pid_file)}, {"id": "fast"}]
+        pages, errors = asyncio.run(render_all(configs, fake, timeout=0.5))
+        assert list(pages) == ["fast"]
+        assert errors == {"slow": "timed out after 0.5s"}
+        pid = int(pid_file.read_text())
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        os.kill(pid, 9)
+        pytest.fail(f"process {pid} is still running after timeout")
+
+
+    def test_missing_renderer() -> None:
+        pages, errors = asyncio.run(render_all([{"id": "x"}], ["formbuilder-no-such-renderer"]))
+        assert pages == {}
+        assert errors["x"].startswith("[Errno 2]")
+    ```
+  starter: |
+    import asyncio
+    import json
+    from collections.abc import Sequence
+
+
+    async def render_all(
+        configs: list[dict],
+        argv: Sequence[str],
+        *,
+        limit: int = 2,
+        timeout: float = 5.0,
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        ...
+  hints:
+    - "Розділіть на дві функції: render_one(config, argv, timeout) запускає один процес і кидає RuntimeError з готовим текстом, а render_all тримає Semaphore, TaskGroup і два словники результатів. Таймаут і вбивство процесу живуть у render_one."
+    - "У render_one: `try: async with asyncio.timeout(timeout): out, err = await proc.communicate(data)` / `except TimeoutError: raise RuntimeError(...) from None` / `finally: if proc.returncode is None: proc.kill(); await proc.wait()`. У задачі render_all: `async with sem: try: pages[id] = await render_one(...) except (RuntimeError, OSError) as e: errors[id] = str(e)`."
+  solution: |
+    import asyncio
+    import json
+    from collections.abc import Sequence
+
+
+    async def render_one(config: dict, argv: Sequence[str], timeout: float) -> str:
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            async with asyncio.timeout(timeout):
+                out, err = await proc.communicate(json.dumps(config).encode())
+        except TimeoutError:
+            raise RuntimeError(f"timed out after {timeout}s") from None
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+        if proc.returncode != 0:
+            lines = err.decode("utf-8", errors="replace").strip().splitlines()
+            raise RuntimeError(f"exit {proc.returncode}: {lines[-1] if lines else ''}".rstrip())
+        return out.decode("utf-8", errors="replace")
+
+
+    async def render_all(
+        configs: list[dict],
+        argv: Sequence[str],
+        *,
+        limit: int = 2,
+        timeout: float = 5.0,
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        sem = asyncio.Semaphore(limit)
+        pages: dict[str, str] = {}
+        errors: dict[str, str] = {}
+
+        async def job(config: dict) -> None:
+            async with sem:
+                try:
+                    pages[config["id"]] = await render_one(config, argv, timeout)
+                except (RuntimeError, OSError) as e:
+                    errors[config["id"]] = str(e)
+
+        async with asyncio.TaskGroup() as tg:
+            for config in configs:
+                tg.create_task(job(config))
+        return pages, errors
+  requires: []
+  verify: ".venv/bin/pytest practice/m6-l05/test_render_pool.py -q"

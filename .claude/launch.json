@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "platform",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["platform/serve.py"],
+      "port": 8765
+    }
+  ]
+}

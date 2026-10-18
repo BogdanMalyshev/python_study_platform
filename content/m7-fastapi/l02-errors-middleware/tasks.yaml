@@ -1,0 +1,498 @@
+- id: q1
+  type: quiz
+  question: |
+    Обробник зареєстровано так:
+    ```python
+    from fastapi import FastAPI, HTTPException
+
+    app = FastAPI()
+
+    @app.exception_handler(HTTPException)
+    async def http_error(request, exc):
+        return JSONResponse({"error": {"code": f"http_{exc.status_code}", "message": exc.detail}},
+                            status_code=exc.status_code)
+    ```
+    Що поверне `GET /no/such/route`, якщо такого маршруту немає?
+  options:
+    - "404 `{\"detail\": \"Not Found\"}`"
+    - "404 `{\"error\": {\"code\": \"http_404\", \"message\": \"Not Found\"}}`"
+    - "500, бо обробник не знайшов маршрут"
+    - "404 з порожнім тілом"
+  answer: 0
+  explain: |
+    Маршрутизатор кидає `starlette.exceptions.HTTPException`, а обробник зареєстровано на
+    `fastapi.HTTPException`, його підклас. Пошук іде за MRO класу винятку: у MRO Starlette-івського
+    класу FastAPI-шного немає, тому спрацьовує вбудований обробник зі стандартним `{"detail": ...}`.
+    Варіант з `http_404` був би правильним, якби обробник стояв на `starlette.exceptions.HTTPException`:
+    тоді він ловить і ваші `raise HTTPException`, і 404/405 маршрутизатора. 500 тут немає звідки взятись:
+    відсутній маршрут це звичайний 404, а не збій.
+
+- id: t1
+  type: code
+  title: "Шлях поля з loc"
+  prompt: |
+    Напишіть `loc_to_path(loc)`, яка перетворює `loc` з помилки FastAPI на плоский шлях для фронтенду.
+
+    - Перший елемент `loc` зрізається, якщо це джерело: `"body"`, `"query"`, `"path"`, `"header"`, `"cookie"`.
+    - Решта елементів, рядки й числа, з'єднується через крапку.
+    - Якщо після зрізу нічого не лишилось (помилка на рівні всієї моделі), повертається порожній рядок.
+
+    ```python
+    loc_to_path(("body", "elements", 0, "maxLength"))   # 'elements.0.maxLength'
+    loc_to_path(("query", "pageSize"))                  # 'pageSize'
+    loc_to_path(("body",))                              # ''
+    ```
+  starter: |
+    SOURCES = {"body", "query", "path", "header", "cookie"}
+
+
+    def loc_to_path(loc: tuple[str | int, ...]) -> str:
+        ...
+  harness: |
+    print(repr(loc_to_path(("body", "elements", 0, "maxLength"))))
+    print(repr(loc_to_path(("query", "pageSize"))))
+    print(repr(loc_to_path(("path", "form_id"))))
+    print(repr(loc_to_path(("body",))))
+    print(repr(loc_to_path(("body", "elements", 1, "children", 0, "id"))))
+    print(repr(loc_to_path(("title",))))
+    print(repr(loc_to_path(())))
+  expected: |
+    'elements.0.maxLength'
+    'pageSize'
+    'form_id'
+    ''
+    'elements.1.children.0.id'
+    'title'
+    ''
+  hints:
+    - "Перевірте, чи перший елемент є в множині джерел, і якщо так, візьміть зріз без нього. Порожній кортеж не має першого елемента."
+    - "`parts = loc[1:] if loc and loc[0] in SOURCES else loc`, далі `\".\".join(str(p) for p in parts)`: числа треба привести до рядка, `join` сам цього не робить."
+  solution: |
+    SOURCES = {"body", "query", "path", "header", "cookie"}
+
+
+    def loc_to_path(loc: tuple[str | int, ...]) -> str:
+        parts = loc[1:] if loc and loc[0] in SOURCES else loc
+        return ".".join(str(p) for p in parts)
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Помилки Pydantic у формат фронтенду"
+  prompt: |
+    Напишіть `to_error_body(errors)`, яка перетворює список помилок з `RequestValidationError.errors()`
+    на тіло відповіді капстоуну:
+
+    ```python
+    {"error": {"code": "validation_error",
+               "message": "<кількість> invalid field(s)",
+               "fields": [{"path": ..., "code": ..., "message": ...}, ...]}}
+    ```
+
+    - `path` це `loc` без першого елемента-джерела, з'єднаний крапками (як у t1).
+    - `code` це `type` помилки.
+    - `message` це `msg`, крім помилок з `type == "value_error"`: для них беріть текст самого винятку
+      з `ctx["error"]`, без префікса `Value error, `, який Pydantic додає в `msg`.
+    - Результат має серіалізуватися через `json.dumps`: жодних об'єктів винятків усередині.
+
+    Харнес будує справжні помилки Pydantic з camelCase-аліасами і додає на початок `loc` джерело `"body"`,
+    як це робить FastAPI.
+  starter: |
+    SOURCES = {"body", "query", "path", "header", "cookie"}
+
+
+    def to_error_body(errors: list[dict]) -> dict:
+        ...
+  harness: |
+    import json
+    from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+    from pydantic.alias_generators import to_camel
+
+
+    class Element(BaseModel):
+        model_config = ConfigDict(alias_generator=to_camel, validate_by_name=True)
+        id: str
+        max_length: int | None = Field(default=None, ge=1)
+
+
+    class FormIn(BaseModel):
+        model_config = ConfigDict(alias_generator=to_camel, validate_by_name=True)
+        title: str = Field(min_length=1)
+        min_answers: int = 0
+        max_answers: int = 10
+        elements: list[Element] = []
+
+        @model_validator(mode="after")
+        def check_range(self):
+            if self.min_answers > self.max_answers:
+                raise ValueError("minAnswers must be <= maxAnswers")
+            return self
+
+
+    def fastapi_errors(data: dict) -> list[dict]:
+        try:
+            FormIn.model_validate(data)
+        except ValidationError as e:
+            return [{**err, "loc": ("body", *err["loc"])} for err in e.errors()]
+        return []
+
+
+    body = to_error_body(fastapi_errors({"title": "", "elements": [{"id": "e1", "maxLength": 0}, {}]}))
+    print(json.dumps(body, indent=2))
+    body = to_error_body(fastapi_errors({"title": "Poll", "minAnswers": 5, "maxAnswers": 1}))
+    print(json.dumps(body))
+    print(json.dumps(to_error_body([{"type": "int_parsing", "loc": ("query", "pageSize"), "msg": "Input should be a valid integer", "input": "x"}])))
+  expected: |
+    {
+      "error": {
+        "code": "validation_error",
+        "message": "3 invalid field(s)",
+        "fields": [
+          {
+            "path": "title",
+            "code": "string_too_short",
+            "message": "String should have at least 1 character"
+          },
+          {
+            "path": "elements.0.maxLength",
+            "code": "greater_than_equal",
+            "message": "Input should be greater than or equal to 1"
+          },
+          {
+            "path": "elements.1.id",
+            "code": "missing",
+            "message": "Field required"
+          }
+        ]
+      }
+    }
+    {"error": {"code": "validation_error", "message": "1 invalid field(s)", "fields": [{"path": "", "code": "value_error", "message": "minAnswers must be <= maxAnswers"}]}}
+    {"error": {"code": "validation_error", "message": "1 invalid field(s)", "fields": [{"path": "pageSize", "code": "int_parsing", "message": "Input should be a valid integer"}]}}
+  hints:
+    - "Розбийте на дві частини: шлях з `loc` (як у t1) і текст повідомлення. Для `value_error` у `err[\"ctx\"][\"error\"]` лежить об'єкт `ValueError`, а не рядок."
+    - "Текст винятку це `str(err[\"ctx\"][\"error\"])`. `fields` збирайте списком словників, `message` верхнього рівня через f-рядок з `len(fields)`."
+    - |
+      Майже рішення:
+      ```python
+      message = str(err["ctx"]["error"]) if err["type"] == "value_error" else err["msg"]
+      fields.append({"path": path, "code": err["type"], "message": message})
+      ```
+  solution: |
+    SOURCES = {"body", "query", "path", "header", "cookie"}
+
+
+    def to_error_body(errors: list[dict]) -> dict:
+        fields = []
+        for err in errors:
+            loc = err["loc"]
+            parts = loc[1:] if loc and loc[0] in SOURCES else loc
+            if err["type"] == "value_error":
+                message = str(err["ctx"]["error"])
+            else:
+                message = err["msg"]
+            fields.append({"path": ".".join(str(p) for p in parts), "code": err["type"], "message": message})
+        return {
+            "error": {
+                "code": "validation_error",
+                "message": f"{len(fields)} invalid field(s)",
+                "fields": fields,
+            }
+        }
+  requires: [pydantic]
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Пошук обробника за MRO"
+  prompt: |
+    Відтворіть, як Starlette вибирає exception handler. Напишіть `error_response(exc)`, яка повертає
+    пару `(status, body)` за таблицею `HANDLERS`.
+
+    - Обробник шукається за `type(exc).__mro__`: перший клас з MRO, який є в `HANDLERS`, перемагає.
+      Порядок ключів у словнику значення не має.
+    - Знайдений запис дає `(status, {"error": {"code": code, "message": str(exc)}})`.
+    - Якщо обробника немає, це 500 з `{"error": {"code": "internal_error", "message": "Internal server error"}}`.
+      Текст винятку в 500 не потрапляє ніколи.
+
+    ```python
+    error_response(UnknownElementType("unknown type 'slider'"))
+    # (422, {'error': {'code': 'unknown_element_type', 'message': "unknown type 'slider'"}})
+    ```
+  starter: |
+    class ConfigError(Exception): ...
+    class UnknownElementType(ConfigError): ...
+    class JobNotFound(LookupError): ...
+
+
+    HANDLERS: dict[type[Exception], tuple[int, str]] = {
+        ConfigError: (422, "invalid_config"),
+        JobNotFound: (404, "job_not_found"),
+        UnknownElementType: (422, "unknown_element_type"),
+    }
+
+
+    def error_response(exc: Exception) -> tuple[int, dict]:
+        ...
+  harness: |
+    class DuplicateElementId(ConfigError): ...
+
+    print(error_response(UnknownElementType("unknown type 'slider'")))
+    print(error_response(DuplicateElementId("duplicate id 'email'")))
+    print(error_response(ConfigError("title is empty")))
+    print(error_response(JobNotFound("job 'j-9' not found")))
+    print(error_response(KeyError("j-9")))
+    print(error_response(RuntimeError("password=hunter2 rejected by db")))
+  expected: |
+    (422, {'error': {'code': 'unknown_element_type', 'message': "unknown type 'slider'"}})
+    (422, {'error': {'code': 'invalid_config', 'message': "duplicate id 'email'"}})
+    (422, {'error': {'code': 'invalid_config', 'message': 'title is empty'}})
+    (404, {'error': {'code': 'job_not_found', 'message': "job 'j-9' not found"}})
+    (500, {'error': {'code': 'internal_error', 'message': 'Internal server error'}})
+    (500, {'error': {'code': 'internal_error', 'message': 'Internal server error'}})
+  hints:
+    - "Перебір `HANDLERS` з `isinstance` залежить від порядку ключів: `ConfigError` стоїть першим і перехопить `UnknownElementType`. Ітеруйте не словник, а MRO класу винятку."
+    - "`for cls in type(exc).__mro__: if cls in HANDLERS: ...`; після циклу без знахідки повертайте 500. `KeyError` це `LookupError`, але не `JobNotFound`, тому він у таблиці не знаходиться."
+  solution: |
+    class ConfigError(Exception): ...
+    class UnknownElementType(ConfigError): ...
+    class JobNotFound(LookupError): ...
+
+
+    HANDLERS: dict[type[Exception], tuple[int, str]] = {
+        ConfigError: (422, "invalid_config"),
+        JobNotFound: (404, "job_not_found"),
+        UnknownElementType: (422, "unknown_element_type"),
+    }
+
+
+    def error_response(exc: Exception) -> tuple[int, dict]:
+        for cls in type(exc).__mro__:
+            if cls in HANDLERS:
+                status, code = HANDLERS[cls]
+                return status, {"error": {"code": code, "message": str(exc)}}
+        return 500, {"error": {"code": "internal_error", "message": "Internal server error"}}
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Стек middleware як цибуля"
+  prompt: |
+    Напишіть `build_stack(endpoint, middlewares)`, яка збирає застосунок так, як це робить Starlette.
+
+    - `endpoint` це `async def endpoint(request) -> dict`.
+    - Кожен middleware це `async def mw(request, call_next) -> dict`, де `call_next(request)` викликає
+      наступний шар.
+    - `middlewares` перелічені в порядку реєстрації (`add_middleware`). Останній зареєстрований має бути
+      зовнішнім: він першим бачить запит і останнім відповідь.
+    - Повертається `async`-функція `app(request)`. Без middleware `app` поводиться як `endpoint`.
+
+    Харнес записує порядок проходу в `log` і додає ім'я кожного middleware в `headers` відповіді на виході.
+  starter: |
+    from collections.abc import Awaitable, Callable
+
+    Endpoint = Callable[[dict], Awaitable[dict]]
+    Middleware = Callable[[dict, Endpoint], Awaitable[dict]]
+
+
+    def build_stack(endpoint: Endpoint, middlewares: list[Middleware]) -> Endpoint:
+        ...
+  harness: |
+    import asyncio
+
+    log = []
+
+
+    def tag(name):
+        async def mw(request, call_next):
+            log.append(f"{name}>")
+            response = await call_next(request)
+            log.append(f"<{name}")
+            return {**response, "headers": [*response["headers"], name]}
+        return mw
+
+
+    async def deny_all(request, call_next):
+        log.append("deny")
+        return {"status": 401, "headers": []}
+
+
+    async def endpoint(request):
+        log.append("endpoint")
+        return {"status": 200, "headers": []}
+
+
+    async def main():
+        app = build_stack(endpoint, [tag("cors"), tag("request_id"), tag("timing")])
+        print(await app({"path": "/health"}))
+        print(" ".join(log))
+        log.clear()
+        print(await build_stack(endpoint, [])({"path": "/"}))
+        print(" ".join(log))
+        log.clear()
+        print(await build_stack(endpoint, [deny_all, tag("request_id")])({"path": "/"}))
+        print(" ".join(log))
+
+
+    asyncio.run(main())
+  expected: |
+    {'status': 200, 'headers': ['cors', 'request_id', 'timing']}
+    timing> request_id> cors> endpoint <cors <request_id <timing
+    {'status': 200, 'headers': []}
+    endpoint
+    {'status': 401, 'headers': ['request_id']}
+    request_id> deny <request_id
+  hints:
+    - "Почніть з `app = endpoint` і загортайте його по черзі кожним middleware зі списку: перший зареєстрований загортається першим і тому опиняється найглибше."
+    - "Обгортка в циклі через `lambda request: mw(request, app)` зловить пізнє зв'язування з m1-l06: lambda читає `app` в момент виклику, коли це вже вона сама, і стек падає з `RecursionError`. Фіксуйте значення через фабрику-функцію або `functools.partial`."
+    - |
+      Майже рішення:
+      ```python
+      def wrap(mw, inner):
+          async def app(request):
+              return await mw(request, inner)
+          return app
+      ```
+  solution: |
+    from collections.abc import Awaitable, Callable
+
+    Endpoint = Callable[[dict], Awaitable[dict]]
+    Middleware = Callable[[dict, Endpoint], Awaitable[dict]]
+
+
+    def build_stack(endpoint: Endpoint, middlewares: list[Middleware]) -> Endpoint:
+        def wrap(mw: Middleware, inner: Endpoint) -> Endpoint:
+            async def app(request: dict) -> dict:
+                return await mw(request, inner)
+            return app
+
+        app = endpoint
+        for mw in middlewares:
+            app = wrap(mw, app)
+        return app
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    ```python
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True)
+    ```
+    Що отримає браузер на сторінці `https://evil.example`, який робить `fetch(url, {credentials: "include"})`
+    до цього API?
+  options:
+    - "`Access-Control-Allow-Origin: *`, і браузер відхилить відповідь, бо `*` несумісна з credentials"
+    - "`Access-Control-Allow-Origin: https://evil.example` і `Access-Control-Allow-Credentials: true`, тобто відповідь з cookies користувача доступна скрипту"
+    - "Starlette кине помилку конфігурації при створенні middleware"
+    - "400 `Disallowed CORS origin`"
+  answer: 1
+  explain: |
+    Starlette для `"*"` разом з `allow_credentials=True` віддзеркалює конкретний `Origin` запиту і ставить
+    `allow-credentials: true`, тож для браузера все легально, і будь-який сайт читає відповіді з cookies
+    користувача. Перший варіант це поведінка пакета `cors` в Express з `origin: "*"`: там конфіг просто не
+    працює, і звідси хибне відчуття, що комбінація безпечна. Помилки конфігурації Starlette не кидає.
+    `Disallowed CORS origin` буває лише на preflight з origin-ом, якого немає в явному списку.
+
+- id: q3
+  type: quiz
+  question: |
+    Застосунок створено з `FastAPI(debug=True)`, зареєстровано `@app.exception_handler(Exception)`, який
+    логує виняток і повертає JSON `{"error": {"code": "internal_error"}}` зі статусом 500. Обробник маршруту
+    падає з `KeyError`. Що отримає клієнт?
+  options:
+    - "500 з JSON від вашого обробника"
+    - "500 з JSON від вашого обробника і полем з traceback"
+    - "500 з traceback текстом; ваш обробник не викликається"
+    - "422, бо `KeyError` вважається помилкою вводу"
+  answer: 2
+  explain: |
+    `ServerErrorMiddleware` у режимі `debug` віддає `debug_response` з traceback і не викликає зареєстрований
+    обробник `Exception` взагалі: у лозі не з'явиться і ваш запис. FastAPI не домішує traceback у ваш JSON,
+    тому другий варіант неможливий. `KeyError` не має жодного стосунку до 422: 422 буває лише від
+    `RequestValidationError` або від вашого обробника. Звідси правило: `debug` з налаштувань, у prod `False`.
+
+- id: q4
+  type: quiz
+  question: |
+    ```python
+    app = FastAPI()
+    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"])
+
+    @app.middleware("http")
+    async def request_id(request, call_next):
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = "req-1"
+        return response
+
+    @app.exception_handler(Exception)
+    async def unhandled(request, exc):
+        return JSONResponse({"error": {"code": "internal_error"}}, status_code=500)
+
+    @app.get("/boom")
+    def boom():
+        raise RuntimeError("db is down")
+    ```
+    Які з заголовків `X-Request-ID` і `Access-Control-Allow-Origin` будуть у відповіді 500 на
+    `GET /boom` з `Origin: http://localhost:5173`?
+  options:
+    - "Обидва"
+    - "Лише `Access-Control-Allow-Origin`"
+    - "Лише `X-Request-ID`"
+    - "Жодного"
+  answer: 3
+  explain: |
+    Обробник `Exception` викликається в `ServerErrorMiddleware`, найзовнішньому шарі, над усіма вашими
+    middleware. `RuntimeError` пролітає крізь CORS і `request_id` нагору, а 500 збирається вже над ними, тож
+    жоден не додає заголовків. Відповідь 404 чи 422 отримала б обидва, бо їх збирає `ExceptionMiddleware`
+    усередині стеку. Виправлення: ловити `Exception` у middleware з request id і додавати `CORSMiddleware`
+    останнім, щоб він був зовнішнім.
+
+- id: p1
+  type: project
+  title: "Єдиний формат помилок, request id, CORS і статика в капстоуні"
+  prompt: |
+    У пакеті `src/formbuilder/api/` з m7-l01 зведіть усі помилки API до одного формату і додайте
+    інфраструктурні middleware. Код уроку в розділі "Для капстоуну" це орієнтир, а не готовий файл.
+
+    1. `formbuilder/jobs.py`: `class JobNotFound(LookupError)` з атрибутом `job_id` і повідомленням
+       `job '<id>' not found`. `GET /jobs/{job_id}` для невідомого id кидає `JobNotFound`,
+       а не `HTTPException`.
+    2. `formbuilder/api/errors.py`: Pydantic-моделі `FieldError`, `ErrorBody`, `ErrorResponse` для формату
+       `{"error": {"code", "message", "fields"}}`; функції `loc_to_path` і `to_field_errors` з завдань t1, t2;
+       обробники для `RequestValidationError` (`validation_error`, 422), `ConfigError` (`invalid_config`, 422,
+       `fields` з `exc.__cause__`, якщо це `ValidationError`), `JobNotFound` (`job_not_found`, 404) і
+       `starlette.exceptions.HTTPException` (`http_<status>`, заголовки винятку зберігаються);
+       `install_error_handlers(app)`.
+    3. `formbuilder/api/middleware.py`: middleware `request_context`, який бере `X-Request-ID` із запиту
+       або генерує `uuid4().hex`, кладе його в `request.state` і в `ContextVar` (або `bind_contextvars`
+       structlog, якщо логування з m5-l09 вже на ньому), ловить `Exception` навколо `call_next`, логує
+       через `logging.getLogger("formbuilder.api").exception(...)` і повертає 500 `internal_error` без
+       тексту винятку, пише рядок логу з методом, шляхом, статусом і тривалістю, ставить `X-Request-ID`
+       у відповідь. `install_middleware(app, cors_origins)` додає його, а `CORSMiddleware` останнім
+       з `expose_headers=["X-Request-ID"]`. Origin-и з налаштувань, за замовчуванням `http://localhost:5173`.
+    4. Статика: `app.mount("/sites", StaticFiles(directory=<out_dir із налаштувань>, html=True, check_dir=False))`.
+    5. OpenAPI: `responses` з `ErrorResponse` для 404 на `GET /jobs/{job_id}` і для 422 на рівні роутерів
+       `forms` і `jobs`. Префікс версії `/api/v1` з розділу про URL-простір у капстоуні не вмикайте: шляхи
+       `/forms` і `/jobs` спільні для всіх уроків модуля 7 і тестів m7-l05.
+
+    Фабрика `create_app(settings)` з m7-l01 викликає `install_error_handlers(app)` і
+    `install_middleware(app, cors_origins)`.
+
+    Тести в `tests/test_api_errors.py` через `TestClient`. Щоб перевірити `ConfigError` і 500 незалежно від
+    того, які маршрути вже є, фікстура створює застосунок фабрикою `create_app(settings)` з m7-l01 з тимчасовою
+    `out_dir` і `db_path` у `tmp_path` і додає два службові маршрути: один кидає `ConfigError ... from ValidationError`,
+    другий `RuntimeError` із "секретом" у тексті.
+  checklist:
+    - "Невалідне тіло `POST /forms` дає 422 `validation_error`, `fields[].path` у camelCase без префікса `body` (наприклад `maxAnswers`)"
+    - "`ConfigError`, кинутий `from` над `ValidationError`, дає 422 `invalid_config` з полями з причини; без причини `fields == []`"
+    - "`GET /jobs/<невідомий>` дає 404 рівно `{\"error\": {\"code\": \"job_not_found\", \"message\": \"job '<id>' not found\", \"fields\": []}}`"
+    - "Неіснуючий маршрут дає `http_404` у тому самому форматі, а не `{\"detail\": ...}`"
+    - "`RuntimeError` дає 500 `internal_error`; текст винятку не потрапляє у відповідь; у відповіді є `X-Request-ID` із запиту і `Access-Control-Allow-Origin` для `http://localhost:5173`; `caplog` бачить запис рівня ERROR з `exc_info` у логері `formbuilder.api`"
+    - "Без `X-Request-ID` у запиті відповідь отримує згенерований id довжиною 32"
+    - "Preflight з `http://localhost:5173` дає 200 з `Access-Control-Allow-Origin`; preflight з чужого origin цього заголовка не має"
+    - "`GET /sites/<форма>/` віддає `index.html` із тимчасової `out_dir`"
+    - "У `/openapi.json` відповіді 404 і 422 для `GET /jobs/{job_id}` посилаються на `ErrorResponse`"
+    - "`uv run mypy src` і `uv run ruff check` без помилок"
+  verify: "cd capstone && uv run pytest tests/test_api_errors.py -q"

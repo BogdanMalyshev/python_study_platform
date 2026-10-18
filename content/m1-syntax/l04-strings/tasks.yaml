@@ -1,0 +1,289 @@
+- id: t1
+  type: code
+  title: "Рядок таблиці через специфікації формату"
+  prompt: |
+    Напишіть `format_row(label, qty, price)`, яка повертає один рядок таблиці з трьома колонками без роздільників:
+
+    - `label` вирівняний вліво в колонці шириною 12;
+    - `qty` вирівняний вправо в колонці шириною 4;
+    - `price` вирівняний вправо в колонці шириною 12, з роздільником тисяч `,` і рівно двома знаками після крапки.
+
+    Усе в одному f-рядку, без `ljust`, `rjust` і `round`. Довгий `label` не обрізається: ширина в специфікації мінімальна.
+
+    ```python
+    format_row("Pro plan", 3, 1234.5)   # 'Pro plan       3    1,234.50'
+    ```
+  starter: |
+    def format_row(label: str, qty: int, price: float) -> str:
+        ...
+  harness: |
+    print(f"|{format_row('Pro plan', 3, 1234.5)}|")
+    print(f"|{format_row('Starter', 12, 9.99)}|")
+    print(f"|{format_row('Enterprise plan', 1, 125000)}|")
+  expected: |
+    |Pro plan       3    1,234.50|
+    |Starter       12        9.99|
+    |Enterprise plan   1  125,000.00|
+  hints:
+    - "Кожна колонка це окрема підстановка `{...}` зі специфікацією після двокрапки: вирівнювання, ширина, для ціни ще роздільник і точність."
+    - "Специфікації: `<12`, `>4` і `>12,.2f`. Тобто `f\"{label:<12}{qty:>4}{price:>12,.2f}\"`."
+  solution: |
+    def format_row(label: str, qty: int, price: float) -> str:
+        return f"{label:<12}{qty:>4}{price:>12,.2f}"
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Маскування значення зрізами"
+  prompt: |
+    Напишіть `mask(value, visible=4)`, яка замінює на `*` усі символи, крім останніх `visible`.
+
+    - Якщо `visible` дорівнює `0`, маскується весь рядок.
+    - Якщо `visible` не менше за довжину рядка, рядок повертається без змін.
+    - Довжина результату завжди дорівнює довжині `value`.
+
+    Без циклів і без `if` для крайових випадків: лише зрізи і множення рядка на число.
+    Пам'ятайте пастку з уроку: `value[-0:]` це весь рядок.
+
+    ```python
+    mask("+380501234567")      # '*********4567'
+    mask("+380501234567", 0)   # '*************'
+    mask("abc", 10)            # 'abc'
+    ```
+  starter: |
+    def mask(value: str, visible: int = 4) -> str:
+        ...
+  harness: |
+    print(mask("+380501234567"))
+    print(mask("+380501234567", 2))
+    print(mask("+380501234567", 0))
+    print(mask("abc", 10))
+    print(repr(mask("")))
+  expected: |
+    *********4567
+    ***********67
+    *************
+    abc
+    ''
+  hints:
+    - "Порахуйте, скільки символів ховається, і використайте це число двічі: для кількості зірочок і як позицію початку видимої частини, рахуючи від початку рядка."
+    - "`hidden = len(value) - visible`. Множення рядка на від'ємне число дає порожній рядок, а зріз з від'ємним початком за межами рядка обрізається до нуля: `\"*\" * hidden + value[hidden:]`."
+  solution: |
+    def mask(value: str, visible: int = 4) -> str:
+        hidden = len(value) - visible
+        return "*" * hidden + value[hidden:]
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Розбір рядка key=value"
+  prompt: |
+    Налаштування приходять одним рядком на кшталт `"theme=dark; lang = uk;; token=a=b; flag"`.
+    Напишіть `parse_pairs(raw)`, яка повертає словник `{key: value}` за правилами:
+
+    - пари розділені `;`, порожні частини (зокрема від `;;` і `;` у кінці) пропускаються;
+    - ключ і значення розділені першим `=`; решта `=` належать значенню;
+    - пробіли навколо ключа і значення обрізаються;
+    - частина без `=` дає ключ з порожнім значенням.
+
+    ```python
+    parse_pairs("theme=dark; lang = uk")   # {'theme': 'dark', 'lang': 'uk'}
+    parse_pairs("token=a=b; flag")         # {'token': 'a=b', 'flag': ''}
+    ```
+  starter: |
+    def parse_pairs(raw: str) -> dict[str, str]:
+        ...
+  harness: |
+    print(parse_pairs("theme=dark; lang = uk;; token=a=b; flag"))
+    print(parse_pairs("  a=1 ;b= 2;"))
+    print(parse_pairs(""))
+    print(parse_pairs(" ; ;"))
+  expected: |
+    {'theme': 'dark', 'lang': 'uk', 'token': 'a=b', 'flag': ''}
+    {'a': '1', 'b': '2'}
+    {}
+    {}
+  hints:
+    - "Тут потрібен `split` з явним роздільником: він зберігає порожні частини, і їх треба пропустити після `strip`. Для пари є метод, який ділить по першому входженню і не падає без роздільника."
+    - "`for part in raw.split(\";\"):`, далі `part = part.strip()`, `if not part: continue`, `key, _, value = part.partition(\"=\")` і `result[key.strip()] = value.strip()`."
+  solution: |
+    def parse_pairs(raw: str) -> dict[str, str]:
+        result = {}
+        for part in raw.split(";"):
+            part = part.strip()
+            if not part:
+                continue
+            key, _, value = part.partition("=")
+            result[key.strip()] = value.strip()
+        return result
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "slugify для id поля"
+  prompt: |
+    Напишіть `slugify(title)`, яка робить з підпису поля його `id`:
+
+    - усі літери в нижньому регістрі;
+    - літери й цифри (будь-якої мови, зокрема кирилиця) зберігаються;
+    - кожен інший символ, включно з пробілами й розділовими знаками, вважається роздільником;
+    - слова склеюються через `-`, без дефісів на краях і без двох дефісів поспіль.
+
+    ```python
+    slugify("  Contact  Form: Step 1 ")   # 'contact-form-step-1'
+    slugify("Анкета / Крок 2")            # 'анкета-крок-2'
+    slugify("---")                        # ''
+    ```
+  starter: |
+    def slugify(title: str) -> str:
+        ...
+  harness: |
+    print(slugify("  Contact  Form: Step 1 "))
+    print(slugify("Анкета / Крок 2"))
+    print(slugify("C++ & Python!!"))
+    print(slugify("first_name"))
+    print(repr(slugify("---")))
+  expected: |
+    contact-form-step-1
+    анкета-крок-2
+    c-python
+    first-name
+    ''
+  hints:
+    - "Пройдіть по символах і замініть усе, що не літера й не цифра, на пробіл. Далі є режим `split`, який сам ігнорує будь-яку кількість пробілів і краї."
+    - "Зберіть символи в список: `ch if ch.isalnum() else \" \"` для кожного `ch` з `title.lower()`. Потім `\"-\".join(\"\".join(chars).split())`."
+  solution: |
+    def slugify(title: str) -> str:
+        chars = []
+        for ch in title.lower():
+            chars.append(ch if ch.isalnum() else " ")
+        return "-".join("".join(chars).split())
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Звіт по відповідях форми"
+  prompt: |
+    Напишіть `format_answers(answers)`, яка перетворює словник відповідей `{field_id: value}` на текстовий звіт:
+
+    - рядки впорядковані за ключем без урахування регістру;
+    - кожен рядок має вигляд `<key> : <value>`, де ключ доповнений пробілами справа до довжини найдовшого ключа;
+    - значення обрізаються від пробілів по краях; порожнє після цього значення виводиться як `<empty>`;
+    - значення довше за 12 символів скорочується до перших 9 символів плюс `...` (разом 12);
+    - рядки склеєні через `\n`, без переносу в кінці; для порожнього словника результат `""`.
+
+    ```python
+    print(format_answers({"email": " a@b.c ", "Name": "Bogdan", "age": ""}))
+    # age   : <empty>
+    # email : a@b.c
+    # Name  : Bogdan
+    ```
+  starter: |
+    def format_answers(answers: dict[str, str]) -> str:
+        ...
+  harness: |
+    answers = {
+        "email": " a@b.c ",
+        "Name": "Bogdan",
+        "comment": "Very long comment text here",
+        "age": "   ",
+        "Zip": "01001",
+    }
+    print(format_answers(answers))
+    print(format_answers({"id": "exactly12chr"}))
+    print(repr(format_answers({})))
+  expected: |
+    age     : <empty>
+    comment : Very long...
+    email   : a@b.c
+    Name    : Bogdan
+    Zip     : 01001
+    id : exactly12chr
+    ''
+  hints:
+    - "Три кроки: ширина колонки як найбільша довжина ключа, обхід ключів у порядку `sorted` з функцією ключа, і один рядок на поле з вкладеною шириною у специфікації формату. Порожній словник обробіть окремо до обчислення ширини."
+    - "`width = max(len(key) for key in answers)`; `for key in sorted(answers, key=str.casefold)`; значення: `value = answers[key].strip()`, потім `\"<empty>\"` або `value[:9] + \"...\"` за довжиною; рядок `f\"{key:<{width}} : {value}\"` у список, наприкінці `\"\\n\".join(lines)`."
+  solution: |
+    def format_answers(answers: dict[str, str]) -> str:
+        if not answers:
+            return ""
+        width = max(len(key) for key in answers)
+        lines = []
+        for key in sorted(answers, key=str.casefold):
+            value = answers[key].strip()
+            if not value:
+                value = "<empty>"
+            elif len(value) > 12:
+                value = value[:9] + "..."
+            lines.append(f"{key:<{width}} : {value}")
+        return "\n".join(lines)
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    s = "abc"
+    print(s[1:10])
+    print(s[10])
+    ```
+  options: ["bc, потім IndexError", "IndexError уже на першому print", "bc, потім порожній рядок", "bc, потім None"]
+  answer: 0
+  explain: |
+    Зріз обрізає межі до довжини рядка і ніколи не падає, тому `s[1:10]` дає `bc`. Індекс обіцяє рівно один символ,
+    і за межами рядка його немає, тому `s[10]` кидає `IndexError: string index out of range`.
+    "Порожній рядок" це інтуїція `charAt(10)` з JS, "None" це інтуїція `s[10] === undefined`.
+    "IndexError на першому" переносить поведінку індексу на зріз, але зріз описує діапазон позицій, і він може бути частково або повністю порожнім.
+
+- id: q2
+  type: quiz
+  question: |
+    Що поверне вираз?
+    ```python
+    "2026-10-18".split("-", 1)
+    ```
+  options: ["['2026', '10-18']", "['2026']", "['2026', '10', '18']", "['2026', '10']"]
+  answer: 0
+  explain: |
+    Другий аргумент `split` у Python це `maxsplit`, кількість розрізів: один розріз дає дві частини, і залишок
+    `10-18` лишається цілим. `['2026']` це поведінка `limit` у JS: `"2026-10-18".split("-", 1)` там обрізає масив до
+    одного елемента. `['2026', '10', '18']` ігнорує аргумент зовсім, а `['2026', '10']` змішує обидві моделі.
+    Щоб отримати JS-результат, у Python беруть зріз: `s.split("-")[:1]`.
+
+- id: q3
+  type: quiz
+  question: |
+    Що поверне вираз?
+    ```python
+    "https://shop.com".lstrip("https://")
+    ```
+  options: ["'shop.com'", "'op.com'", "'https://shop.com'", "'.com'"]
+  answer: 1
+  explain: |
+    Аргумент `lstrip` це набір символів `{h, t, p, s, :, /}`, а не префікс. Метод знімає з лівого краю будь-які
+    символи з набору, поки не натрапить на чужий: `https://` знімається, далі `s` і `h` зі `shop` теж у наборі,
+    а `o` вже ні. Залишається `op.com`. `shop.com` це очікування поведінки "відрізати префікс", яку дає
+    `removeprefix("https://")`. `.com` вийшло б, якби метод знімав символи з набору будь-де, а не лише з краю.
+    `https://shop.com` без змін був би, якби аргумент шукався як цілий підрядок і не знайшовся.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    print(sorted(["b", "B", "a", "10", "9"]))
+    ```
+  options: ["['10', '9', 'B', 'a', 'b']", "['9', '10', 'a', 'B', 'b']", "['10', '9', 'a', 'B', 'b']", "TypeError"]
+  answer: 0
+  explain: |
+    Рядки порівнюються по code points: цифри (48–57) менші за великі латинські (65–90), а ті менші за малі (97–122).
+    `"10" < "9"`, бо порівнюються перші символи `"1"` і `"9"`, а не числа. `['9', '10', 'a', 'B', 'b']` це "природне"
+    сортування, як у файловому менеджері або `localeCompare` з `numeric: true`; Python так не робить без функції ключа.
+    `['10', '9', 'a', 'B', 'b']` це сортування без урахування регістру, для нього потрібен `key=str.casefold`.
+    `TypeError` був би лише при змішуванні рядків і чисел, а тут усі елементи рядки.

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Самоперевірка курсу</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  body{overflow:auto}
+  main{max-width:1100px;margin:0 auto;padding:24px 16px 80px}
+  h1{font-size:24px;margin-bottom:6px}
+  .muted{color:var(--muted);font-size:14px}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin-top:16px}
+  td,th{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+  td pre{margin:0;white-space:pre-wrap;font-size:12px;max-height:260px;overflow:auto}
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
+  #summary{font-family:var(--font-mono);background:var(--surface-2);padding:12px;border-radius:8px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<main>
+  <h1>Самоперевірка курсу</h1>
+  <p class="muted">Проганяє рішення кожного завдання з кодом через той самий Python-воркер, що й платформа. Параметри: <code>?only=m2-l09</code>, <code>?live=0</code> (без живих прикладів), <code>?starter=0</code>, <code>?pyodide=&lt;base url&gt;</code>.</p>
+  <div id="summary">Запускаю…</div>
+  <table><thead><tr><th>Що</th><th>Результат</th><th>Деталі</th></tr></thead><tbody id="rows"></tbody></table>
+</main>
+<script src="vendor/marked/marked.umd.js"></script>
+<script src="runner.js"></script>
+<script>
+'use strict';
+const params = new URLSearchParams(location.search);
+const only = params.get('only');
+const doLive = params.get('live') !== '0';
+const doStarter = params.get('starter') !== '0';
+const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const rows = document.getElementById('rows');
+const summaryEl = document.getElementById('summary');
+const stats = { solutions: 0, solutionsPassed: 0, startersPassedWrongly: 0, live: 0, liveMatched: 0, failures: [] };
+window.__selftest = { done: false, stats };
+
+function addRow(what, cls, verdict, details) {
+  rows.insertAdjacentHTML('beforeend', `<tr><td>${esc(what)}</td><td class="${cls}">${esc(verdict)}</td><td>${details ? `<pre>${esc(details)}</pre>` : ''}</td></tr>`);
+}
+
+function liveBlocks(body) {
+  const tokens = marked.lexer(body);
+  const out = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.type !== 'code') continue;
+    const lang = (t.lang || '').trim().split(/\s+/);
+    if (lang[0] !== 'python' || !lang.includes('live')) continue;
+    let j = i + 1;
+    while (j < tokens.length && tokens[j].type === 'space') j++;
+    const n = tokens[j];
+    const expected = n && n.type === 'code' && (n.lang || '').trim() === 'text' ? n.text : null;
+    out.push({ code: t.text, expected });
+  }
+  return out;
+}
+
+async function check(code, task) {
+  const r = await PyRunner.run(buildCheckProgram(code, task), { packages: task.requires }).promise;
+  let ok;
+  if (task.expected != null) ok = r.ok && normalizeOutput(r.stdout) === normalizeOutput(task.expected);
+  else ok = r.ok;
+  return { ok, r };
+}
+
+(async () => {
+  const course = await (await fetch('dist/course.json', { cache: 'no-store' })).json();
+  const lessons = course.modules.flatMap((m) => m.lessons).filter((l) => l.written && (!only || l.id === only));
+  const t0 = performance.now();
+  for (const lesson of lessons) {
+    for (const task of lesson.tasks) {
+      if (task.type !== 'code' || task.runtime !== 'browser') continue;
+      const name = `${lesson.id}/${task.id}`;
+      stats.solutions++;
+      const { ok, r } = await check(task.solution, task);
+      if (ok) stats.solutionsPassed++;
+      else {
+        stats.failures.push(name);
+        const detail = task.expected != null
+          ? `ОЧІКУЄТЬСЯ:\n${normalizeOutput(task.expected)}\n\nОТРИМАНО stdout:\n${normalizeOutput(r.stdout)}\n\nstderr:\n${r.stderr}`
+          : `stderr:\n${r.stderr}`;
+        addRow(`${name} рішення`, 'bad', r.timedOut ? 'таймаут' : 'не пройшло', detail);
+      }
+      if (doStarter) {
+        const s = await check(task.starter || '', task);
+        if (s.ok) { stats.startersPassedWrongly++; addRow(`${name} стартовий код`, 'warn', 'стартовий код уже проходить перевірку', ''); }
+      }
+      summaryEl.textContent = `Рішення: ${stats.solutionsPassed}/${stats.solutions} … (${lesson.id})`;
+    }
+    if (doLive) {
+      for (const [i, lb] of liveBlocks(lesson.body).entries()) {
+        if (lb.expected == null) continue;
+        stats.live++;
+        const r = await PyRunner.run(lb.code).promise;
+        const same = normalizeOutput(r.stdout) === normalizeOutput(lb.expected)
+          || normalizeOutput(r.stdout + r.stderr) === normalizeOutput(lb.expected);
+        if (same) stats.liveMatched++;
+        else addRow(`${lesson.id} живий приклад #${i + 1}`, 'warn', 'вивід відрізняється (інфо)',
+          `ОЧІКУЄТЬСЯ:\n${normalizeOutput(lb.expected)}\n\nОТРИМАНО:\n${normalizeOutput(r.stdout)}${r.stderr ? '\n--- stderr ---\n' + r.stderr : ''}\n\nКОД:\n${lb.code}`);
+      }
+    }
+  }
+  const info = PyRunner.info();
+  stats.python = info.python;
+  stats.pyodide = info.version;
+  stats.seconds = Math.round((performance.now() - t0) / 1000);
+  summaryEl.textContent = `Pyodide ${info.version}, Python ${info.python}, ${stats.seconds} с
+Рішення завдань з кодом: ${stats.solutionsPassed}/${stats.solutions} пройшли${stats.failures.length ? `\nНе пройшли: ${stats.failures.join(', ')}` : ''}
+Стартовий код, що вже проходить: ${stats.startersPassedWrongly}${doStarter ? '' : ' (не перевірялось)'}
+Живі приклади з блоком text, вивід збігся: ${stats.liveMatched}/${stats.live}${doLive ? '' : ' (не перевірялось)'}`;
+  window.__selftest.done = true;
+})().catch((e) => { summaryEl.textContent = 'Помилка: ' + e; window.__selftest.error = String(e); window.__selftest.done = true; });
+</script>
+</body>
+</html>

@@ -1,0 +1,567 @@
+- id: t1
+  type: code
+  title: "Помилка JSON з рядком і колонкою"
+  prompt: |
+    Напишіть `parse_config(text)`, яка парсить конфіг форми з JSON-рядка і повертає `dict`.
+
+    - Невалідний JSON: кинути `ValueError` з текстом
+      `invalid JSON at line <lineno>, column <colno>: <msg>`, де значення взяті з `JSONDecodeError`.
+      Сам `JSONDecodeError` назовні не випускати.
+    - Валідний JSON, але не об'єкт (масив, рядок, `null`): `ValueError` з текстом
+      `config must be a JSON object, got <назва типу Python>`.
+
+    ```python
+    parse_config('{"id": "signup"}')   # {'id': 'signup'}
+    parse_config('["email"]')          # ValueError: config must be a JSON object, got list
+    ```
+  starter: |
+    import json
+
+
+    def parse_config(text: str) -> dict:
+        ...
+  harness: |
+    print(parse_config('{"id": "signup", "fields": []}'))
+    for text in ['{"id": "signup",\n fields: []}', '["email"]', '', 'null']:
+        try:
+            parse_config(text)
+            print("no error")
+        except ValueError as e:
+            print(type(e).__name__, "|", e)
+  expected: |
+    {'id': 'signup', 'fields': []}
+    ValueError | invalid JSON at line 2, column 2: Expecting property name enclosed in double quotes
+    ValueError | config must be a JSON object, got list
+    ValueError | invalid JSON at line 1, column 1: Expecting value
+    ValueError | config must be a JSON object, got NoneType
+  hints:
+    - "JSONDecodeError має атрибути msg, lineno і colno. Його треба перехопити і кинути замість нього звичайний ValueError; перевірка типу результату робиться вже після успішного парсингу."
+    - "except json.JSONDecodeError as e: raise ValueError(f\"invalid JSON at line {e.lineno}, column {e.colno}: {e.msg}\") from None; далі if not isinstance(data, dict): raise ValueError(f\"... got {type(data).__name__}\")"
+  solution: |
+    import json
+
+
+    def parse_config(text: str) -> dict:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"invalid JSON at line {e.lineno}, column {e.colno}: {e.msg}") from None
+        if not isinstance(data, dict):
+            raise ValueError(f"config must be a JSON object, got {type(data).__name__}")
+        return data
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "default= для типів бекенду"
+  prompt: |
+    Напишіть функцію `to_jsonable(obj)` для `json.dumps(..., default=to_jsonable)`:
+
+    - `datetime` і `date` стають рядком ISO 8601 (`isoformat()`);
+    - `Decimal` стає рядком (`"19.90"`, не числом);
+    - екземпляр dataclass стає словником через `dataclasses.asdict`;
+    - `set` і `frozenset` стають відсортованим списком;
+    - `Enum` стає своїм `.value`;
+    - будь-що інше: `TypeError` з текстом `Object of type <назва типу> is not JSON serializable`.
+
+    Пам'ятайте, що енкодер обробляє результат `default` рекурсивно: усередині dataclass можуть бути `Decimal` і `datetime`.
+  starter: |
+    import json
+    from dataclasses import asdict, is_dataclass
+    from datetime import date, datetime
+    from decimal import Decimal
+    from enum import Enum
+
+
+    def to_jsonable(obj: object) -> object:
+        ...
+  harness: |
+    from dataclasses import dataclass
+    from datetime import timezone
+
+    class Plan(Enum):
+        FREE = "free"
+        PRO = "pro"
+
+    @dataclass
+    class Lead:
+        email: str
+        plan: Plan
+        amount: Decimal
+        created_at: datetime
+        tags: set[str]
+
+    lead = Lead("a@b.c", Plan.PRO, Decimal("19.90"), datetime(2026, 10, 18, 9, 30, tzinfo=timezone.utc), {"vip", "eu"})
+    print(json.dumps(lead, default=to_jsonable))
+    print(json.dumps({"day": date(2026, 10, 18), "ids": frozenset({3, 1, 2})}, default=to_jsonable))
+    for bad in [b"raw", object()]:
+        try:
+            json.dumps({"x": bad}, default=to_jsonable)
+            print("no error")
+        except TypeError as e:
+            print("TypeError:", e)
+  expected: |
+    {"email": "a@b.c", "plan": "pro", "amount": "19.90", "created_at": "2026-10-18T09:30:00+00:00", "tags": ["eu", "vip"]}
+    {"day": "2026-10-18", "ids": [1, 2, 3]}
+    TypeError: Object of type bytes is not JSON serializable
+    TypeError: Object of type object is not JSON serializable
+  hints:
+    - "Ланцюжок isinstance-перевірок, по одній на тип, і raise TypeError наприкінці. datetime це підклас date, тож одна перевірка покриває обидва. Для dataclass є is_dataclass, але вона повертає True і для самого класу."
+    - "if is_dataclass(obj) and not isinstance(obj, type): return asdict(obj); if isinstance(obj, (set, frozenset)): return sorted(obj); if isinstance(obj, Enum): return obj.value; raise TypeError(f\"Object of type {type(obj).__name__} is not JSON serializable\")"
+  solution: |
+    import json
+    from dataclasses import asdict, is_dataclass
+    from datetime import date, datetime
+    from decimal import Decimal
+    from enum import Enum
+
+
+    def to_jsonable(obj: object) -> object:
+        if isinstance(obj, date):
+            return obj.isoformat()
+        if isinstance(obj, Decimal):
+            return str(obj)
+        if is_dataclass(obj) and not isinstance(obj, type):
+            return asdict(obj)
+        if isinstance(obj, (set, frozenset)):
+            return sorted(obj)
+        if isinstance(obj, Enum):
+            return obj.value
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Зворотно: дати, гроші й дубльовані ключі"
+  prompt: |
+    Напишіть `load_order(text)`, яка читає замовлення з JSON і відновлює типи:
+
+    - усі дробові числа стають `Decimal` (ціле `qty` лишається `int`);
+    - у будь-якому об'єкті, на будь-якій глибині, значення-рядок під ключем, що закінчується на `_at`,
+      стає `datetime` через `datetime.fromisoformat`; `null` під таким ключем лишається `None`;
+    - дубльований ключ у будь-якому об'єкті: `ValueError` з текстом `duplicate key: '<ключ>'`.
+
+    `json.loads` сам дублікати мовчки зливає. Подумайте, який хук бачить об'єкт ще до побудови словника:
+    `object_hook` і `object_pairs_hook` разом не працюють, тож усе має зробити один із них.
+  starter: |
+    import json
+    from datetime import datetime
+    from decimal import Decimal
+
+
+    def load_order(text: str) -> dict:
+        ...
+  harness: |
+    order = load_order(
+        '{"id": "o1", "total": 19.90, "created_at": "2026-10-18T09:30:00+00:00",'
+        ' "items": [{"sku": "A", "price": 9.95, "qty": 2}],'
+        ' "meta": {"paid_at": "2026-10-19T10:00:00Z", "refunded_at": null}}'
+    )
+    print(repr(order["total"]), repr(order["items"][0]["price"]), repr(order["items"][0]["qty"]))
+    print(type(order["created_at"]).__name__, order["created_at"].isoformat())
+    print(order["meta"]["paid_at"].isoformat(), order["meta"]["refunded_at"])
+    for text in ['{"id": "o1", "id": "o2"}', '{"items": [{"sku": "A", "sku": "B"}]}']:
+        try:
+            load_order(text)
+            print("no error")
+        except ValueError as e:
+            print("ValueError:", e)
+  expected: |
+    Decimal('19.90') Decimal('9.95') 2
+    datetime 2026-10-18T09:30:00+00:00
+    2026-10-19T10:00:00+00:00 None
+    ValueError: duplicate key: 'id'
+    ValueError: duplicate key: 'sku'
+  hints:
+    - "parse_float=Decimal закриває перший пункт. Решту робить object_pairs_hook: він отримує список пар (ключ, значення) кожного об'єкта, знизу вгору, і повертає те, що стане на місце об'єкта."
+    - "У хуку: result = {}; for key, value in pairs: if key in result: raise ValueError(f\"duplicate key: {key!r}\"); if key.endswith(\"_at\") and isinstance(value, str): value = datetime.fromisoformat(value); result[key] = value."
+  solution: |
+    import json
+    from datetime import datetime
+    from decimal import Decimal
+
+
+    def _revive(pairs: list[tuple[str, object]]) -> dict:
+        result: dict = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate key: {key!r}")
+            if key.endswith("_at") and isinstance(value, str):
+                value = datetime.fromisoformat(value)
+            result[key] = value
+        return result
+
+
+    def load_order(text: str) -> dict:
+        return json.loads(text, object_pairs_hook=_revive, parse_float=Decimal)
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Імпорт лідів з Excel-CSV"
+  prompt: |
+    Маркетинг вивантажує ліди з Excel з українською локаллю. Файл приходить як `bytes`: UTF-8 з BOM,
+    роздільник `;`, переводи рядків `\r\n`, суми з десятковою комою. Колонки: `email;name;age;amount;consent`.
+
+    Напишіть `parse_leads(data)`, яка повертає список словників з типізованими значеннями:
+
+    - `email` без пробілів по краях і в нижньому регістрі; рядки з порожнім `email` пропустити;
+    - `name` як є;
+    - `age`: `int` або `None` для порожньої клітинки;
+    - `amount`: `Decimal` з комою, заміненою на крапку (`"19,90"` стає `Decimal('19.90')`);
+    - `consent`: `True` для `"1"`, `False` для всього іншого.
+
+    Файл без BOM теж має читатися.
+  starter: |
+    import csv
+    import io
+    from decimal import Decimal
+
+
+    def parse_leads(data: bytes) -> list[dict]:
+        ...
+  harness: |
+    data = (
+        "email;name;age;amount;consent\r\n"
+        " A@B.c ;Олена;30;19,90;1\r\n"
+        'x@y.z;"Тарас; ФОП";;0;0\r\n'
+        ";;;;\r\n"
+    ).encode("utf-8-sig")
+    print(data[:3])
+    for lead in parse_leads(data):
+        print(lead)
+    print(parse_leads("email;name;age;amount;consent\r\nq@q.q;Ія;41;1200,5;1\r\n".encode("utf-8")))
+  expected: |
+    b'\xef\xbb\xbf'
+    {'email': 'a@b.c', 'name': 'Олена', 'age': 30, 'amount': Decimal('19.90'), 'consent': True}
+    {'email': 'x@y.z', 'name': 'Тарас; ФОП', 'age': None, 'amount': Decimal('0'), 'consent': False}
+    [{'email': 'q@q.q', 'name': 'Ія', 'age': 41, 'amount': Decimal('1200.5'), 'consent': True}]
+  hints:
+    - "Спершу bytes у текст кодеком, який прибирає BOM і не вимагає його. Потім io.StringIO(text, newline=\"\") як файл для csv.DictReader з потрібним роздільником. Усі значення приходять рядками, конвертуйте кожне явно."
+    - "text = data.decode(\"utf-8-sig\"); for row in csv.DictReader(io.StringIO(text, newline=\"\"), delimiter=\";\"): email = row[\"email\"].strip().lower(); if not email: continue; age = int(row[\"age\"]) if row[\"age\"] else None; amount = Decimal(row[\"amount\"].replace(\",\", \".\"))"
+  solution: |
+    import csv
+    import io
+    from decimal import Decimal
+
+
+    def parse_leads(data: bytes) -> list[dict]:
+        text = data.decode("utf-8-sig")
+        leads = []
+        for row in csv.DictReader(io.StringIO(text, newline=""), delimiter=";"):
+            email = row["email"].strip().lower()
+            if not email:
+                continue
+            leads.append({
+                "email": email,
+                "name": row["name"],
+                "age": int(row["age"]) if row["age"] else None,
+                "amount": Decimal(row["amount"].replace(",", ".")),
+                "consent": row["consent"] == "1",
+            })
+        return leads
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "formbuilder.toml поверх значень за замовчуванням"
+  prompt: |
+    Напишіть `load_settings(data)`, яка читає `formbuilder.toml` (вміст файлу як `bytes`, тобто те,
+    що дав би `open(path, "rb")`) і повертає налаштування: значення з файлу поверх `DEFAULTS`.
+
+    - Таблиці (`[database]`) зливаються з таблицею за замовчуванням по ключах, а не замінюють її цілком.
+    - Невідомий ключ верхнього рівня: `ValueError` з текстом `unknown setting: '<ключ>'`.
+    - Невідомий ключ усередині таблиці: `ValueError` з текстом `unknown setting: '<таблиця>.<ключ>'`.
+    - Таблиця в `DEFAULTS`, а у файлі під цим ключем не таблиця: `ValueError` з текстом `'<ключ>' must be a table`.
+    - Невалідний TOML: `ValueError` з текстом `invalid TOML` (`TOMLDecodeError` назовні не випускати).
+    - `DEFAULTS` не змінюється між викликами.
+  starter: |
+    import copy
+    import io
+    import tomllib
+
+    DEFAULTS = {
+        "debug": False,
+        "out_dir": "dist",
+        "database": {"path": "formbuilder.db", "timeout": 5},
+    }
+
+
+    def load_settings(data: bytes) -> dict:
+        ...
+  harness: |
+    print(load_settings(b'debug = true\n[database]\ntimeout = 10\n'))
+    print(load_settings(b""))
+    print(DEFAULTS["database"])
+    for data in [b"port = 8000", b"[database]\npool = 5", b"debug = yes", b'database = "x.db"']:
+        try:
+            load_settings(data)
+            print("no error")
+        except ValueError as e:
+            print("ValueError:", e)
+  expected: |
+    {'debug': True, 'out_dir': 'dist', 'database': {'path': 'formbuilder.db', 'timeout': 10}}
+    {'debug': False, 'out_dir': 'dist', 'database': {'path': 'formbuilder.db', 'timeout': 5}}
+    {'path': 'formbuilder.db', 'timeout': 5}
+    ValueError: unknown setting: 'port'
+    ValueError: unknown setting: 'database.pool'
+    ValueError: invalid TOML
+    ValueError: 'database' must be a table
+  hints:
+    - "tomllib.load хоче бінарний файловий об'єкт; для bytes у пам'яті є io.BytesIO (або tomllib.loads(data.decode())). Копія DEFAULTS має бути глибокою: інакше update вкладеної таблиці змінить сам DEFAULTS."
+    - "settings = copy.deepcopy(DEFAULTS); for key, value in loaded.items(): перевірити key in DEFAULTS; якщо isinstance(DEFAULTS[key], dict): перевірити, що value теж dict і всі його ключі є в DEFAULTS[key], потім settings[key].update(value); інакше settings[key] = value."
+  solution: |
+    import copy
+    import io
+    import tomllib
+
+    DEFAULTS = {
+        "debug": False,
+        "out_dir": "dist",
+        "database": {"path": "formbuilder.db", "timeout": 5},
+    }
+
+
+    def load_settings(data: bytes) -> dict:
+        try:
+            loaded = tomllib.load(io.BytesIO(data))
+        except tomllib.TOMLDecodeError as e:
+            raise ValueError("invalid TOML") from e
+        settings = copy.deepcopy(DEFAULTS)
+        for key, value in loaded.items():
+            if key not in DEFAULTS:
+                raise ValueError(f"unknown setting: {key!r}")
+            default = DEFAULTS[key]
+            if isinstance(default, dict):
+                if not isinstance(value, dict):
+                    raise ValueError(f"{key!r} must be a table")
+                for sub in value:
+                    if sub not in default:
+                        raise ValueError(f"unknown setting: '{key}.{sub}'")
+                settings[key].update(value)
+            else:
+                settings[key] = value
+        return settings
+  requires: []
+  runtime: browser
+
+- id: t6
+  type: code
+  title: "JSON Lines у CSV потоком"
+  prompt: |
+    Журнал заявок лежить у JSON Lines, маркетингу потрібен CSV. Напишіть
+    `jsonl_to_csv(lines, dst, fields)`, яка повертає кортеж `(written, errors)`.
+
+    - `lines` будь-який iterable рядків (файл, генератор). Обробляйте потоком: рядок прочитали, запис записали.
+      Не збирайте всі рядки чи записи в список і не викликайте `.read()`.
+    - `dst` текстовий файловий об'єкт. У нього пишеться CSV з роздільником `;`: спершу заголовок з `fields`
+      (навіть якщо записів немає), потім по рядку на запис. Ключі, яких немає у `fields`, ігноруються;
+      відсутні поля й `null` стають порожньою клітинкою.
+    - Значення-список або значення-словник записується як компактний JSON: `json.dumps(value, ensure_ascii=False, separators=(",", ":"))`.
+    - Порожні рядки пропускаються мовчки. Невалідний JSON дає помилку `line <n>: invalid JSON`,
+      валідний JSON, що не є об'єктом, дає `line <n>: not an object`. Нумерація рядків з 1, порожні рядки теж рахуються.
+      Помилкові рядки пропускаються, обробка йде далі.
+    - `written` кількість записаних рядків даних, `errors` список текстів помилок.
+  starter: |
+    import csv
+    import json
+    from collections.abc import Iterable
+    from typing import TextIO
+
+
+    def jsonl_to_csv(lines: Iterable[str], dst: TextIO, fields: list[str]) -> tuple[int, list[str]]:
+        ...
+  harness: |
+    import io
+
+    lines = [
+        '{"email": "a@b.c", "name": "Олена", "tags": ["vip", "eu"], "ip": "10.0.0.1"}\n',
+        "\n",
+        '{"email": "x@y.z", "name": null}\n',
+        '{"email": "broken"\n',
+        '["not", "object"]\n',
+        '{"email": "q@q.q", "name": "Тарас; ФОП", "meta": {"utm": "ads"}}\n',
+    ]
+    log = []
+
+    def source(items):
+        for item in items:
+            log.append("read")
+            yield item
+
+    class SpyIO(io.StringIO):
+        def write(self, s):
+            log.append("write")
+            return super().write(s)
+
+    dst = SpyIO()
+    written, errors = jsonl_to_csv(source(lines), dst, ["email", "name", "tags", "meta"])
+    print(written, errors)
+    for row in dst.getvalue().splitlines():
+        print(row)
+    first_read = log.index("read")
+    last_read = len(log) - 1 - log[::-1].index("read")
+    print("streaming:", "write" in log[first_read:last_read])
+    empty = io.StringIO()
+    print(jsonl_to_csv(iter([]), empty, ["email"]), repr(empty.getvalue()))
+  expected: |
+    3 ['line 4: invalid JSON', 'line 5: not an object']
+    email;name;tags;meta
+    a@b.c;Олена;"[""vip"",""eu""]";
+    x@y.z;;;
+    q@q.q;"Тарас; ФОП";;"{""utm"":""ads""}"
+    streaming: True
+    (0, []) 'email\r\n'
+  hints:
+    - "csv.DictWriter з delimiter=\";\", restval=\"\" і extrasaction=\"ignore\" закриває заголовок, відсутні поля й зайві ключі; None він сам пише порожньою клітинкою. Цикл for lineno, line in enumerate(lines, start=1) дає і потоковість, і номери."
+    - "У циклі: пропустити line.strip() == \"\"; try: record = json.loads(line) except json.JSONDecodeError: errors.append(...); continue; перевірити isinstance(record, dict); потім {k: json.dumps(v, ensure_ascii=False, separators=(\",\", \":\")) if isinstance(v, (list, dict)) else v for k, v in record.items()} у writer.writerow."
+  solution: |
+    import csv
+    import json
+    from collections.abc import Iterable
+    from typing import TextIO
+
+
+    def jsonl_to_csv(lines: Iterable[str], dst: TextIO, fields: list[str]) -> tuple[int, list[str]]:
+        writer = csv.DictWriter(dst, fieldnames=fields, delimiter=";", restval="", extrasaction="ignore")
+        writer.writeheader()
+        written = 0
+        errors: list[str] = []
+        for lineno, line in enumerate(lines, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                errors.append(f"line {lineno}: invalid JSON")
+                continue
+            if not isinstance(record, dict):
+                errors.append(f"line {lineno}: not an object")
+                continue
+            row = {
+                key: json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+                if isinstance(value, (list, dict))
+                else value
+                for key, value in record.items()
+            }
+            writer.writerow(row)
+            written += 1
+        return written, errors
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    import json
+    print(json.dumps({"rate": float("nan"), "phone": None}))
+    ```
+  options:
+    - '{"rate": NaN, "phone": null}'
+    - '{"rate": null}'
+    - '{"rate": null, "phone": null}'
+    - 'ValueError: Out of range float values are not JSON compliant: nan'
+  answer: 0
+  explain: |
+    За замовчуванням `allow_nan=True`, і Python пише `NaN` як є, хоча стандарт JSON такого значення не має,
+    а `JSON.parse` у браузері на ньому впаде. `None` завжди стає `null`, ключ лишається.
+    `{"rate": null}` це поведінка `JSON.stringify`, де `NaN` стає `null`, а поле з `undefined` зникає,
+    але `None` це не `undefined`. `{"rate": null, "phone": null}` теж JS-логіка для `NaN`.
+    `ValueError` буде лише з `allow_nan=False`.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    import json
+    from datetime import datetime
+    print(json.dumps({"at": datetime(2026, 10, 18, 9, 30)}, default=str))
+    ```
+  options:
+    - '{"at": "2026-10-18T09:30:00"}'
+    - '{"at": "2026-10-18 09:30:00"}'
+    - 'TypeError: Object of type datetime is not JSON serializable'
+    - '{"at": "2026-10-18T09:30:00.000Z"}'
+  answer: 1
+  explain: |
+    `default=str` викликає `str(datetime)`, а він розділяє дату й час пробілом, тобто це не ISO 8601,
+    який віддав би `isoformat()` з літерою `T`. `TypeError` не буде саме тому, що `default` перехопив тип.
+    Варіант з `.000Z` це те, що дає `Date.prototype.toJSON` у JS: мілісекунди й UTC; Python нічого не
+    дописує до naive-дати.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    import csv, io
+    rows = list(csv.DictReader(io.StringIO("id,age\n1,30\n2,\n3\n")))
+    print([row["age"] for row in rows])
+    ```
+  options:
+    - "[30, None, None]"
+    - "['30', '', None]"
+    - "['30', '', '']"
+    - "KeyError: 'age'"
+  answer: 1
+  explain: |
+    `csv` не вгадує типи, тож `30` лишається рядком `'30'`. Порожня клітинка в рядку `2,` це порожній рядок,
+    а не `None`. Рядок `3` взагалі не має другої колонки, і `DictReader` підставляє `restval`, який за
+    замовчуванням `None`. `[30, None, None]` це очікування автоматичного `cast` з `csv-parse`.
+    `['30', '', '']` було б з `restval=""`. `KeyError` не буде: ключ є в кожному словнику.
+
+- id: q4
+  type: quiz
+  question: |
+    Що поверне `yaml.safe_load` (pyyaml 6) для такого документа?
+    ```yaml
+    countries: [ua, pl, no]
+    python: 3.10
+    zip: 01001
+    ```
+  options:
+    - "{'countries': ['ua', 'pl', 'no'], 'python': '3.10', 'zip': '01001'}"
+    - "{'countries': ['ua', 'pl', False], 'python': 3.1, 'zip': 513}"
+    - "{'countries': ['ua', 'pl', False], 'python': '3.10', 'zip': '01001'}"
+    - "ConstructorError, бо safe_load не приймає неявні типи"
+  answer: 1
+  explain: |
+    pyyaml реалізує YAML 1.1: `no` без лапок це булеве `False`, `3.10` це float `3.1`, а нуль попереду
+    означає вісімкове число, тож `01001` стає `513`. Перший варіант це очікування "YAML як JSON",
+    де рядок лишається рядком; у YAML лапки необов'язкові, і тип вирішує парсер. Третій припускає, що
+    перетворюється лише `no`. `ConstructorError` `safe_load` кидає на теги на кшталт `!!python/object`,
+    а неявні базові типи він будує сам.
+
+- id: p1
+  type: project
+  title: "Модуль форматів у капстоуні"
+  prompt: |
+    Додайте в капстоун `src/formbuilder/formats.py` з трьома функціями і `tests/test_formats.py`.
+
+    - `load_form_config(path: Path) -> FormConfig`: читає JSON-конфіг форми через
+      `FormConfig.model_validate_json(path.read_bytes())`. Модель `FormConfig` беріть з `formbuilder.models`
+      (проєктне завдання m2-l09); якщо її ще немає, мінімальна модель з `id`, `title` і списком полів.
+    - `load_settings(path: Path) -> Settings`: читає `formbuilder.toml` через `tomllib` у Pydantic-модель
+      `Settings` (поля `out_dir: Path = Path("dist")`, `debug: bool = False`, `database_path: Path`);
+      невідомий ключ у файлі це помилка (`extra="forbid"`). У m6-l06 цю модель замінить pydantic-settings.
+    - `export_leads_csv(leads: Iterable[Lead], path: Path) -> int`: пише CSV для Excel (`utf-8-sig`,
+      `newline=""`, `;`), колонки фіксовані й перелічені явно, дата заявки у форматі `%Y-%m-%d %H:%M`,
+      повертає кількість рядків. `leads` обробляються потоком, без `list(leads)`.
+
+    Тести використовують `tmp_path` (m3-l03) і реальні файли.
+  checklist:
+    - "`load_form_config` на невалідному JSON і на невалідному типі поля кидає `ValidationError`, тест перевіряє `type` першої помилки (`json_invalid` і тип поля відповідно)"
+    - "`load_settings` на файлі з невідомим ключем кидає `ValidationError` з `extra_forbidden`; на порожньому файлі повертає значення за замовчуванням"
+    - "Тест читає згенерований CSV через `read_bytes()` і перевіряє, що він починається з BOM `b'\\xef\\xbb\\xbf'`"
+    - "Тест читає CSV назад через `csv.DictReader(..., delimiter=\";\")` з `encoding=\"utf-8-sig\"` і порівнює значення, включно з полем, що містить `;` і кирилицю"
+    - "Тест передає в `export_leads_csv` генератор і перевіряє повернену кількість рядків"
+    - "Зайві ключі ліда (наприклад, `ip`) у CSV не потрапляють"
+    - "ruff і mypy у strict-режимі проходять на `formats.py`"
+  verify: "cd capstone && uv run pytest tests/test_formats.py -q"

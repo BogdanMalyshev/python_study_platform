@@ -1,0 +1,102 @@
+# Маніфест курсу: порядок модулів і уроків для платформи (platform/build.py).
+# Урок-рядок означає папку content/<module>/<slug>/ з lesson.md і tasks.yaml.
+# Урок-словник {slug, title} допустимий для ще не написаних уроків: якщо папки немає,
+# сайдбар показує його сірим як "ще не написано". Порядок і назви з docs/roadmap.md.
+title: "Python для Senior Frontend-розробника"
+modules:
+  - id: m0-start
+    title: "Модуль 0. Старт і інструменти"
+    lessons:
+      - l01-install-versions
+      - l02-venv-pip-uv
+      - l03-repl-running
+      - l04-ruff
+      - l05-debugging
+      - l06-project-structure
+
+  - id: m1-syntax
+    title: "Модуль 1. Синтаксис через призму JS"
+    lessons:
+      - l01-indentation-names
+      - l02-types
+      - l03-equality-truthiness
+      - l04-strings
+      - l05-conditions-match
+      - l06-loops
+      - l07-functions
+      - l08-scope-closures
+      - l09-lambda
+      - l10-comprehensions
+      - l11-exceptions
+
+  - id: m2-data-typing
+    title: "Модуль 2. Структури даних і типізація"
+    lessons:
+      - l01-collections
+      - l02-mutability-copy
+      - l03-slicing-unpacking
+      - l04-collections-module
+      - l05-dataclasses
+      - l06-typing
+      - l07-protocol
+      - l08-type-checkers
+      - l09-pydantic
+
+  - id: m3-modules-tests
+    title: "Модуль 3. Модулі, пакети, тести"
+    lessons:
+      - {slug: l01-imports, title: "Система імпортів, __init__.py, циклічні імпорти"}
+      - {slug: l02-packaging, title: "Пакет із pyproject.toml, залежності, lockfile через uv"}
+      - {slug: l03-pytest, title: "pytest: assert, parametrize, fixtures, conftest.py"}
+      - {slug: l04-mocks-coverage, title: "Моки: unittest.mock, pytest-mock; coverage"}
+      - {slug: l05-doctest, title: "doctest як документація, що виконується"}
+      - {slug: l06-pre-commit, title: "pre-commit з ruff і mypy"}
+
+  - id: m4-oop
+    title: "Модуль 4. ООП і протоколи по-пайтонівськи"
+    lessons:
+      - {slug: l01-classes, title: "Класи, __init__, self, атрибути класу й екземпляра"}
+      - {slug: l02-dunder, title: "dunder-методи: __repr__, __eq__, __hash__, __iter__, __call__"}
+      - {slug: l03-property-slots, title: "property замість геттерів і сеттерів; __slots__"}
+      - {slug: l04-inheritance-mro, title: "Наслідування, super(), MRO, mixins"}
+      - {slug: l05-abc-protocol, title: "ABC проти Protocol"}
+      - {slug: l06-enum, title: "Enum, StrEnum"}
+      - {slug: l07-context-managers, title: "Контекстні менеджери: with, contextmanager"}
+      - {slug: l08-composition-patterns, title: "Композиція замість наслідування, патерни в ідіоматичному Python"}
+
+  - id: m5-iter-async
+    title: "Модуль 5. Ітератори, генератори, декоратори, asyncio"
+    lessons:
+      - {slug: l01-iteration-protocol, title: "Протокол ітерації: __iter__, __next__, StopIteration"}
+      - {slug: l02-generators, title: "Генератори, yield, yield from, ліниві конвеєри"}
+      - {slug: l03-itertools-functools, title: "itertools і functools: partial, lru_cache, reduce, wraps"}
+      - {slug: l04-decorators, title: "Декоратори функцій і класів, декоратори з параметрами"}
+      - l05-asyncio
+      - {slug: l06-async-iterators, title: "Асинхронні ітератори й генератори, async with"}
+      - {slug: l07-httpx, title: "httpx для асинхронних запитів"}
+      - {slug: l08-gil-concurrency, title: "GIL, threading, multiprocessing, concurrent.futures"}
+      - {slug: l09-logging, title: "Логування: logging, structlog"}
+
+  - id: m6-stdlib-cli
+    title: "Модуль 6. Стандартна бібліотека і CLI"
+    lessons:
+      - {slug: l01-pathlib, title: "pathlib, shutil, tempfile"}
+      - {slug: l02-formats, title: "json, csv, tomllib, yaml"}
+      - {slug: l03-datetime, title: "datetime, zoneinfo, UTC за замовчуванням"}
+      - {slug: l04-re, title: "re проти JS RegExp"}
+      - {slug: l05-subprocess, title: "subprocess: виклик зовнішнього процесу"}
+      - {slug: l06-cli-settings, title: "CLI: argparse або Typer, змінні оточення, pydantic-settings"}
+      - {slug: l07-os-sys-signal, title: "os, sys, signal: коректне завершення по SIGTERM"}
+      - {slug: l08-sqlite, title: "sqlite3 як сховище для капстоуну"}
+
+  - id: m7-fastapi
+    title: "Модуль 7. FastAPI і капстоун"
+    lessons:
+      - {slug: l01-fastapi-basics, title: "FastAPI: роутери, моделі запитів і відповідей, Depends"}
+      - {slug: l02-errors-middleware, title: "Обробка помилок, middleware, CORS, OpenAPI"}
+      - {slug: l03-background-tasks, title: "Фонові задачі: BackgroundTasks і воркер на asyncio.Queue"}
+      - {slug: l04-websocket, title: "WebSocket у FastAPI для статусу генерації"}
+      - {slug: l05-api-tests, title: "Тести API: pytest і httpx AsyncClient"}
+      - {slug: l06-jinja2, title: "Jinja2: шаблони як простий рендерер статики"}
+      - {slug: l07-packaging-docker, title: "Пакування й запуск: uvicorn, Dockerfile з uv"}
+      - {slug: l08-frameworks-overview, title: "Оглядово: Django, Flask, Litestar"}

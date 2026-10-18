@@ -1,0 +1,600 @@
+- id: q1
+  type: quiz
+  question: |
+    Що станеться в цьому коді?
+    ```python
+    async def load(client: httpx.AsyncClient) -> dict:
+        r = await client.get("/forms/42")
+        return await r.json()
+    ```
+  options:
+    - "Поверне dict: await над готовим значенням просто його віддає, як у JS"
+    - "TypeError: object dict can't be used in 'await' expression"
+    - "Поверне корутину, а в stderr з'явиться RuntimeWarning про never awaited"
+    - "httpx.ResponseNotRead: тіло ще не прочитане"
+  answer: 1
+  explain: |
+    `await client.get(...)` повертає відповідь з уже прочитаним тілом, і `r.json()` синхронно
+    повертає `dict`. `await` у Python вимагає awaitable (корутину, Task, Future); на звичайному
+    значенні він кидає `TypeError`. Варіант 1 це JS-інтуїція: там `await 42` повертає 42, бо
+    `await` загортає будь-що в `Promise.resolve`. Варіант 3 переплутав напрям: `RuntimeWarning`
+    буває, коли корутину забули дочекатись, а тут навпаки чекають не-корутину. Варіант 4
+    стосується лише `client.stream(...)`, де тіло справді не прочитане до `aread()`.
+
+- id: t1
+  type: code
+  title: "Перший запит через Client"
+  prompt: |
+    API конструктора форм віддає `GET /forms/<id>` у форматі
+    `{"id": 42, "title": "Contact", "fields": [{"id": "email", ...}, ...]}`.
+
+    Напишіть `get_field_ids(client, form_id)`: робить запит через переданий `httpx.Client`
+    (у нього вже налаштований `base_url`), повертає список `id` полів у порядку з відповіді.
+    Якщо статус не 2xx, функція має кинути `httpx.HTTPStatusError`, а не повернути щось.
+
+    ```python
+    get_field_ids(client, 42)   # ['email', 'phone']
+    get_field_ids(client, 7)    # HTTPStatusError (404)
+    ```
+
+    Перевірка створює клієнт з `MockTransport`, мережі немає.
+  starter: |
+    import httpx
+
+    def get_field_ids(client: httpx.Client, form_id: int) -> list[str]:
+        ...
+  harness: |
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/forms/42":
+            return httpx.Response(200, json={"id": 42, "title": "Contact", "fields": [
+                {"id": "email", "type": "email"}, {"id": "phone", "type": "tel"}]})
+        return httpx.Response(404, json={"detail": "form not found"})
+
+    _client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="https://api.example.com")
+    print(get_field_ids(_client, 42))
+    try:
+        print(get_field_ids(_client, 7))
+    except httpx.HTTPStatusError as exc:
+        print("HTTPStatusError", exc.response.status_code, exc.request.url)
+  expected: |
+    ['email', 'phone']
+    HTTPStatusError 404 https://api.example.com/forms/7
+  hints:
+    - "Запит відносним шляхом, бо base_url уже в клієнті. Статус не перевіряйте вручну: у відповіді є метод, який сам кидає потрібний виняток."
+    - "`r = client.get(f\"/forms/{form_id}\")`, потім `r.raise_for_status()`; він повертає саму відповідь, тож можна писати в ланцюжок."
+    - "`data = client.get(f\"/forms/{form_id}\").raise_for_status().json()` і `return [f[\"id\"] for f in data[\"fields\"]]`."
+  solution: |
+    import httpx
+
+    def get_field_ids(client: httpx.Client, form_id: int) -> list[str]:
+        data = client.get(f"/forms/{form_id}").raise_for_status().json()
+        return [field["id"] for field in data["fields"]]
+  requires: [httpx]
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Сервер повертає `503`. Що надрукує код?
+    ```python
+    try:
+        r = client.get("/forms/42")
+        print("got", r.status_code)
+    except httpx.HTTPError as exc:
+        print("error", type(exc).__name__)
+    ```
+  options:
+    - "error HTTPStatusError"
+    - "got 503"
+    - "error ServerError"
+    - "Нічого: виняток RemoteProtocolError не є HTTPError і вилетить назовні"
+  answer: 1
+  explain: |
+    Статус відповіді сам по собі винятку не дає, як і у `fetch`: відповідь `503` повертається
+    звичайним об'єктом, і лише `r.raise_for_status()` перетворить її на `HTTPStatusError`.
+    Варіант 1 це інтуїція axios, який відхиляє проміс на не-2xx. `ServerError` в httpx
+    не існує, статуси не мають окремих класів винятків. Варіант 4 невірний двічі:
+    `RemoteProtocolError` це `TransportError`, тобто нащадок `HTTPError`, і до того ж
+    сервер тут відповів коректно, протокол не порушено.
+
+- id: t2
+  type: code
+  title: "Класифікація помилок запиту"
+  prompt: |
+    Напишіть `probe(client, path)`, яка робить `GET path` і повертає рядок-діагноз:
+
+    | Що сталось | Результат |
+    |---|---|
+    | статус 2xx | `"ok <статус>"` |
+    | статус 4xx | `"client error <статус>"` |
+    | статус 5xx | `"server error <статус>"` |
+    | будь-який таймаут | `"timeout"` |
+    | інша помилка транспорту (з'єднання, протокол) | `"network error"` |
+
+    Використайте ієрархію винятків httpx, а не перевірку назв класів рядками.
+    Подумайте, у якому порядку мають стояти `except`.
+
+    ```python
+    probe(client, "/ok")        # 'ok 200'
+    probe(client, "/slow")      # 'timeout'   (обробник кидає ReadTimeout)
+    probe(client, "/refused")   # 'network error'
+    ```
+  starter: |
+    import httpx
+
+    def probe(client: httpx.Client, path: str) -> str:
+        ...
+  harness: |
+    def _handler(request: httpx.Request) -> httpx.Response:
+        match request.url.path:
+            case "/ok":
+                return httpx.Response(200)
+            case "/created":
+                return httpx.Response(201)
+            case "/missing":
+                return httpx.Response(404)
+            case "/down":
+                return httpx.Response(503)
+            case "/slow":
+                raise httpx.ReadTimeout("timed out", request=request)
+            case "/connect-slow":
+                raise httpx.ConnectTimeout("timed out", request=request)
+            case "/refused":
+                raise httpx.ConnectError("connection refused", request=request)
+            case "/garbage":
+                raise httpx.RemoteProtocolError("bad response", request=request)
+        return httpx.Response(500)
+
+    _client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="https://api.example.com")
+    for _path in ["/ok", "/created", "/missing", "/down", "/slow", "/connect-slow", "/refused", "/garbage"]:
+        print(_path, "->", probe(_client, _path))
+  expected: |
+    /ok -> ok 200
+    /created -> ok 201
+    /missing -> client error 404
+    /down -> server error 503
+    /slow -> timeout
+    /connect-slow -> timeout
+    /refused -> network error
+    /garbage -> network error
+  hints:
+    - "Таймаути є нащадками TransportError, тому їхній except має стояти раніше. Статус 4xx/5xx перетворюється на виняток лише через raise_for_status()."
+    - "Три except: `httpx.TimeoutException`, потім `httpx.TransportError`, потім `httpx.HTTPStatusError`; у останньому статус береться з `exc.response.status_code`."
+    - "`try: r = client.get(path).raise_for_status()` … `except httpx.HTTPStatusError as exc: code = exc.response.status_code; return f\"client error {code}\" if code < 500 else f\"server error {code}\"`; після try у `else` поверніть `f\"ok {r.status_code}\"`."
+  solution: |
+    import httpx
+
+    def probe(client: httpx.Client, path: str) -> str:
+        try:
+            r = client.get(path).raise_for_status()
+        except httpx.TimeoutException:
+            return "timeout"
+        except httpx.TransportError:
+            return "network error"
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code
+            kind = "client error" if code < 500 else "server error"
+            return f"{kind} {code}"
+        return f"ok {r.status_code}"
+  requires: [httpx]
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Паралельно, але не більше N"
+  prompt: |
+    Напишіть `async def fetch_titles(client, ids, limit)`: для кожного `id` робить
+    `GET /forms/<id>` через переданий `AsyncClient`, запити йдуть паралельно, але одночасно
+    в польоті не більше `limit`. Повертає `dict[int, str]` з `id` у `title`, **ключі в порядку `ids`**,
+    а не в порядку завершення. Будь-яка помилка статусу має вилетіти назовні.
+
+    ```python
+    await fetch_titles(client, [3, 1, 2], limit=2)
+    # {3: 'Form 3', 1: 'Form 1', 2: 'Form 2'}
+    ```
+
+    "Сервер" у перевірці відповідає на `/forms/<id>` із затримкою `id * 10` мс і рахує, скільки
+    запитів у нього одночасно; завдяки різним затримкам порядок завершення відрізняється від
+    порядку `ids`. Загальний час перевірки менше секунди.
+  starter: |
+    import asyncio
+    import httpx
+
+    async def fetch_titles(client: httpx.AsyncClient, ids: list[int], limit: int) -> dict[int, str]:
+        ...
+  harness: |
+    _stats = {"in_flight": 0, "peak": 0, "calls": 0}
+
+    async def _handler(request: httpx.Request) -> httpx.Response:
+        _stats["calls"] += 1
+        _stats["in_flight"] += 1
+        _stats["peak"] = max(_stats["peak"], _stats["in_flight"])
+        form_id = int(request.url.path.rsplit("/", 1)[1])
+        await asyncio.sleep(0.01 * form_id)
+        _stats["in_flight"] -= 1
+        return httpx.Response(200, json={"id": form_id, "title": f"Form {form_id}"})
+
+    async def _main() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(_handler), base_url="https://api.example.com") as client:
+            result = await fetch_titles(client, [5, 1, 4, 2, 3, 6], limit=2)
+            print(result)
+            print("calls:", _stats["calls"], "peak:", _stats["peak"])
+            _stats.update(peak=0, calls=0)
+            result = await fetch_titles(client, [2, 1, 3], limit=3)
+            print(result)
+            print("calls:", _stats["calls"], "peak:", _stats["peak"])
+
+    asyncio.run(_main())
+  expected: |
+    {5: 'Form 5', 1: 'Form 1', 4: 'Form 4', 2: 'Form 2', 3: 'Form 3', 6: 'Form 6'}
+    calls: 6 peak: 2
+    {2: 'Form 2', 1: 'Form 1', 3: 'Form 3'}
+    calls: 3 peak: 3
+  hints:
+    - "Обмеження паралелізму це asyncio.Semaphore(limit), у який кожен запит входить через async with. Порядок результатів зберігає не порядок завершення, а порядок, у якому ви створили задачі."
+    - "Допоміжна корутина `one(form_id)` з `async with sem:` усередині; задачі створюйте в `async with asyncio.TaskGroup() as tg:` списком у порядку `ids`."
+    - "Після виходу з TaskGroup: `return {form_id: task.result() for form_id, task in zip(ids, tasks)}`, де `one` повертає `r.raise_for_status().json()[\"title\"]`."
+  solution: |
+    import asyncio
+    import httpx
+
+    async def fetch_titles(client: httpx.AsyncClient, ids: list[int], limit: int) -> dict[int, str]:
+        sem = asyncio.Semaphore(limit)
+
+        async def one(form_id: int) -> str:
+            async with sem:
+                r = await client.get(f"/forms/{form_id}")
+                return r.raise_for_status().json()["title"]
+
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(one(form_id)) for form_id in ids]
+        return {form_id: task.result() for form_id, task in zip(ids, tasks)}
+  requires: [httpx]
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Яку з цих ситуацій клієнт може безпечно повторити автоматично, нічого не знаючи про сервер?
+  options:
+    - "`POST /payments` без `Idempotency-Key` отримав `httpx.ReadTimeout`"
+    - "`GET /forms/42` отримав `404`"
+    - "`POST /payments` без `Idempotency-Key` отримав `httpx.ConnectError` (connection refused)"
+    - "`PUT /forms/42` отримав `422`"
+  answer: 2
+  explain: |
+    `ConnectError` означає, що з'єднання не встановилось, тож запит до сервера не дійшов,
+    і повтор безпечний навіть для неідемпотентного `POST`. `ReadTimeout` (варіант 1) означає
+    протилежне: запит пішов, відповідь не прийшла, і сервер міг уже списати гроші; без
+    `Idempotency-Key` повтор ризикує дублем. `404` і `422` це постійні помилки клієнта:
+    `PUT` хоч і ідемпотентний, але повтор того самого невалідного тіла дасть той самий `422`,
+    а форма 42 не з'явиться від того, що ви спитаєте ще раз. Ідемпотентність методу робить
+    повтор безпечним, але не корисним.
+
+- id: t4
+  type: code
+  title: "Ретраї з експоненційною затримкою і jitter"
+  prompt: |
+    Напишіть `async def get_with_retry(client, url, *, attempts, base_delay, sleep, rng)`:
+
+    - робить `GET url`; повторює при `httpx.TransportError` і статусах `429, 500, 502, 503, 504`;
+    - на інші статуси не повторює: 2xx повертає відповідь, 4xx кидає `HTTPStatusError` одразу;
+    - усього не більше `attempts` спроб; якщо остання спроба теж невдала, кидає її помилку:
+      `TransportError` як є, а статус `503` як `HTTPStatusError`;
+    - перед повтором номер `i` (з нуля) чекає `await sleep(delay)`, де
+      `delay = rng.uniform(0, base_delay * 2**i)` (full jitter);
+    - після останньої спроби не чекає.
+
+    `sleep` і `rng` передаються параметрами, щоб перевірка могла записати затримки, не чекаючи
+    їх насправді. Перевірка через `assert`, повідомлення підкажуть, що не так.
+  starter: |
+    import asyncio
+    import random
+    from collections.abc import Awaitable, Callable
+
+    import httpx
+
+    RETRY_STATUSES = {429, 500, 502, 503, 504}
+
+    async def get_with_retry(
+        client: httpx.AsyncClient,
+        url: str,
+        *,
+        attempts: int,
+        base_delay: float,
+        sleep: Callable[[float], Awaitable[None]],
+        rng: random.Random,
+    ) -> httpx.Response:
+        ...
+  asserts: |
+    def _scripted(script):
+        calls = []
+        steps = iter(script)
+        def handler(request):
+            calls.append(request)
+            step = next(steps)
+            if isinstance(step, int):
+                return httpx.Response(step)
+            raise step("simulated", request=request)
+        return handler, calls
+
+    async def _run(script, attempts=4, base_delay=0.1):
+        handler, calls = _scripted(script)
+        delays = []
+        async def fake_sleep(d):
+            delays.append(d)
+        error = None
+        result = None
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            try:
+                result = await get_with_retry(client, "https://api.example.com/x", attempts=attempts,
+                                              base_delay=base_delay, sleep=fake_sleep, rng=random.Random(1))
+            except Exception as exc:
+                error = exc
+        return result, error, len(calls), delays
+
+    async def _check():
+        r, err, n, delays = await _run([503, 503, 200])
+        assert err is None, f"503, 503, 200 має закінчитись успіхом, а вилетіло {err!r}"
+        assert r is not None and r.status_code == 200, "функція має повернути відповідь 200"
+        assert n == 3, f"очікувалось 3 запити, було {n}"
+        assert len(delays) == 2, f"між трьома спробами дві паузи, а було {len(delays)}"
+        for i, d in enumerate(delays):
+            assert 0 <= d <= 0.1 * 2**i, f"пауза {i} = {d:.3f} поза межами [0, base_delay * 2**{i}]"
+        assert any(d < 0.1 * 2**i for i, d in enumerate(delays)), "паузи рівно base_delay * 2**i: немає jitter (rng.uniform)"
+
+        r, err, n, delays = await _run([404])
+        assert isinstance(err, httpx.HTTPStatusError), f"404 має одразу кинути HTTPStatusError, а отримано {r or err!r}"
+        assert n == 1 and delays == [], f"404 не повторюють: було {n} запитів і {len(delays)} пауз"
+
+        r, err, n, delays = await _run([httpx.ReadTimeout, httpx.ConnectError, 429, 200])
+        assert err is None and r.status_code == 200, f"таймаут, помилка з'єднання і 429 мають повторюватись: {err!r}"
+        assert n == 4 and len(delays) == 3, f"очікувалось 4 запити і 3 паузи, було {n} і {len(delays)}"
+
+        r, err, n, delays = await _run([503, 503, 503], attempts=3)
+        assert isinstance(err, httpx.HTTPStatusError) and err.response.status_code == 503, \
+            f"після вичерпаних спроб має вилетіти HTTPStatusError 503, а отримано {r or err!r}"
+        assert n == 3, f"attempts=3 означає рівно 3 запити, було {n}"
+        assert len(delays) == 2, f"після останньої спроби не чекають: пауз має бути 2, було {len(delays)}"
+
+        r, err, n, delays = await _run([httpx.ReadTimeout, httpx.ReadTimeout], attempts=2)
+        assert isinstance(err, httpx.ReadTimeout), f"остання помилка транспорту має вилетіти як є, а отримано {r or err!r}"
+        assert n == 2 and len(delays) == 1, f"очікувалось 2 запити і 1 пауза, було {n} і {len(delays)}"
+        print("all retry checks passed")
+
+    asyncio.run(_check())
+  hints:
+    - "Цикл `for attempt in range(attempts)`. Помилки транспорту ловіть через `try/except httpx.TransportError`, а статус перевіряйте в гілці `else`, щоб `raise_for_status` не потрапив під цей `except`."
+    - "На останній спробі нічого не ковтайте: `raise` для винятку і `return response.raise_for_status()` для статусу. Пауза стоїть у кінці тіла циклу, до неї доходять лише ті ітерації, де буде повтор."
+    - "`last = attempt == attempts - 1`; у `except`: `if last: raise`; у `else`: `if response.status_code not in RETRY_STATUSES or last: return response.raise_for_status()`; далі `await sleep(rng.uniform(0, base_delay * 2**attempt))`."
+  solution: |
+    import asyncio
+    import random
+    from collections.abc import Awaitable, Callable
+
+    import httpx
+
+    RETRY_STATUSES = {429, 500, 502, 503, 504}
+
+    async def get_with_retry(
+        client: httpx.AsyncClient,
+        url: str,
+        *,
+        attempts: int,
+        base_delay: float,
+        sleep: Callable[[float], Awaitable[None]],
+        rng: random.Random,
+    ) -> httpx.Response:
+        for attempt in range(attempts):
+            last = attempt == attempts - 1
+            try:
+                response = await client.get(url)
+            except httpx.TransportError:
+                if last:
+                    raise
+            else:
+                if response.status_code not in RETRY_STATUSES or last:
+                    return response.raise_for_status()
+            await sleep(rng.uniform(0, base_delay * 2**attempt))
+        raise AssertionError("unreachable")
+  requires: [httpx]
+  runtime: browser
+
+- id: q4
+  type: quiz
+  question: |
+    Що станеться при `await client.get("/forms")`?
+    ```python
+    def add_trace(request: httpx.Request) -> None:
+        request.headers["X-Trace-Id"] = "t-1"
+
+    client = httpx.AsyncClient(
+        base_url="https://api.example.com",
+        event_hooks={"request": [add_trace]},
+    )
+    ```
+  options:
+    - "Запит піде з заголовком X-Trace-Id: t-1"
+    - "Хук буде проігноровано, бо він не async, запит піде без заголовка"
+    - "TypeError: object NoneType can't be used in 'await' expression, запит не піде"
+    - "Запит піде, а в stderr з'явиться RuntimeWarning: coroutine was never awaited"
+  answer: 2
+  explain: |
+    `AsyncClient` викликає кожен хук і робить `await` над результатом. Звичайна функція
+    виконується (заголовок навіть встигає дописатись), повертає `None`, і `await None`
+    кидає `TypeError` до відправки запиту. Варіант 1 правильний лише для синхронного
+    `httpx.Client`, де хуки звичайні функції. Варіант 2 це очікування "фреймворк сам
+    розбереться", як з axios, що приймає і sync, і async інтерцептори. `RuntimeWarning`
+    (варіант 4) з'являється в протилежній ситуації: коли корутину створили і не дочекались.
+
+- id: t5
+  type: code
+  title: "HttpPublisher: хуки, таймаут і ретраї разом"
+  prompt: |
+    Зберіть клієнт і публікатор для вебхука партнера.
+
+    1. `make_client(transport)` повертає `httpx.AsyncClient` з `base_url="https://hooks.partner.example"`,
+       таймаутом `httpx.Timeout(10.0, connect=3.0)`, переданим `transport` і двома `event_hooks`:
+       хук запиту додає в глобальний список `log` рядок `"-> POST /pages"` (метод і шлях),
+       хук відповіді додає `"<- 503 /pages"` (статус і шлях).
+    2. `HttpPublisher(client, path, attempts, base_delay)` з методом `async publish(form_id, version, url) -> str`:
+       - `POST path` з JSON `{"form_id": ..., "version": ..., "url": ...}` і заголовком
+         `Idempotency-Key: <form_id>:<version>`, однаковим в усіх спробах;
+       - повтор на `httpx.TransportError` і статусах `429, 500, 502, 503, 504`, пауза
+         `await asyncio.sleep(base_delay * 2**attempt)` між спробами;
+       - 2xx: повертає `delivery_id` з JSON відповіді; 4xx: `HTTPStatusError` одразу;
+         невдала остання спроба: її помилка.
+
+    Перевірка проганяє три сценарії: `503` потім `200`, одразу `400`, і `ReadTimeout` тричі
+    при `attempts=3`. `base_delay` у перевірці 0.01, загальні паузи менше 0.1 с.
+  starter: |
+    import asyncio
+    import httpx
+
+    log: list[str] = []
+    RETRY_STATUSES = {429, 500, 502, 503, 504}
+
+    def make_client(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
+        ...
+
+    class HttpPublisher:
+        def __init__(self, client: httpx.AsyncClient, path: str, *, attempts: int = 4, base_delay: float = 0.5) -> None:
+            ...
+
+        async def publish(self, form_id: str, version: int, url: str) -> str:
+            ...
+  harness: |
+    import json as _json
+
+    def _partner(script):
+        sent = []
+        steps = iter(script)
+        def handler(request):
+            sent.append(request)
+            step = next(steps)
+            if isinstance(step, httpx.Response):
+                return step
+            raise step("simulated", request=request)
+        return handler, sent
+
+    async def _scenario(name, script, attempts=4):
+        log.clear()
+        handler, sent = _partner(script)
+        print(f"-- {name}")
+        async with make_client(httpx.MockTransport(handler)) as client:
+            print("timeout:", client.timeout, "base:", client.base_url)
+            publisher = HttpPublisher(client, "/pages", attempts=attempts, base_delay=0.01)
+            try:
+                print("delivery:", await publisher.publish("contact", 3, "https://cdn.example.com/contact/v3/"))
+            except httpx.HTTPError as exc:
+                print("error:", type(exc).__name__)
+        print("log:", log)
+        print("keys:", sorted({r.headers.get("idempotency-key") for r in sent}, key=str))
+        print("body:", _json.loads(sent[0].content))
+
+    async def _main():
+        await _scenario("503 then 200", [httpx.Response(503), httpx.Response(200, json={"delivery_id": "d-17"})])
+        await _scenario("400", [httpx.Response(400, json={"detail": "bad url"})])
+        await _scenario("timeouts", [httpx.ReadTimeout] * 3, attempts=3)
+
+    asyncio.run(_main())
+  expected: |
+    -- 503 then 200
+    timeout: Timeout(connect=3.0, read=10.0, write=10.0, pool=10.0) base: https://hooks.partner.example
+    delivery: d-17
+    log: ['-> POST /pages', '<- 503 /pages', '-> POST /pages', '<- 200 /pages']
+    keys: ['contact:3']
+    body: {'form_id': 'contact', 'version': 3, 'url': 'https://cdn.example.com/contact/v3/'}
+    -- 400
+    timeout: Timeout(connect=3.0, read=10.0, write=10.0, pool=10.0) base: https://hooks.partner.example
+    error: HTTPStatusError
+    log: ['-> POST /pages', '<- 400 /pages']
+    keys: ['contact:3']
+    body: {'form_id': 'contact', 'version': 3, 'url': 'https://cdn.example.com/contact/v3/'}
+    -- timeouts
+    timeout: Timeout(connect=3.0, read=10.0, write=10.0, pool=10.0) base: https://hooks.partner.example
+    error: ReadTimeout
+    log: ['-> POST /pages', '-> POST /pages', '-> POST /pages']
+    keys: ['contact:3']
+    body: {'form_id': 'contact', 'version': 3, 'url': 'https://cdn.example.com/contact/v3/'}
+  hints:
+    - "Хуки в AsyncClient мають бути async def. Хук відповіді бачить запит через response.request. Зверніть увагу на лог сценарію з таймаутами: хук відповіді не викликається, коли відповіді немає."
+    - "`event_hooks={\"request\": [on_request], \"response\": [on_response]}`; у хуках `log.append(f\"-> {request.method} {request.url.path}\")` і `log.append(f\"<- {response.status_code} {response.request.url.path}\")`."
+    - "`publish`: payload і headers збираються до циклу; цикл такий самий, як у t4: `try: r = await self.client.post(self.path, json=payload, headers=headers)`, `except httpx.TransportError: if last: raise`, `else: if r.status_code not in RETRY_STATUSES or last: return r.raise_for_status().json()[\"delivery_id\"]`, потім `await asyncio.sleep(self.base_delay * 2**attempt)`."
+  solution: |
+    import asyncio
+    import httpx
+
+    log: list[str] = []
+    RETRY_STATUSES = {429, 500, 502, 503, 504}
+
+    async def _on_request(request: httpx.Request) -> None:
+        log.append(f"-> {request.method} {request.url.path}")
+
+    async def _on_response(response: httpx.Response) -> None:
+        log.append(f"<- {response.status_code} {response.request.url.path}")
+
+    def make_client(transport: httpx.AsyncBaseTransport) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            base_url="https://hooks.partner.example",
+            timeout=httpx.Timeout(10.0, connect=3.0),
+            transport=transport,
+            event_hooks={"request": [_on_request], "response": [_on_response]},
+        )
+
+    class HttpPublisher:
+        def __init__(self, client: httpx.AsyncClient, path: str, *, attempts: int = 4, base_delay: float = 0.5) -> None:
+            self.client = client
+            self.path = path
+            self.attempts = attempts
+            self.base_delay = base_delay
+
+        async def publish(self, form_id: str, version: int, url: str) -> str:
+            payload = {"form_id": form_id, "version": version, "url": url}
+            headers = {"Idempotency-Key": f"{form_id}:{version}"}
+            for attempt in range(self.attempts):
+                last = attempt == self.attempts - 1
+                try:
+                    r = await self.client.post(self.path, json=payload, headers=headers)
+                except httpx.TransportError:
+                    if last:
+                        raise
+                else:
+                    if r.status_code not in RETRY_STATUSES or last:
+                        return r.raise_for_status().json()["delivery_id"]
+                await asyncio.sleep(self.base_delay * 2**attempt)
+            raise AssertionError("unreachable")
+  requires: [httpx]
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "HttpPublisher у капстоуні"
+  prompt: |
+    Допишіть у `src/formbuilder/publisher.py` (з m3-l04 там уже Protocol `Publisher` і `DirPublisher`)
+    HTTP-публікацію вебхуком і тести `tests/test_publisher.py`. Ім'я `Publisher` у модулі зайняте протоколом
+    публікації сторінки, а сповіщення партнера це окрема роль, тож клас зветься `HttpPublisher`.
+    Спершу залежність: `cd capstone && uv add httpx`.
+
+    У модулі:
+    - `make_client(webhook_base_url: str, transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncClient`
+      з таймаутом `httpx.Timeout(10.0, connect=3.0)` і `event_hooks`, які пишуть запит і відповідь
+      у `logging.getLogger("formbuilder.publisher")` на рівні INFO (налаштування логування в m5-l09);
+    - клас `HttpPublisher(client, path, *, attempts=4, base_delay=0.5, max_delay=8.0, rng=None, sleep=asyncio.sleep)`
+      з методом `async publish(page) -> str`, де `page` має `form_id`, `version`, `url`
+      (dataclass або Pydantic-модель з модуля 2). Ретраї на `TransportError`, `429`, `5xx` з full jitter
+      і верхньою межею `max_delay`; для `429` з заголовком `Retry-After` пауза береться з нього;
+      `Idempotency-Key` = `"<form_id>:<version>"`.
+
+    Тести пишуться як звичайні `def test_...()` з `asyncio.run(...)` усередині або з плагіном
+    `anyio`; мережі в тестах немає, лише `httpx.MockTransport`. `sleep` підмінюйте записувачем
+    затримок, щоб тести не чекали.
+  checklist:
+    - "`503`, потім `200`: `publish` повертає `delivery_id`, транспорт отримав рівно 2 запити з однаковим `Idempotency-Key` і однаковим JSON-тілом"
+    - "`400` або `422`: `HTTPStatusError` після першого запиту, жодної паузи"
+    - "`ReadTimeout` на всіх спробах: після `attempts` запитів вилітає `ReadTimeout`, пауз на одну менше, ніж спроб"
+    - "`429` з `Retry-After: 2`: записана пауза дорівнює 2 секундам, а не backoff"
+    - "Усі паузи в межах `[0, min(max_delay, base_delay * 2**i)]` для звичайних повторів"
+    - "Тест через `caplog` перевіряє, що в логері `formbuilder.publisher` є запис про кожен запит і кожну відповідь"
+    - "`uv run mypy src` і `uv run ruff check` без помилок"
+  verify: "cd capstone && uv run pytest tests/test_publisher.py -q && uv run mypy src && uv run ruff check"

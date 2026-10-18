@@ -1,0 +1,534 @@
+<meta charset="utf-8">
+<title>Python для себе</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: three-column app shell. Left = course tree, center = lesson scroll, right = on-this-page nav + lesson progress. */
+:root{
+  --bg:#F4F6F3; --surface:#FFFFFF; --surface-2:#EAEEE9; --line:#D6DDD6;
+  --fg:#17211D; --muted:#5F6D66; --accent:#0E7C6B; --accent-fg:#FFFFFF; --accent-soft:#DDF1EC;
+  --code-bg:#1B2420; --code-fg:#E7EFEA; --ok:#1E8E4F; --ok-soft:#DFF3E6; --bad:#C2412B; --bad-soft:#FBE5E0; --warn:#B7791F; --warn-soft:#FBF0D8;
+  --font-ui:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --radius:10px;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#121816; --surface:#1A221F; --surface-2:#222C28; --line:#2E3A35;
+  --fg:#E6EDE9; --muted:#95A49D; --accent:#3FB9A4; --accent-fg:#0E1512; --accent-soft:#17352F;
+  --code-bg:#0D1311; --code-fg:#DCE6E1; --ok:#4CC27A; --ok-soft:#163C27; --bad:#F0796A; --bad-soft:#44201B; --warn:#E0A83F; --warn-soft:#3E3115;
+  color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#121816; --surface:#1A221F; --surface-2:#222C28; --line:#2E3A35;
+  --fg:#E6EDE9; --muted:#95A49D; --accent:#3FB9A4; --accent-fg:#0E1512; --accent-soft:#17352F;
+  --code-bg:#0D1311; --code-fg:#DCE6E1; --ok:#4CC27A; --ok-soft:#163C27; --bad:#F0796A; --bad-soft:#44201B; --warn:#E0A83F; --warn-soft:#3E3115;
+  color-scheme:dark }
+
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-ui);font-size:15px;line-height:1.55;margin:0;overflow:hidden}
+*{box-sizing:border-box}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,a:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{text-wrap:balance;margin:0}
+code,pre,textarea.editor{font-family:var(--font-mono)}
+p code,li code{background:var(--surface-2);padding:1px 6px;border-radius:5px;font-size:.92em}
+
+.app{display:grid;grid-template-rows:52px 1fr;height:100%}
+.topbar{display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--line);background:var(--surface);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600}
+.brand .mark{width:26px;height:26px;border-radius:7px;background:var(--accent);color:var(--accent-fg);display:grid;place-items:center;font-family:var(--font-mono);font-size:13px;font-weight:500}
+.topbar .spacer{flex:1}
+.progress-wrap{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.bar{width:160px;height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent);width:0;transition:width .3s}
+.iconbtn{background:none;border:1px solid var(--line);border-radius:8px;width:34px;height:34px;display:none;place-items:center}
+.iconbtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2}
+.pill{font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding:3px 8px;border-radius:999px;background:var(--warn-soft);color:var(--warn);font-weight:600}
+
+.shell{display:grid;grid-template-columns:272px minmax(0,1fr) 236px;min-height:0}
+.left,.right{background:var(--surface);overflow-y:auto;min-height:0}
+.left{border-right:1px solid var(--line);padding-block:14px;padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:12px}
+.right{border-left:1px solid var(--line);padding-block:22px;padding-left:16px;padding-right:max(16px,env(safe-area-inset-right,0px))}
+.center{overflow-y:auto;min-height:0;scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){.center{scroll-behavior:auto}.bar>i{transition:none}}
+.lesson{max-width:760px;margin:0 auto;padding-block:28px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+/* left tree */
+.module{margin-bottom:14px}
+.module-h{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.module-h small{font-variant-numeric:tabular-nums;letter-spacing:0;text-transform:none;font-weight:500}
+.lesson-btn{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:8px 8px 8px 10px;font-size:14px;color:var(--fg)}
+.lesson-btn:hover{background:var(--surface-2)}
+.lesson-btn.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--line);flex:none;display:grid;place-items:center;font-size:10px}
+.dot.part{border-color:var(--accent);background:linear-gradient(90deg,var(--accent) 50%,transparent 50%)}
+.dot.done{border-color:var(--ok);background:var(--ok);color:#fff}
+.dot.done::after{content:"✓";font-weight:700}
+.lesson-btn .n{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px;width:18px;flex:none}
+.lesson-btn.active .n{color:inherit}
+
+/* center lesson */
+.eyebrow{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:8px}
+.lesson h1{font-size:30px;line-height:1.2;font-weight:700;margin-bottom:8px}
+.lead{color:var(--muted);font-size:16px;margin:0 0 28px;max-width:62ch}
+.lesson h2{font-size:20px;font-weight:600;margin:40px 0 12px;scroll-margin-top:16px}
+.lesson p{margin:0 0 12px;max-width:68ch}
+.lesson ul{margin:0 0 12px;padding-left:22px;max-width:68ch}
+.lesson li{margin-bottom:4px}
+pre.snippet{background:var(--code-bg);color:var(--code-fg);border-radius:var(--radius);padding:14px 16px;font-size:13.5px;line-height:1.6;overflow-x:auto;margin:0 0 14px}
+.callout{border-left:3px solid var(--accent);background:var(--accent-soft);padding:10px 14px;border-radius:0 8px 8px 0;margin:0 0 14px;max-width:68ch}
+
+/* task block */
+.task{border:1px solid var(--line);background:var(--surface);border-radius:var(--radius);margin:18px 0 8px;overflow:hidden;scroll-margin-top:16px}
+.task-h{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.task-h .kind{font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--accent);background:var(--accent-soft);padding:3px 8px;border-radius:999px}
+.task-h h3{font-size:15px;font-weight:600;flex:1}
+.status{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--surface);border:1px solid var(--line);color:var(--muted)}
+.status.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.status.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
+.task-body{padding:14px 16px}
+.task-body p:last-child{margin-bottom:0}
+.editor-wrap{background:var(--code-bg);border-radius:8px;margin-top:12px;position:relative}
+textarea.editor{display:block;width:100%;min-height:120px;resize:vertical;background:transparent;color:var(--code-fg);border:0;padding:12px 14px;font-size:13.5px;line-height:1.6;tab-size:4;white-space:pre;overflow-wrap:normal;overflow-x:auto}
+textarea.editor:focus-visible{outline-offset:-2px}
+.editor-label{position:absolute;top:6px;right:10px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--code-fg);opacity:.5;font-family:var(--font-mono)}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 14px;font-size:14px;font-weight:500}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.05)}
+.btn[disabled]{opacity:.5;cursor:default}
+.actions .hint-link{margin-left:auto;background:none;border:0;color:var(--muted);text-decoration:underline;font-size:13px}
+.output{margin-top:10px;border-radius:8px;border:1px solid var(--line);font-family:var(--font-mono);font-size:13px;overflow:hidden}
+.output .out-h{display:flex;gap:10px;padding:6px 12px;font-family:var(--font-ui);font-size:12px;color:var(--muted);border-bottom:1px solid var(--line);background:var(--surface-2)}
+.output pre{margin:0;padding:10px 12px;white-space:pre-wrap;overflow-x:auto;max-height:220px;overflow-y:auto}
+.verdict{margin-top:10px;padding:10px 14px;border-radius:8px;font-size:14px}
+.verdict.ok{background:var(--ok-soft);color:var(--ok)}
+.verdict.bad{background:var(--bad-soft);color:var(--bad)}
+.verdict.warn{background:var(--warn-soft);color:var(--warn)}
+.verdict b{font-weight:600}
+.diff{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;font-family:var(--font-mono);font-size:12.5px}
+.diff>div{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:8px 10px;white-space:pre-wrap;min-width:0}
+.diff>div>span{display:block;font-family:var(--font-ui);font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em}
+.hints{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.hint{background:var(--warn-soft);color:var(--fg);border-radius:8px;padding:8px 12px;font-size:14px}
+.hint b{color:var(--warn)}
+
+/* quiz */
+.options{display:grid;gap:8px;margin-top:12px}
+.opt{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--surface);text-align:left;font-family:var(--font-mono);font-size:14px}
+.opt:hover{background:var(--surface-2)}
+.opt .k{font-family:var(--font-ui);font-size:12px;color:var(--muted);width:18px}
+.opt.right{border-color:var(--ok);background:var(--ok-soft)}
+.opt.wrong{border-color:var(--bad);background:var(--bad-soft)}
+
+.lesson-footer{display:flex;justify-content:space-between;gap:12px;margin-top:48px;padding-top:20px;border-top:1px solid var(--line);flex-wrap:wrap}
+.lesson-footer .btn{display:inline-flex;gap:8px;align-items:center}
+
+/* right nav */
+.right h4{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 10px}
+.toc{list-style:none;margin:0 0 26px;padding:0;border-left:2px solid var(--line)}
+.toc a{display:flex;align-items:center;gap:8px;padding:5px 0 5px 12px;margin-left:-2px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;font-size:13.5px}
+.toc a:hover{color:var(--fg)}
+.toc a.current{border-left-color:var(--accent);color:var(--accent);font-weight:600}
+.toc a .m{font-size:11px;flex:none;width:14px;text-align:center}
+.toc a .m.ok{color:var(--ok)}
+.lesson-stats{background:var(--surface-2);border-radius:8px;padding:12px;font-size:13px;color:var(--muted)}
+.lesson-stats b{display:block;font-size:22px;color:var(--fg);font-variant-numeric:tabular-nums;font-weight:600}
+.legend{margin-top:22px;font-size:12.5px;color:var(--muted);display:grid;gap:6px}
+.legend span{display:flex;align-items:center;gap:8px}
+
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:5}
+@media (max-width:1100px){
+  .shell{grid-template-columns:272px minmax(0,1fr)}
+  .right{display:none}
+}
+@media (max-width:800px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .left{position:fixed;top:0;bottom:0;left:0;width:min(300px,85vw);z-index:6;transform:translateX(-100%);transition:transform .2s;padding-top:calc(14px + env(safe-area-inset-top,0px))}
+  .left.open{transform:none}
+  .overlay.show{display:block}
+  .iconbtn{display:grid}
+  .bar{width:90px}
+  .lesson h1{font-size:25px}
+  .diff{grid-template-columns:1fr}
+}
+</style>
+
+<div class="app">
+  <header class="topbar">
+    <button class="iconbtn" id="menuBtn" aria-label="Відкрити список тем"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    <div class="brand"><span class="mark">&gt;_</span> Python для себе</div>
+    <span class="pill">Прототип</span>
+    <div class="spacer"></div>
+    <div class="progress-wrap"><span id="globalText">0 / 0 завдань</span><div class="bar"><i id="globalBar"></i></div></div>
+  </header>
+  <div class="shell">
+    <nav class="left" id="left" aria-label="Теми курсу"></nav>
+    <div class="overlay" id="overlay"></div>
+    <main class="center" id="center"><article class="lesson" id="lesson"></article></main>
+    <aside class="right" id="right" aria-label="Навігація по уроку"></aside>
+  </div>
+</div>
+
+<script>
+// ---------- Course content ----------
+const COURSE = [
+ { id:'m1', title:'Основи', lessons:[
+  { id:'l1', title:'Змінні та типи даних', lead:'Перший урок: як Python зберігає дані і чим число відрізняється від рядка.',
+    sections:[
+     { type:'theory', id:'s1', title:'Що таке змінна', html:`
+<p>Змінна — це ім'я, прив'язане до значення. У Python не треба оголошувати тип: ви просто присвоюєте значення знаком <code>=</code>, і Python сам розуміє, що це за дані.</p>
+<pre class="snippet">name = "Богдан"
+age = 32
+height = 1.82
+is_student = False
+
+print(name, age)</pre>
+<p>Імена пишуть малими літерами, слова розділяють підкресленням: <code>first_name</code>, <code>total_price</code>. Ім'я не може починатися з цифри і не може збігатися з ключовим словом (<code>if</code>, <code>for</code>, <code>class</code>).</p>
+<div class="callout">Функція <code>print()</code> виводить значення на екран. Кілька аргументів через кому вона розділить пробілом.</div>`},
+     { type:'theory', id:'s2', title:'Чотири базові типи', html:`
+<ul>
+ <li><code>int</code> — цілі числа: <code>7</code>, <code>-120</code>, <code>0</code>.</li>
+ <li><code>float</code> — дробові: <code>3.14</code>, <code>2.0</code>. Навіть <code>2.0</code> — це float, бо є крапка.</li>
+ <li><code>str</code> — рядки в одинарних або подвійних лапках: <code>"hello"</code>, <code>'a'</code>.</li>
+ <li><code>bool</code> — логічні <code>True</code> та <code>False</code>, обов'язково з великої літери.</li>
+</ul>
+<p>Тип будь-якого значення можна дізнатись функцією <code>type()</code>:</p>
+<pre class="snippet">print(type(42))        # &lt;class 'int'&gt;
+print(type("42"))      # &lt;class 'str'&gt;
+print(7 / 2)           # 3.5  — ділення завжди дає float
+print(7 // 2, 7 % 2)   # 3 1  — цілочисельне ділення та остача</pre>`},
+     { type:'code', id:'t1', title:'Арифметика зі змінними',
+       prompt:'Створіть змінні <code>a = 7</code> та <code>b = 3</code>. Виведіть їхню суму, різницю та добуток — кожне значення з нового рядка.',
+       starter:'a = 7\nb = 3\n\n# ваш код нижче\n',
+       expected:'10\n4\n21',
+       hints:['Кожен виклик print() виводить з нового рядка. Потрібно три виклики.','Сума: a + b, різниця: a - b, добуток: a * b.'],
+       solution:'a = 7\nb = 3\n\nprint(a + b)\nprint(a - b)\nprint(a * b)'},
+     { type:'quiz', id:'q1', title:'Швидка перевірка', question:'Який тип має значення <code>3.0</code>?', options:['int','float','str','bool'], answer:1,
+       explain:'Крапка робить число дробовим, навіть якщо дробова частина нульова.'},
+     { type:'theory', id:'s3', title:'Перетворення типів', html:`
+<p>Дані часто приходять як рядки, наприклад з форми або файлу. Щоб порахувати щось, їх треба перетворити на число. Для цього є функції з назвами типів:</p>
+<pre class="snippet">text = "25"
+number = int(text)      # 25
+print(number + 10)      # 35
+
+price = float("9.99")   # 9.99
+label = str(100)        # "100"</pre>
+<p>Якщо спробувати додати рядок до числа без перетворення, Python видасть помилку <code>TypeError</code>. Це одна з найчастіших помилок на старті.</p>`},
+     { type:'code', id:'t2', title:'Рядок у число',
+       prompt:'У змінній <code>age</code> лежить рядок <code>"25"</code>. Перетворіть його на число і виведіть, скільки років буде через 10 років.',
+       starter:'age = "25"\n\n# ваш код нижче\n',
+       expected:'35',
+       hints:['Спочатку int(age), а вже потім додавайте 10.','print(int(age) + 10)'],
+       solution:'age = "25"\n\nprint(int(age) + 10)'}
+    ]},
+  { id:'l2', title:'Рядки', lead:'Текст у Python: індекси, зрізи, методи та f-рядки.',
+    sections:[
+     { type:'theory', id:'s1', title:'Індекси та зрізи', html:`
+<p>Рядок — це послідовність символів. До кожного символу можна звернутись за індексом, починаючи з нуля. Від'ємний індекс рахує з кінця.</p>
+<pre class="snippet">s = "python"
+print(s[0])      # p
+print(s[-1])     # n
+print(s[1:4])    # yth  — зріз від 1 включно до 4 не включно
+print(len(s))    # 6</pre>`},
+     { type:'theory', id:'s2', title:'Корисні методи', html:`
+<pre class="snippet">s = "  Hello, World  "
+print(s.strip())             # прибирає пробіли по краях
+print(s.upper())             # великими
+print(s.lower())             # малими
+print(s.replace("l", "L"))   # заміна
+print("a,b,c".split(","))    # ['a', 'b', 'c']</pre>
+<p>Методи не змінюють сам рядок, а повертають новий. Рядки в Python незмінні.</p>`},
+     { type:'code', id:'t1', title:'Робота з рядком',
+       prompt:'Для рядка <code>s = "python"</code> виведіть у три рядки: його великими літерами, його довжину, а потім перший і останній символи склеєні разом.',
+       starter:'s = "python"\n\n',
+       expected:'PYTHON\n6\npn',
+       hints:['s.upper(), len(s), s[0] + s[-1].'],
+       solution:'s = "python"\n\nprint(s.upper())\nprint(len(s))\nprint(s[0] + s[-1])'},
+     { type:'quiz', id:'q1', title:'Швидка перевірка', question:'Що поверне <code>"hello"[1:3]</code>?', options:['"he"','"el"','"ell"','"hel"'], answer:1,
+       explain:'Зріз бере індекси 1 і 2: символи e та l.'},
+     { type:'theory', id:'s3', title:'f-рядки', html:`
+<p>Найзручніший спосіб вставити значення в текст — f-рядок. Перед лапками ставимо <code>f</code>, а змінні пишемо у фігурних дужках:</p>
+<pre class="snippet">name = "Оля"
+count = 3
+print(f"{name} має {count} книги")   # Оля має 3 книги
+print(f"{2 + 2 = }")                 # у дужках можна і вирази</pre>`},
+     { type:'code', id:'t2', title:'Функція привітання',
+       prompt:'Напишіть функцію <code>greet(name)</code>, яка <b>повертає</b> рядок <code>Привіт, &lt;name&gt;!</code>. Перевірка викличе її з різними іменами.',
+       starter:'def greet(name):\n    # поверніть рядок, не друкуйте його\n    pass\n',
+       harness:'print(greet("Богдан"))\nprint(greet("Оля"))',
+       expected:'Привіт, Богдан!\nПривіт, Оля!',
+       hints:['Використайте return, а не print.','return f"Привіт, {name}!"'],
+       solution:'def greet(name):\n    return f"Привіт, {name}!"'}
+    ]},
+  { id:'l3', title:'Умови if / elif / else', lead:'Як програма приймає рішення.',
+    sections:[
+     { type:'theory', id:'s1', title:'Галуження', html:`
+<pre class="snippet">temperature = 23
+
+if temperature > 25:
+    print("Спекотно")
+elif temperature > 15:
+    print("Тепло")
+else:
+    print("Холодно")</pre>
+<p>Блок після двокрапки відступається на 4 пробіли. Відступи в Python — це частина синтаксису, а не оформлення. Оператори порівняння: <code>==</code>, <code>!=</code>, <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code>. Логічні: <code>and</code>, <code>or</code>, <code>not</code>.</p>`},
+     { type:'code', id:'t1', title:'Знак числа',
+       prompt:'Напишіть функцію <code>sign(n)</code>, яка повертає <code>"додатне"</code>, <code>"від\'ємне"</code> або <code>"нуль"</code>.',
+       starter:'def sign(n):\n    pass\n',
+       harness:'print(sign(5))\nprint(sign(-2))\nprint(sign(0))',
+       expected:"додатне\nвід'ємне\nнуль",
+       hints:['Три гілки: if n > 0, elif n < 0, else.'],
+       solution:'def sign(n):\n    if n > 0:\n        return "додатне"\n    elif n < 0:\n        return "від\'ємне"\n    else:\n        return "нуль"'},
+     { type:'quiz', id:'q1', title:'Швидка перевірка', question:'Чому дорівнює <code>not (3 &gt; 2 and 1 &gt; 2)</code>?', options:['True','False','None','Помилка'], answer:0,
+       explain:'3 > 2 істина, 1 > 2 хиба, and дає False, not перевертає на True.'},
+     { type:'code', id:'t2', title:'Оцінка за балами',
+       prompt:'Функція <code>grade(score)</code>: від 90 — <code>"A"</code>, від 75 — <code>"B"</code>, від 60 — <code>"C"</code>, інакше <code>"F"</code>.',
+       starter:'def grade(score):\n    pass\n',
+       harness:'for s in [95, 90, 80, 60, 59]:\n    print(grade(s))',
+       expected:'A\nA\nB\nC\nF',
+       hints:['Перевіряйте від більшого до меншого: спочатку >= 90.','Межі включні: 90 це вже A, 60 це вже C.'],
+       solution:'def grade(score):\n    if score >= 90:\n        return "A"\n    elif score >= 75:\n        return "B"\n    elif score >= 60:\n        return "C"\n    else:\n        return "F"'}
+    ]},
+  { id:'l4', title:'Цикли for та while', lead:'Повторення дій без копіювання коду.',
+    sections:[
+     { type:'theory', id:'s1', title:'Цикл for', html:`
+<pre class="snippet">for i in range(1, 4):
+    print(i)          # 1 2 3
+
+for letter in "abc":
+    print(letter)</pre>
+<p><code>range(a, b)</code> дає числа від a до b не включно. <code>range(5)</code> — від 0 до 4.</p>`},
+     { type:'code', id:'t1', title:'Квадрати чисел',
+       prompt:'Виведіть квадрати чисел від 1 до 5, кожен з нового рядка.',
+       starter:'',
+       expected:'1\n4\n9\n16\n25',
+       hints:['range(1, 6) дасть числа від 1 до 5.','print(i * i) або print(i ** 2).'],
+       solution:'for i in range(1, 6):\n    print(i ** 2)'}
+    ]}
+ ]},
+ { id:'m2', title:'Структури даних', lessons:[
+  { id:'l5', title:'Списки', lead:'Урок у розробці.', sections:[{type:'theory',id:'s1',title:'Скоро',html:'<p>Тут буде теорія про списки: створення, індексація, append, sort, зрізи. У прототипі урок порожній, щоб показати, як виглядає структура курсу.</p>'}]},
+  { id:'l6', title:'Словники', lead:'Урок у розробці.', sections:[{type:'theory',id:'s1',title:'Скоро',html:'<p>Ключі та значення, get(), перебір items().</p>'}]},
+  { id:'l7', title:'Кортежі та множини', lead:'Урок у розробці.', sections:[{type:'theory',id:'s1',title:'Скоро',html:'<p>Незмінні послідовності та унікальні колекції.</p>'}]}
+ ]},
+ { id:'m3', title:'Функції та модулі', lessons:[
+  { id:'l8', title:'Визначення функцій', lead:'Урок у розробці.', sections:[{type:'theory',id:'s1',title:'Скоро',html:'<p>Параметри, значення за замовчуванням, return, область видимості.</p>'}]},
+  { id:'l9', title:'Імпорт модулів', lead:'Урок у розробці.', sections:[{type:'theory',id:'s1',title:'Скоро',html:'<p>import, from … import, стандартна бібліотека: math, random, datetime.</p>'}]}
+ ]}
+];
+
+// ---------- State ----------
+const LS_KEY='pylearn-mock-v1';
+let state={ current:'l1', passed:{}, drafts:{} };
+try{ const s=JSON.parse(localStorage.getItem(LS_KEY)||'null'); if(s&&typeof s==='object') state=Object.assign(state,s); }catch(e){}
+function save(){ try{ localStorage.setItem(LS_KEY,JSON.stringify(state)); }catch(e){} }
+
+const allLessons=COURSE.flatMap(m=>m.lessons);
+const lessonById=id=>allLessons.find(l=>l.id===id);
+const taskKey=(lid,sid)=>lid+'/'+sid;
+const tasksOf=l=>l.sections.filter(s=>s.type==='code'||s.type==='quiz');
+const passedIn=l=>tasksOf(l).filter(s=>state.passed[taskKey(l.id,s.id)]).length;
+
+// ---------- Render: left ----------
+function renderLeft(){
+  const el=document.getElementById('left');
+  el.innerHTML=COURSE.map(m=>{
+    const total=m.lessons.reduce((a,l)=>a+tasksOf(l).length,0);
+    const done=m.lessons.reduce((a,l)=>a+passedIn(l),0);
+    return `<div class="module"><div class="module-h"><span>${m.title}</span><small>${done}/${total}</small></div>`+
+      m.lessons.map((l,i)=>{
+        const t=tasksOf(l).length, p=passedIn(l);
+        const cls=t&&p===t?'done':(p>0?'part':'');
+        return `<button class="lesson-btn ${l.id===state.current?'active':''}" data-lesson="${l.id}"><span class="dot ${cls}"></span><span class="n">${allLessons.indexOf(l)+1}</span><span>${l.title}</span></button>`;
+      }).join('')+'</div>';
+  }).join('');
+  el.querySelectorAll('[data-lesson]').forEach(b=>b.addEventListener('click',()=>{ openLesson(b.dataset.lesson); closeDrawer(); }));
+}
+
+// ---------- Render: center ----------
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function renderLesson(){
+  const l=lessonById(state.current);
+  const idx=allLessons.indexOf(l);
+  const mod=COURSE.find(m=>m.lessons.includes(l));
+  const el=document.getElementById('lesson');
+  let html=`<div class="eyebrow">${mod.title} · Урок ${idx+1} з ${allLessons.length}</div><h1>${l.title}</h1><p class="lead">${l.lead}</p>`;
+  for(const s of l.sections){
+    if(s.type==='theory'){ html+=`<h2 id="sec-${s.id}">${s.title}</h2>${s.html}`; continue; }
+    const key=taskKey(l.id,s.id); const ok=!!state.passed[key];
+    if(s.type==='code'){
+      const draft=state.drafts[key]??s.starter;
+      html+=`<section class="task" id="sec-${s.id}" data-task="${s.id}">
+        <div class="task-h"><span class="kind">Завдання</span><h3>${s.title}</h3><span class="status ${ok?'ok':''}" data-status>${ok?'Виконано':'Не виконано'}</span></div>
+        <div class="task-body">
+          <p>${s.prompt}</p>
+          ${s.harness?`<p style="color:var(--muted);font-size:13.5px">Перевірка додасть до вашого коду:</p><pre class="snippet" style="font-size:12.5px;margin-bottom:0">${esc(s.harness)}</pre>`:''}
+          <div class="editor-wrap"><span class="editor-label">main.py</span><textarea class="editor" id="ed-${l.id}-${s.id}" spellcheck="false" aria-label="Редактор коду">${esc(draft)}</textarea></div>
+          <div class="actions">
+            <button class="btn" data-run>Запустити</button>
+            <button class="btn primary" data-check>Перевірити</button>
+            <button class="btn" data-reset title="Повернути початковий код">Скинути</button>
+            <button class="hint-link" data-hint>Підказка</button>
+          </div>
+          <div data-result></div>
+          <div class="hints" data-hints></div>
+        </div></section>`;
+    } else {
+      html+=`<section class="task" id="sec-${s.id}" data-quiz="${s.id}">
+        <div class="task-h"><span class="kind">Тест</span><h3>${s.title}</h3><span class="status ${ok?'ok':''}" data-status>${ok?'Правильно':'Не пройдено'}</span></div>
+        <div class="task-body"><p>${s.question}</p>
+          <div class="options">${s.options.map((o,i)=>`<button class="opt" data-opt="${i}"><span class="k">${String.fromCharCode(65+i)}</span>${esc(o)}</button>`).join('')}</div>
+          <div data-result></div>
+        </div></section>`;
+    }
+  }
+  const prev=allLessons[idx-1], next=allLessons[idx+1];
+  html+=`<div class="lesson-footer">
+    ${prev?`<button class="btn" data-goto="${prev.id}">← ${prev.title}</button>`:'<span></span>'}
+    ${next?`<button class="btn primary" data-goto="${next.id}">Наступний урок: ${next.title} →</button>`:''}
+  </div>`;
+  el.innerHTML=html;
+  el.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',()=>openLesson(b.dataset.goto)));
+  el.querySelectorAll('[data-task]').forEach(bindTask);
+  el.querySelectorAll('[data-quiz]').forEach(bindQuiz);
+  document.getElementById('center').scrollTop=0;
+}
+
+function openLesson(id){ state.current=id; save(); renderLeft(); renderLesson(); renderRight(); setupSpy(); }
+
+// ---------- Tasks ----------
+function bindTask(sec){
+  const l=lessonById(state.current); const s=l.sections.find(x=>x.id===sec.dataset.task); const key=taskKey(l.id,s.id);
+  const ed=sec.querySelector('textarea'), res=sec.querySelector('[data-result]'), hints=sec.querySelector('[data-hints]'), status=sec.querySelector('[data-status]');
+  let fails=0, hintIdx=0;
+  ed.value=state.drafts[key]??s.starter;
+  ed.addEventListener('input',()=>{ state.drafts[key]=ed.value; save(); });
+  ed.addEventListener('keydown',e=>{
+    if(e.key==='Tab'){ e.preventDefault(); const st=ed.selectionStart, en=ed.selectionEnd; ed.setRangeText('    ',st,en,'end'); ed.dispatchEvent(new Event('input')); }
+    if(e.key==='Enter'){ // keep indentation, add after colon
+      const st=ed.selectionStart; const before=ed.value.slice(0,st); const line=before.slice(before.lastIndexOf('\n')+1);
+      const ind=(line.match(/^ */)||[''])[0]+(line.trimEnd().endsWith(':')?'    ':'');
+      e.preventDefault(); ed.setRangeText('\n'+ind,st,ed.selectionEnd,'end'); ed.dispatchEvent(new Event('input'));
+    }
+  });
+  sec.querySelector('[data-reset]').addEventListener('click',()=>{ ed.value=s.starter; delete state.drafts[key]; save(); res.innerHTML=''; });
+  sec.querySelector('[data-hint]').addEventListener('click',()=>showHint());
+  function showHint(){
+    if(hintIdx<s.hints.length){ hints.insertAdjacentHTML('beforeend',`<div class="hint"><b>Підказка ${hintIdx+1}.</b> ${esc(s.hints[hintIdx])}</div>`); hintIdx++; }
+    else if(!hints.querySelector('[data-sol]')){ hints.insertAdjacentHTML('beforeend',`<div class="hint" data-sol><b>Рішення.</b><pre class="snippet" style="margin:8px 0 0">${esc(s.solution)}</pre></div>`); }
+  }
+  sec.querySelector('[data-run]').addEventListener('click',async()=>{
+    setBusy(sec,true); res.innerHTML=`<div class="verdict warn">Запускаю…</div>`;
+    const r=await runPython(ed.value);
+    res.innerHTML=renderOutput(r);
+    setBusy(sec,false);
+  });
+  sec.querySelector('[data-check]').addEventListener('click',async()=>{
+    setBusy(sec,true); res.innerHTML=`<div class="verdict warn">Перевіряю…</div>`;
+    const code=ed.value+(s.harness?'\n\n'+s.harness:'');
+    const r=await runPython(code);
+    const norm=t=>t.replace(/\r/g,'').split('\n').map(x=>x.trimEnd()).join('\n').trim();
+    let html=renderOutput(r);
+    if(r.engine==='fallback'){
+      const pass=norm(ed.value)===norm(s.solution);
+      html+=pass?`<div class="verdict ok"><b>Збігається з еталоном.</b> Python-рушій не завантажився, тож порівняв код із рішенням.</div>`
+                :`<div class="verdict warn"><b>Не можу виконати код.</b> Python-рушій не завантажився (немає доступу до CDN?). У прототипі це демо-режим.</div>`;
+      if(pass) markPassed();
+    } else if(!r.ok){
+      fails++; html+=`<div class="verdict bad"><b>Помилка виконання.</b> Подивіться на повідомлення вище: Python показує рядок, де зламалось.</div>`;
+    } else if(norm(r.out)===norm(s.expected)){
+      html+=`<div class="verdict ok"><b>Правильно!</b> Вивід збігається з очікуваним.</div>`; markPassed();
+    } else {
+      fails++;
+      html+=`<div class="verdict bad"><b>Поки не те.</b> Порівняйте ваш вивід з очікуваним.
+        <div class="diff"><div><span>Ваш вивід</span>${esc(norm(r.out))||'<i>(порожньо)</i>'}</div><div><span>Очікується</span>${esc(norm(s.expected))}</div></div></div>`;
+    }
+    res.innerHTML=html;
+    if(fails>=2 && hintIdx===0) showHint();
+    setBusy(sec,false);
+  });
+  function markPassed(){ state.passed[key]=true; save(); status.textContent='Виконано'; status.className='status ok'; renderLeft(); renderRight(); updateGlobal(); }
+}
+function setBusy(sec,b){ sec.querySelectorAll('[data-run],[data-check]').forEach(x=>x.disabled=b); }
+function renderOutput(r){
+  let body=esc(r.out||'');
+  if(r.err) body+=(body?'\n':'')+`<span style="color:var(--bad)">${esc(r.err)}</span>`;
+  if(!body) body='<span style="color:var(--muted)">(нічого не виведено)</span>';
+  return `<div class="output"><div class="out-h"><span>Вивід</span><span style="margin-left:auto">${r.engine==='skulpt'?'Python у браузері':'демо-режим'}</span></div><pre>${body}</pre></div>`;
+}
+
+function bindQuiz(sec){
+  const l=lessonById(state.current); const s=l.sections.find(x=>x.id===sec.dataset.quiz); const key=taskKey(l.id,s.id);
+  const res=sec.querySelector('[data-result]'), status=sec.querySelector('[data-status]');
+  sec.querySelectorAll('.opt').forEach(b=>b.addEventListener('click',()=>{
+    const i=+b.dataset.opt; sec.querySelectorAll('.opt').forEach(x=>x.classList.remove('right','wrong'));
+    if(i===s.answer){ b.classList.add('right'); res.innerHTML=`<div class="verdict ok"><b>Правильно.</b> ${esc(s.explain)}</div>`; state.passed[key]=true; save(); status.textContent='Правильно'; status.className='status ok'; renderLeft(); renderRight(); updateGlobal(); }
+    else { b.classList.add('wrong'); res.innerHTML=`<div class="verdict bad"><b>Ні.</b> Спробуйте ще раз.</div>`; }
+  }));
+}
+
+// ---------- Python engine (Skulpt, loaded on first run) ----------
+let skulptPromise=null;
+function loadScript(src){ return new Promise((ok,bad)=>{ const s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=()=>bad(new Error('load '+src)); document.head.appendChild(s); }); }
+function ensureSkulpt(){
+  if(!skulptPromise){
+    skulptPromise=(async()=>{
+      const t=new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),20000));
+      await Promise.race([ (async()=>{ await loadScript('https://cdn.jsdelivr.net/npm/skulpt@1.2.0/dist/skulpt.min.js'); await loadScript('https://cdn.jsdelivr.net/npm/skulpt@1.2.0/dist/skulpt-stdlib.js'); })(), t ]);
+      if(typeof Sk==='undefined') throw new Error('no Sk');
+      return true;
+    })().catch(()=>false);
+  }
+  return skulptPromise;
+}
+async function runPython(code){
+  const ready=await ensureSkulpt();
+  if(!ready) return {ok:false,out:'',err:'',engine:'fallback'};
+  let out='';
+  Sk.configure({ output:t=>{out+=t;}, read:x=>{ if(Sk.builtinFiles===undefined||Sk.builtinFiles.files[x]===undefined) throw "File not found: '"+x+"'"; return Sk.builtinFiles.files[x]; }, __future__:Sk.python3, execLimit:5000, inputfun:()=>'' });
+  try{ await Sk.misceval.asyncToPromise(()=>Sk.importMainWithBody('<stdin>',false,code,true)); return {ok:true,out,err:'',engine:'skulpt'}; }
+  catch(e){ return {ok:false,out,err:(e&&e.toString?e.toString():String(e)),engine:'skulpt'}; }
+}
+
+// ---------- Right: on this page ----------
+function renderRight(){
+  const l=lessonById(state.current); const el=document.getElementById('right');
+  const t=tasksOf(l).length, p=passedIn(l);
+  el.innerHTML=`<h4>На цій сторінці</h4><ul class="toc">${l.sections.map(s=>{
+    const isTask=s.type!=='theory'; const ok=state.passed[taskKey(l.id,s.id)];
+    const mark=isTask?`<span class="m ${ok?'ok':''}">${ok?'✓':(s.type==='code'?'▣':'?')}</span>`:'<span class="m"></span>';
+    return `<li><a href="#sec-${s.id}" data-sec="${s.id}">${mark}${s.title}</a></li>`;}).join('')}</ul>
+  <div class="lesson-stats">Завдань у цьому уроці<b>${p} / ${t}</b>${t&&p===t?'Урок пройдено':''}</div>
+  <div class="legend"><span><i class="dot done" style="width:12px;height:12px;font-size:7px"></i> урок пройдено</span><span><i class="dot part" style="width:12px;height:12px"></i> частково</span><span>▣ завдання з кодом</span><span>? тест</span></div>`;
+  el.querySelectorAll('a[data-sec]').forEach(a=>a.addEventListener('click',e=>{ e.preventDefault(); document.getElementById('sec-'+a.dataset.sec)?.scrollIntoView({block:'start'}); }));
+}
+let spy=null;
+function setupSpy(){
+  if(spy) spy.disconnect();
+  const center=document.getElementById('center');
+  const targets=[...document.querySelectorAll('#lesson [id^="sec-"]')];
+  const links=id=>document.querySelectorAll(`.toc a[data-sec="${id}"]`);
+  spy=new IntersectionObserver(entries=>{
+    const vis=entries.filter(e=>e.isIntersecting).sort((a,b)=>a.boundingClientRect.top-b.boundingClientRect.top);
+    if(!vis.length) return;
+    document.querySelectorAll('.toc a').forEach(a=>a.classList.remove('current'));
+    links(vis[0].target.id.slice(4)).forEach(a=>a.classList.add('current'));
+  },{root:center,rootMargin:'0px 0px -60% 0px',threshold:0});
+  targets.forEach(t=>spy.observe(t));
+}
+
+// ---------- Global ----------
+function updateGlobal(){
+  const total=allLessons.reduce((a,l)=>a+tasksOf(l).length,0), done=allLessons.reduce((a,l)=>a+passedIn(l),0);
+  document.getElementById('globalText').textContent=`${done} / ${total} завдань`;
+  document.getElementById('globalBar').style.width=(total?done/total*100:0)+'%';
+}
+const leftEl=document.getElementById('left'), overlay=document.getElementById('overlay');
+function closeDrawer(){ leftEl.classList.remove('open'); overlay.classList.remove('show'); }
+document.getElementById('menuBtn').addEventListener('click',()=>{ leftEl.classList.toggle('open'); overlay.classList.toggle('show'); });
+overlay.addEventListener('click',closeDrawer);
+
+if(!lessonById(state.current)) state.current='l1';
+renderLeft(); renderLesson(); renderRight(); setupSpy(); updateGlobal();
+</script>

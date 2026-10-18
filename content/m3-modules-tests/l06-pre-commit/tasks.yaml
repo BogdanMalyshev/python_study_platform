@@ -1,0 +1,326 @@
+- id: q1
+  type: quiz
+  question: |
+    Ви робите `git commit`. Хуки `ruff-check` і `ruff-format` друкують `Failed` і
+    `- files were modified by this hook`, решта `Passed`. Що зараз у репозиторії?
+  options:
+    - "Коміт не створено; виправлення лежать у робочій копії, але не в індексі, тож треба `git add` і закомітити ще раз"
+    - "Коміт створено з уже виправленими файлами: pre-commit сам додав зміни в індекс, як lint-staged"
+    - "Коміт створено з початковою версією файлів, а виправлення лишились незакоміченими"
+    - "Коміт не створено, і pre-commit відкотив свої виправлення, щоб не чіпати робочу копію"
+  answer: 0
+  explain: |
+    Для pre-commit змінений файл це провал хука, навіть якщо сам ruff завершився з кодом `0`, а провал будь-якого
+    хука скасовує коміт. Виправлення лишаються в робочій копії й не потрапляють в індекс: `git status --short`
+    показує `AM` або `MM`. Другий варіант це очікування з lint-staged, який з версії 10 сам додає зміни задач
+    у коміт; pre-commit цього не робить свідомо, щоб автоматичну правку побачила людина. Третій неможливий, бо
+    коміт іде лише після успіху всіх хуків. Четвертий навпаки: відкату немає, саме тому достатньо `git add -u`.
+
+- id: q2
+  type: quiz
+  question: |
+    Капстоун лежить усередині репозиторію курсу, як у прикладах уроку, і в ньому є функція без анотацій.
+    `uv run mypy` у `capstone/` друкує
+    `error: Function is missing a type annotation  [no-untyped-def]`, а хук
+    ```yaml
+    - repo: https://github.com/pre-commit/mirrors-mypy
+      rev: v2.4.0
+      hooks:
+        - id: mypy
+    ```
+    друкує `mypy....Passed`. Чому?
+  options:
+    - "Хук запускає mypy з кореня git, де немає `capstone/pyproject.toml`, тобто без `strict = true`, і з аргументами `--ignore-missing-imports`"
+    - "У хуку інша версія mypy, у якій цього правила ще немає"
+    - "Хук перевіряє лише файли в індексі, а файл із функцією ще не додано"
+    - "pre-commit закешував результат попереднього успішного прогону"
+  answer: 0
+  explain: |
+    pre-commit виконує кожен хук з кореня git-репозиторію, а у вкладеній розкладці це корінь курсу. mypy шукає конфіг у
+    поточній директорії, не знаходить `[tool.mypy]` і працює в режимі за замовчуванням, де функції без анотацій
+    просто не перевіряються. Плюс маніфест `mirrors-mypy` додає `--ignore-missing-imports`. Версія та сама: `rev`
+    збігається з mypy у `uv.lock`. Файл у прикладі якраз в індексі, інакше хук сказав би `(no files to check)`.
+    Кешу результатів у pre-commit немає взагалі: кешуються оточення хуків, а не вердикти.
+
+- id: q3
+  type: quiz
+  question: |
+    У конфігу капстоуну хуки `mypy` і `pytest` мають `stages: [pre-push]`, решта сім хуків без `stages`.
+    Що виконає `uv run pre-commit run --all-files`?
+  options:
+    - "Сім хуків без `mypy` і `pytest`"
+    - "Усі дев'ять, бо `--all-files` ігнорує `stages`"
+    - "Лише `mypy` і `pytest`, бо `--all-files` еквівалентне повній перевірці перед push"
+    - "Нічого: хуки без `stages` не прив'язані до жодної стадії"
+  answer: 0
+  explain: |
+    `pre-commit run` без `--hook-stage` імітує стадію `pre-commit`. Хук без `stages` отримує `default_stages`,
+    а якщо їх немає, працює на всіх стадіях; хук зі `stages: [pre-push]` на стадії `pre-commit` не існує.
+    `--all-files` відповідає лише за те, які файли передати, а не за те, які хуки обрати. Щоб прогнати все,
+    як перед push, потрібно `--hook-stage pre-push`.
+
+- id: q4
+  type: quiz
+  question: |
+    Ви клонували репозиторій з `.pre-commit-config.yaml` і `pre-commit` у dev-групі, виконали `uv sync` і
+    закомітили файл з невикористаним імпортом. Жоден хук не запустився. Чому?
+  options:
+    - "Не виконано `uv run pre-commit install`: `.git/hooks/` не версіонується, а `uv sync` не запускає скриптів встановлення"
+    - "pre-commit треба додати в основні залежності `[project] dependencies`, а не в dev-групу"
+    - "Хуки за замовчуванням запускаються лише на `git push`"
+    - "Треба `git config core.hooksPath .pre-commit`, інакше git не знайде конфіг"
+  answer: 0
+  explain: |
+    Конфіг лежить у репозиторії, але сам git-хук це файл `.git/hooks/pre-commit`, а `.git/` не клонується з
+    вмістом хуків. husky в JS ставить хук сам через скрипт `prepare`, який npm виконує після `npm install`;
+    у `uv sync` такого механізму немає, тому `pre-commit install` виконує кожен розробник один раз після
+    клонування. Dev-група правильне місце для інструмента. Стадія за замовчуванням саме `pre-commit`.
+    `core.hooksPath` це спосіб husky v9, pre-commit його не використовує і з ним відмовляється встановлюватись.
+
+- id: t1
+  type: code
+  title: "Які хуки запустяться на стадії"
+  prompt: |
+    Після `yaml.safe_load` конфіг pre-commit це звичайний словник. Напишіть
+    `hooks_for_stage(config, stage, skip="")`, яка повертає список `id` хуків у порядку конфігу, що реально
+    виконаються на стадії `stage`.
+
+    Правила, як у pre-commit:
+
+    - якщо в хука є непорожній `stages`, хук працює лише на цих стадіях;
+    - якщо `stages` немає, діє верхньорівневий `default_stages`; якщо немає і його, хук працює на будь-якій стадії;
+    - `skip` це значення змінної `SKIP`: id через кому, пробіли навколо id ігноруються; такі хуки не виконуються.
+
+    ```python
+    hooks_for_stage(CONFIG, "pre-push", skip="mypy, pytest")
+    # ['trailing-whitespace', 'ruff-check', 'ruff-format']
+    ```
+  starter: |
+    def hooks_for_stage(config: dict, stage: str, skip: str = "") -> list[str]:
+        ...
+  harness: |
+    CONFIG = {
+        "files": "^capstone/",
+        "repos": [
+            {"repo": "https://github.com/pre-commit/pre-commit-hooks", "rev": "v6.0.0",
+             "hooks": [{"id": "trailing-whitespace"}]},
+            {"repo": "https://github.com/astral-sh/ruff-pre-commit", "rev": "v0.17.1",
+             "hooks": [{"id": "ruff-check", "args": ["--fix"]}, {"id": "ruff-format"}]},
+            {"repo": "local",
+             "hooks": [{"id": "mypy", "stages": ["pre-push"]},
+                       {"id": "pytest", "stages": ["pre-push"]}]},
+        ],
+    }
+    print(hooks_for_stage(CONFIG, "pre-commit"))
+    print(hooks_for_stage(CONFIG, "pre-push"))
+    print(hooks_for_stage(CONFIG, "pre-push", skip="mypy, pytest"))
+    print(hooks_for_stage(CONFIG, "pre-commit", skip="ruff-check,"))
+
+    SCOPED = {
+        "default_stages": ["pre-commit"],
+        "repos": [{"repo": "local", "hooks": [
+            {"id": "a"}, {"id": "b", "stages": ["pre-push"]}, {"id": "c", "stages": []},
+        ]}],
+    }
+    print(hooks_for_stage(SCOPED, "pre-commit"))
+    print(hooks_for_stage(SCOPED, "pre-push"))
+    print(hooks_for_stage(SCOPED, "manual"))
+  expected: |
+    ['trailing-whitespace', 'ruff-check', 'ruff-format']
+    ['trailing-whitespace', 'ruff-check', 'ruff-format', 'mypy', 'pytest']
+    ['trailing-whitespace', 'ruff-check', 'ruff-format']
+    ['trailing-whitespace', 'ruff-format']
+    ['a', 'c']
+    ['b']
+    []
+  hints:
+    - "Порожній список `stages` поводиться так само, як відсутній ключ: перевіряйте truthiness, а не `in`. Множину пропущених id зберіть один раз до циклів."
+    - "`skips = {s.strip() for s in skip.split(',') if s.strip()}`; для хука `stages = hook.get('stages') or config.get('default_stages')`, і якщо `stages` досі порожнє, хук підходить."
+  solution: |
+    def hooks_for_stage(config: dict, stage: str, skip: str = "") -> list[str]:
+        skips = {s.strip() for s in skip.split(",") if s.strip()}
+        default_stages = config.get("default_stages")
+        result = []
+        for repo in config["repos"]:
+            for hook in repo["hooks"]:
+                stages = hook.get("stages") or default_stages
+                if stages and stage not in stages:
+                    continue
+                if hook["id"] in skips:
+                    continue
+                result.append(hook["id"])
+        return result
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "План прогону: який хук які файли отримає"
+  prompt: |
+    pre-commit зливає маніфест кожного хука (`types`, `types_or`) з вашим конфігом, а потім для кожного хука
+    фільтрує список файлів. Напишіть `plan(config, filenames, stage)`, яка повертає словник
+    `{id хука: [файли]}` для хуків, що працюють на `stage` (використайте `hooks_for_stage` з t1, вона вже в
+    стартері в робочому вигляді).
+
+    Фільтри в тому порядку, в якому їх застосовує pre-commit:
+
+    1. Верхньорівневі `files` і `exclude`: файл лишається, якщо `re.search(files, name)` знаходить збіг і
+       `re.search(exclude, name)` не знаходить. За замовчуванням `files = ""` (збігається з усім),
+       `exclude = "^$"` (не збігається ні з чим).
+    2. Ті самі `files` і `exclude`, але з хука, з тими самими значеннями за замовчуванням.
+    3. Типи: теги файлу дає `tags_for(name)` зі стартера (спрощена версія бібліотеки identify). Файл
+       підходить, якщо всі теги з `types` є серед тегів файлу і, якщо `types_or` непорожній, хоча б один з них.
+
+    Хук потрапляє в результат, лише якщо для нього лишився хоча б один файл; порядок файлів як у `filenames`.
+  starter: |
+    import re
+
+    EXT_TAGS = {".py": "python", ".pyi": "pyi", ".toml": "toml", ".lock": "toml",
+                ".yaml": "yaml", ".md": "markdown"}
+
+
+    def tags_for(name: str) -> set[str]:
+        tags = {"file", "text"}
+        for ext, tag in EXT_TAGS.items():
+            if name.endswith(ext):
+                tags.add(tag)
+        return tags
+
+
+    def hooks_for_stage(config: dict, stage: str) -> list[str]:
+        result = []
+        for repo in config["repos"]:
+            for hook in repo["hooks"]:
+                stages = hook.get("stages") or config.get("default_stages")
+                if not stages or stage in stages:
+                    result.append(hook["id"])
+        return result
+
+
+    def plan(config: dict, filenames: list[str], stage: str) -> dict[str, list[str]]:
+        ...
+  harness: |
+    CONFIG = {
+        "files": "^capstone/",
+        "repos": [
+            {"repo": "https://github.com/pre-commit/pre-commit-hooks", "hooks": [
+                {"id": "trailing-whitespace", "types": ["text"], "exclude": r"\.md$"},
+                {"id": "check-toml", "types": ["toml"]},
+                {"id": "check-added-large-files"},
+            ]},
+            {"repo": "https://github.com/astral-sh/ruff-pre-commit", "hooks": [
+                {"id": "ruff-check", "types_or": ["python", "pyi", "jupyter"]},
+            ]},
+            {"repo": "local", "hooks": [
+                {"id": "mypy", "types": ["python"], "stages": ["pre-push"]},
+                {"id": "check-yaml-local", "types": ["yaml"]},
+            ]},
+        ],
+    }
+    FILES = [
+        "content/notes.md",
+        "capstone/README.md",
+        "capstone/pyproject.toml",
+        "capstone/uv.lock",
+        "capstone/src/formbuilder/cli.py",
+        "capstone/src/formbuilder/py.typed",
+        "capstone/tests/test_models.py",
+    ]
+    for hook_id, files in plan(CONFIG, FILES, "pre-commit").items():
+        print(hook_id, files)
+    print("---")
+    print(list(plan(CONFIG, FILES, "pre-push")))
+    print(plan(CONFIG, ["content/notes.md"], "pre-commit"))
+    print(plan({"repos": CONFIG["repos"]}, ["content/notes.md"], "pre-commit"))
+  expected: |
+    trailing-whitespace ['capstone/pyproject.toml', 'capstone/uv.lock', 'capstone/src/formbuilder/cli.py', 'capstone/src/formbuilder/py.typed', 'capstone/tests/test_models.py']
+    check-toml ['capstone/pyproject.toml', 'capstone/uv.lock']
+    check-added-large-files ['capstone/README.md', 'capstone/pyproject.toml', 'capstone/uv.lock', 'capstone/src/formbuilder/cli.py', 'capstone/src/formbuilder/py.typed', 'capstone/tests/test_models.py']
+    ruff-check ['capstone/src/formbuilder/cli.py', 'capstone/tests/test_models.py']
+    ---
+    ['trailing-whitespace', 'check-toml', 'check-added-large-files', 'ruff-check', 'mypy']
+    {}
+    {'check-added-large-files': ['content/notes.md']}
+  hints:
+    - "Розбийте на два кроки: спершу відфільтруйте `filenames` верхньорівневими `files`/`exclude` один раз, потім для кожного хука з `hooks_for_stage` застосуйте його власні фільтри й типи. Хук за id зручно знайти через словник `{hook['id']: hook}`."
+    - "Допоміжна функція `def keep(names, files, exclude): return [n for n in names if re.search(files, n) and not re.search(exclude, n)]`; типи: `set(hook.get('types', [])) <= tags and (not types_or or tags & types_or)`."
+  solution: |
+    import re
+
+    EXT_TAGS = {".py": "python", ".pyi": "pyi", ".toml": "toml", ".lock": "toml",
+                ".yaml": "yaml", ".md": "markdown"}
+
+
+    def tags_for(name: str) -> set[str]:
+        tags = {"file", "text"}
+        for ext, tag in EXT_TAGS.items():
+            if name.endswith(ext):
+                tags.add(tag)
+        return tags
+
+
+    def hooks_for_stage(config: dict, stage: str) -> list[str]:
+        result = []
+        for repo in config["repos"]:
+            for hook in repo["hooks"]:
+                stages = hook.get("stages") or config.get("default_stages")
+                if not stages or stage in stages:
+                    result.append(hook["id"])
+        return result
+
+
+    def keep(names: list[str], files: str, exclude: str) -> list[str]:
+        return [n for n in names if re.search(files, n) and not re.search(exclude, n)]
+
+
+    def plan(config: dict, filenames: list[str], stage: str) -> dict[str, list[str]]:
+        hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
+        candidates = keep(filenames, config.get("files", ""), config.get("exclude", "^$"))
+        result = {}
+        for hook_id in hooks_for_stage(config, stage):
+            hook = hooks[hook_id]
+            names = keep(candidates, hook.get("files", ""), hook.get("exclude", "^$"))
+            types = set(hook.get("types", []))
+            types_or = set(hook.get("types_or", []))
+            matched = [
+                n for n in names
+                if types <= tags_for(n) and (not types_or or tags_for(n) & types_or)
+            ]
+            if matched:
+                result[hook_id] = matched
+        return result
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "pre-commit і pre-push у капстоуні"
+  prompt: |
+    Зробіть капстоун окремим git-репозиторієм і підключіть до нього pre-commit. У капстоуну свій CI і свої
+    хуки, тож монорепо-налаштування з прикладів уроку (`files: ^capstone/`, `--directory capstone`,
+    `paths`, `working-directory`) йому не потрібні.
+
+    1. `git init` у `capstone/`, якщо він ще не під git, і перший коміт; `.gitignore` з m0-l06 уже прибирає
+       `.venv/` і кеші.
+    2. `uv add --dev pre-commit`.
+    3. Створіть `.pre-commit-config.yaml` у корені капстоуну з розділу "Для капстоуну": `default_install_hook_types`,
+       `pre-commit-hooks` (п'ять хуків), `ruff-pre-commit` з `ruff-check --fix` перед `ruff-format`, локальні
+       `mypy` і `pytest` через `uv run` зі `stages: [pre-push]`. `rev` для ruff дорівнює версії ruff в `uv.lock`
+       (`uv tree --only-dev --depth 1`).
+    4. `git add` конфіг, бо `--all-files` бачить лише відстежувані файли.
+    5. `uv run pre-commit install` має надрукувати два рядки: для `pre-commit` і `pre-push`.
+    6. Проженіть обидві стадії й доведіть до зеленого. Якщо хук щось виправив, перегляньте `git diff` і закомітьте
+       виправлення окремим комітом.
+    7. Покладіть у капстоун `.github/workflows/ci.yml` з уроку без `paths` і `working-directory`. Запускати його
+       не потрібно, але кожна його команда має проходити локально з `capstone/`.
+  checklist:
+    - "`pre-commit` є в `[dependency-groups] dev`, а не в `[project] dependencies`"
+    - "`git rev-parse --show-toplevel`, запущений у `capstone/`, друкує шлях до самого `capstone/`"
+    - "`.pre-commit-config.yaml` лежить у корені капстоуну і закомічений, у ньому немає `files:` і `--directory`; `uv run pre-commit validate-config .pre-commit-config.yaml` мовчить"
+    - "`rev` у `ruff-pre-commit` збігається з версією ruff в `uv.lock`"
+    - "`ruff-check` з `--fix` стоїть перед `ruff-format`"
+    - "`mypy` і `pytest` локальні хуки з `pass_filenames: false` і `stages: [pre-push]`; `mirrors-mypy` не використовується"
+    - "`uv run pre-commit run --all-files` друкує сім рядків `Passed`, а з `--hook-stage pre-push` дев'ять"
+    - "Пробний коміт файлу з `def getLabel(): ...` відхиляється хуком `ruff check` з N802"
+    - "`.github/workflows/ci.yml` у капстоуні існує, без `paths` і `working-directory`; `uv sync --locked`, `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`, `uv run pytest -q` проходять локально"
+  verify: "cd capstone && uv run pre-commit run --all-files && uv run pre-commit run --all-files --hook-stage pre-push"

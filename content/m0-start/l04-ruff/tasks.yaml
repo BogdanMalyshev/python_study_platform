@@ -1,0 +1,350 @@
+- id: q1
+  type: quiz
+  question: |
+    У папці немає жодного конфігу ruff: ні `[tool.ruff]` у `pyproject.toml`, ні `ruff.toml`.
+    Що виведе `ruff check defaults_demo.py` (ruff 0.17)?
+    ```python
+    def is_empty(value: str | None) -> bool:
+        return value == None
+
+
+    normalize = lambda value: value.strip()
+    ```
+  options:
+    - "Дві помилки: `E711` і `E731`"
+    - "Одну помилку: `E711`, бо `E7` входить у стандартний набір"
+    - "`All checks passed!`"
+    - "Дві помилки: `E731` і `F841`"
+  answer: 2
+  explain: |
+    Стандартний набір ruff 0.17 це 407 правил, але майже без pycodestyle: `E711` і `E731` у нього
+    не входять, тому без конфігу файл проходить чисто. Варіант з `E711` спокусливий, бо в багатьох
+    статтях написано, що за замовчуванням увімкнено `E4`, `E7`, `E9`, `F`; так було в старших версіях.
+    Обидві помилки з'являються, щойно в конфігу є `select = ["E", ...]`, і саме тому курс задає
+    `select` явно. `F841` тут ні до чого: невикористаних локальних змінних у файлі немає.
+
+- id: q2
+  type: quiz
+  question: |
+    Що зробить `ruff format` з цим кодом?
+    ```python
+    options = ['small', 'large',]
+    labels = ['a',
+              'b']
+    ```
+  options:
+    - "Обидва списки в один рядок з подвійними лапками: `options = [\"small\", \"large\"]`, `labels = [\"a\", \"b\"]`"
+    - "`options` розкладе по елементу на рядок з комою в кінці, `labels` збере в один рядок; лапки стануть подвійними"
+    - "Обидва списки розкладе по елементу на рядок"
+    - "Замінить лише лапки, розкладку лишить як є: форматер не чіпає ручні переноси"
+  answer: 1
+  explain: |
+    Кома після останнього елемента `options` це magic trailing comma: форматер бачить її і не збирає
+    колекцію в один рядок, а розкладає по елементу на рядок. У `labels` такої коми немає, і він влазить
+    у 88 символів, тому ручний перенос прибирається. Перший варіант був би правдою з
+    `skip-magic-trailing-comma = true`. Останній описує поведінку, якої у black-подібного форматера
+    немає: ручні переноси він не зберігає, якщо це не `# fmt: off`.
+
+- id: q3
+  type: quiz
+  question: |
+    У проєкті конфіг курсу: `select = ["E", "F", "I", "UP", "B", "N", "SIM", "RUF"]`. Що виведе
+    `ruff check types_demo.py`?
+    ```python
+    def next_step(step: int) -> str:
+        return step + 1
+
+
+    print(next_step("2"))
+    ```
+  options:
+    - "Помилку: тип повернення `int` не збігається з анотацією `str`"
+    - "Помилку про аргумент `\"2\"` замість `int` у виклику"
+    - "`All checks passed!`"
+    - "`UP`-попередження про застарілі анотації"
+  answer: 2
+  explain: |
+    ruff не тайпчекер: анотації для нього синтаксис, і невідповідність типів він не шукає. Файл проходить
+    чисто, а падає лише в рантаймі з `TypeError` на `"2" + 1`. Перші два варіанти це те, що знайде mypy
+    або pyright (m2-l08), і те, до чого звикаєш у TS, де `tsc` працює на кожну збірку. `UP` тут нема
+    до чого чіплятися: `int` і `str` уже сучасний запис.
+
+- id: q4
+  type: quiz
+  question: |
+    Що станеться з файлом після `ruff check --fix checkbox.py`?
+    ```python
+    def is_checked(value: object) -> bool:
+        return value == True
+    ```
+  options:
+    - "Файл не зміниться: фікс E712 небезпечний, ruff лише покаже його в `help:`"
+    - "Рядок стане `return value is True`"
+    - "Рядок стане `return value`"
+    - "Рядок стане `return bool(value)`"
+  answer: 0
+  explain: |
+    `--fix` застосовує лише безпечні фікси, а фікс E712 позначений як unsafe, тож файл не змінюється, а у
+    виводі `1 unsafe fix available with --fix --unsafe-fixes`. Третій варіант це те, що зробить
+    `--fix --unsafe-fixes`, і він змінює поведінку: функція з `-> bool` почне повертати `"yes"` чи `1`
+    як є. `is True` і `bool(value)` це дві різні правильні заміни, між якими обирає людина: перша
+    вважає увімкненим лише `True`, друга будь-яке truthy-значення.
+
+- id: t1
+  type: code
+  title: "Прибрати B006 без зміни контракту"
+  prompt: |
+    На цю функцію ruff видає `B006 Do not use mutable data structures for argument defaults`.
+    Перепишіть її так, щоб правило не спрацьовувало, а поведінка стала такою, як задумано:
+
+    - виклик без `options` щоразу отримує новий порожній список;
+    - якщо список передали, функція дописує в нього й повертає той самий об'єкт;
+    - анотація аргументу чесна: `list[str] | None`.
+
+    ```python
+    add_option("small")             # ['small']
+    add_option("large")             # ['large'], а не ['small', 'large']
+    mine = ["xs"]
+    add_option("xl", mine) is mine  # True
+    ```
+  starter: |
+    def add_option(label: str, options: list[str] = []) -> list[str]:
+        options.append(label)
+        return options
+  harness: |
+    first = add_option("small")
+    second = add_option("large")
+    print(first, second, first is second)
+    mine = ["xs"]
+    result = add_option("xl", mine)
+    print(result, result is mine)
+    print(add_option.__defaults__)
+  expected: |
+    ['small'] ['large'] False
+    ['xs', 'xl'] True
+    (None,)
+  hints:
+    - "Значення за замовчуванням обчислюється один раз при def. Потрібен незмінний маркер \"аргумент не передали\", а список треба створювати всередині виклику."
+    - "options: list[str] | None = None, а першим рядком тіла: if options is None: options = []"
+  solution: |
+    def add_option(label: str, options: list[str] | None = None) -> list[str]:
+        if options is None:
+            options = []
+        options.append(label)
+        return options
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "E711, E712, E731 без зміни змісту"
+  prompt: |
+    Ruff знаходить у цьому коді `E731`, `E711` і `E712`. Перепишіть обидві функції так, щоб правила
+    не спрацьовували, і перевірте поведінку на значеннях, які приходять у JSON відповідей форми:
+
+    - `is_filled(value)`: поле заповнене, якщо значення не `None` і не порожній рядок. `0` і `False`
+      це заповнені відповіді (число й чекбокс), тому просте truthiness тут не підходить.
+    - `is_checked(value)`: `True` лише для булевого `True`. Старі конфіги пишуть `1` і `"yes"`,
+      і вони не мають рахуватись увімкненими (зверніть увагу: стартовий `== True` вважає `1` увімкненим).
+    - `is_filled` має бути звичайною функцією з ім'ям `is_filled`, а не `lambda` у змінній.
+  starter: |
+    is_filled = lambda value: value != None and value != ""
+
+
+    def is_checked(value: object) -> bool:
+        return value == True
+  harness: |
+    for raw in [None, "", 0, False, "a@b.c"]:
+        print(repr(raw), is_filled(raw))
+    for raw in [True, 1, "yes", False]:
+        print(repr(raw), is_checked(raw))
+    print(is_filled.__name__)
+  expected: |
+    None False
+    '' False
+    0 True
+    False True
+    'a@b.c' True
+    True True
+    1 False
+    'yes' False
+    False False
+    is_filled
+  hints:
+    - "None перевіряють через identity, а не рівність. Для чекбокса теж потрібна identity: True в Python існує в одному екземплярі, а 1 == True."
+    - "def is_filled(value: object) -> bool: return value is not None and value != \"\"; is_checked повертає value is True."
+  solution: |
+    def is_filled(value: object) -> bool:
+        return value is not None and value != ""
+
+
+    def is_checked(value: object) -> bool:
+        return value is True
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "UP і N: сучасні типи й snake_case"
+  prompt: |
+    Функцію переклали з TypeScript і з туторіалу часів Python 3.8. Ruff з конфігом курсу дає на ній
+    `UP035`, `UP006`, `UP045`, `N802`, `N803`, `N806` і `E711`. Перепишіть так, щоб жодне з цих правил
+    не спрацювало, а поведінка лишилась тією самою:
+
+    - функція називається `get_visible_ids`, аргументи `fields` і `hidden_ids`;
+    - анотації без імпортів з `typing`: `list[dict]`, `set[str] | None`, `list[str]`;
+    - `from __future__ import annotations` не додавайте: перевірка читає анотації як об'єкти.
+
+    ```python
+    get_visible_ids([{"id": "email"}, {"id": "phone"}], hidden_ids={"phone"})  # ['email']
+    ```
+  starter: |
+    from typing import Dict, List, Optional, Set
+
+
+    def getVisibleIds(fields: List[Dict], hiddenIds: Optional[Set[str]] = None) -> List[str]:
+        visibleIds = []
+        for field in fields:
+            if hiddenIds == None or field["id"] not in hiddenIds:
+                visibleIds.append(field["id"])
+        return visibleIds
+  harness: |
+    import inspect
+    import typing
+
+    fields = [{"id": "email"}, {"id": "phone"}, {"id": "age"}]
+    print(get_visible_ids(fields))
+    print(get_visible_ids(fields, hidden_ids={"phone"}))
+    print(list(inspect.signature(get_visible_ids).parameters))
+    for name, hint in typing.get_type_hints(get_visible_ids).items():
+        print(name, hint)
+    print("getVisibleIds" in globals())
+  expected: |
+    ['email', 'phone', 'age']
+    ['email', 'age']
+    ['fields', 'hidden_ids']
+    fields list[dict]
+    hidden_ids set[str] | None
+    return list[str]
+    False
+  hints:
+    - "List, Dict, Set з typing замінюються вбудованими list, dict, set, а Optional[X] записом X | None. Імена всіх трьох рівнів (функція, аргумент, локальна змінна) переходять у snake_case."
+    - "def get_visible_ids(fields: list[dict], hidden_ids: set[str] | None = None) -> list[str]: і всередині hidden_ids is None замість == None."
+  solution: |
+    def get_visible_ids(
+        fields: list[dict], hidden_ids: set[str] | None = None
+    ) -> list[str]:
+        visible_ids = []
+        for field in fields:
+            if hidden_ids is None or field["id"] not in hidden_ids:
+                visible_ids.append(field["id"])
+        return visible_ids
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "Почистити легасі-модуль правил форми"
+  prompt: |
+    У корені курсу створіть папку `practice/m0-l04/` і покладіть туди три файли.
+
+    `pyproject.toml` з конфігом ruff з цього уроку: `line-length = 88`, `target-version = "py312"`,
+    `select = ["E", "F", "I", "UP", "B", "N", "SIM", "RUF"]`, `ignore = ["E501"]`.
+
+    `form_rules.py`, модуль, перекладений з JS як було:
+
+    ```python
+    import sys
+    import re
+    import json
+    from typing import Dict, List, Optional
+
+    EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+    def isRequired(field: Dict) -> bool:
+        return field.get('required') == True
+
+
+    def requiredIds(fields: List[Dict]) -> List[str]:
+        result = []
+        for field in fields:
+            if isRequired(field): result.append(field['id'])
+        return result
+
+
+    def validate(field: Dict, value: Optional[str], errors: List[str] = []) -> List[str]:
+        fieldId = field['id']
+        if value == None or value == '':
+            if isRequired(field):
+                errors.append(f'{fieldId}: required')
+            return errors
+        if 'type' in field.keys() and field['type'] == 'email' and not EMAIL_RE.match(value):
+            errors.append(f'{fieldId}: invalid email')
+        return errors
+
+
+    normalize = lambda value: value.strip() if value else value
+    ```
+
+    `check_form_rules.py`, перевірка поведінки, яку не змінюйте:
+
+    ```python
+    from form_rules import is_required, normalize, required_ids, validate
+
+    fields = [
+        {"id": "email", "type": "email", "required": True},
+        {"id": "nickname", "required": "yes"},
+        {"id": "age", "required": 1},
+    ]
+
+    assert is_required(fields[0]) is True, "required: True means required"
+    assert is_required(fields[1]) is False, 'legacy "yes" must not count as required'
+    assert is_required(fields[2]) is False, "legacy 1 must not count as required"
+    assert required_ids(fields) == ["email"], "only boolean True counts"
+    assert validate(fields[0], None) == ["email: required"], "empty required field"
+    assert validate(fields[0], "a@b.c") == [], "errors must not leak between calls"
+    assert validate(fields[0], "nope") == ["email: invalid email"], "invalid email"
+    assert validate(fields[2], "") == [], "optional field may be empty"
+    assert normalize("  Hi ") == "Hi", "normalize strips spaces"
+    assert normalize(None) is None, "normalize keeps None"
+    print("form_rules: all checks passed")
+    ```
+
+    Доведіть `form_rules.py` до стану, де ruff мовчить, форматер нічого не змінює, а перевірка
+    поведінки проходить. На старті `ruff check` знаходить 22 порушення, і одне з них з пасткою:
+    його небезпечний фікс проходить ruff, але ламає `check_form_rules.py`.
+  checklist:
+    - "`ruff check practice/m0-l04` друкує `All checks passed!`, у файлі немає жодного `# noqa`"
+    - "`ruff format --check practice/m0-l04` друкує `2 files already formatted`"
+    - "Функції перейменовані в `snake_case`: `is_required`, `required_ids`, `validate`, `normalize`; локальна `fieldId` теж"
+    - "Анотації без `typing`: `dict`, `list[str]`, `str | None`; `normalize` має анотації `str | None -> str | None`"
+    - "Для E712 обрано `is True`, а не truthiness: легасі-значення `\"yes\"` і `1` не вважаються обов'язковими"
+    - "`validate` не тягне помилки між викликами: значення за замовчуванням `None`, список створюється всередині"
+    - "Небезпечні фікси або не застосовувались, або кожен прочитаний через `ruff check --diff --unsafe-fixes` перед застосуванням"
+  verify: ".venv/bin/ruff check practice/m0-l04 && .venv/bin/ruff format --check practice/m0-l04 && .venv/bin/python practice/m0-l04/check_form_rules.py"
+
+- id: p2
+  type: project
+  title: "Конфіг ruff у чернетці капстоуну"
+  prompt: |
+    Капстоун `capstone/` з'явиться лише в m0-l06, тож це завдання продовжує чернетку його `pyproject.toml`
+    з m0-l02: папку `practice/m0-l02/formbuilder-draft/` у корені курсу. Усі команди нижче виконуються з неї.
+
+    У `pyproject.toml` чернетки приведіть `[tool.ruff]` до значень цього уроку і додайте `[tool.ruff.lint]`
+    з набором цього уроку. Якщо `ruff` ще не в dev-групі, додайте його через `uv add --dev ruff`.
+
+    Покладіть стартовий файл `src/formbuilder/visibility.py` з розділу "Для капстоуну" (версію з
+    `visibleFields`, `List` і `== None`) і пройдіть повний цикл: `uv run ruff check --fix .`, ручні правки,
+    `uv run ruff format .`. Скелет проєкту (`tests/`, точка входу) добудовується в m0-l06, і цей конфіг
+    переїде туди разом з рештою чернетки; тут потрібен лише конфіг і один чистий файл.
+
+    Чернетка це uv-проєкт з власним оточенням, тому `verify` робить `cd practice/m0-l02/formbuilder-draft`
+    і запускає ruff через `uv run`.
+  checklist:
+    - "`[tool.ruff]` містить `line-length = 88` і `target-version = \"py312\"`, що узгоджено з `requires-python = \">=3.12\"`"
+    - "`[tool.ruff.lint]` містить явний `select` з `E, F, I, UP, B, N, SIM, RUF` і `ignore = [\"E501\"]`"
+    - "`visible_fields` і `visible_if` у `snake_case`, ключ JSON `\"visibleIf\"` лишився рядком у camelCase"
+    - "`uv run ruff check .` і `uv run ruff format --check .` з папки чернетки проходять без змін і без `# noqa`"
+    - "`.ruff_cache/` не потрапляє в git"
+  verify: "cd practice/m0-l02/formbuilder-draft && uv run ruff check . && uv run ruff format --check . && uv run python -c \"import tomllib; r = tomllib.load(open('pyproject.toml', 'rb'))['tool']['ruff']; assert r['line-length'] == 88, 'line-length'; assert {'E', 'F', 'I', 'UP', 'B', 'N', 'SIM', 'RUF'} <= set(r['lint']['select']), 'lint.select'; src = open('src/formbuilder/visibility.py').read(); assert 'def visible_fields' in src and 'visible_if' in src, 'snake_case names'; print('ruff config ok')\""

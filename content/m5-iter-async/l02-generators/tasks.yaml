@@ -1,0 +1,419 @@
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    def load():
+        print("loading")
+        yield "config"
+
+    gen = load()
+    print("ready")
+    print(next(gen))
+    ```
+  options:
+    - "loading, ready, config"
+    - "ready, loading, config"
+    - "ready, config"
+    - "loading, config, ready"
+  answer: 1
+  explain: |
+    Виклик генераторної функції лише створює генератор і нічого з тіла не виконує, тому першим іде `ready`.
+    Тіло стартує на `next(gen)`: друкує `loading` і зупиняється на `yield`, віддаючи `config`.
+    `loading` першим це інтуїція Node-ового `async function`, яка виконує тіло до першого `await` одразу при виклику;
+    генератори так не роблять ні в Python, ні в JS. `ready, config` пропускає сам `print` у тілі: він виконується,
+    просто пізніше.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    def tags(raw):
+        if raw is None:
+            return ["default"]
+        for tag in raw.split(","):
+            yield tag.strip()
+
+    print(list(tags(None)))
+    ```
+  options: ["['default']", "[]", "[['default']]", "TypeError"]
+  answer: 1
+  explain: |
+    `yield` у тілі робить `tags` генераторною функцією цілком, разом з гілкою `return`. У генераторі `return value`
+    не повертає `value` викликачу, а завершує генератор, кладучи `value` в `StopIteration.value`, яке `list` викидає.
+    Тому генератор порожній. `['default']` це очікування звичайної функції; `[['default']]` плутає `return` з `yield`;
+    `TypeError` міг би бути від `None.split`, але до цього рядка виконання не доходить.
+
+- id: t1
+  type: code
+  title: "__iter__ майстра форми як генератор"
+  prompt: |
+    Майстер форми (wizard) складається зі сторінок, кожна сторінка це список id полів.
+    Допишіть `Wizard.__iter__` генератором: він віддає пари `(номер_сторінки, id_поля)`, сторінки нумеруються з 1,
+    порожні сторінки нічого не віддають.
+
+    Об'єкт має бути iterable багаторазово: два `for` по одному `Wizard` не заважають один одному.
+
+    ```python
+    list(Wizard([["email", "phone"], ["age"]]))
+    # [(1, 'email'), (1, 'phone'), (2, 'age')]
+    ```
+  starter: |
+    from collections.abc import Iterator
+
+    class Wizard:
+        def __init__(self, pages: list[list[str]]) -> None:
+            self.pages = pages
+
+        def __iter__(self) -> Iterator[tuple[int, str]]:
+            ...
+  harness: |
+    w = Wizard([["email", "phone"], [], ["age"]])
+    print(list(w))
+    print(list(w))
+    first, second = iter(w), iter(w)
+    print(next(first), next(first), next(second))
+    print(list(Wizard([])))
+  expected: |
+    [(1, 'email'), (1, 'phone'), (3, 'age')]
+    [(1, 'email'), (1, 'phone'), (3, 'age')]
+    (1, 'email') (1, 'phone') (1, 'email')
+    []
+  hints:
+    - "Якщо `__iter__` містить `yield`, кожен виклик `iter(w)` створює новий генератор зі своїм станом, тож багаторазовість виходить сама."
+    - "Номер сторінки дає `enumerate(self.pages, start=1)`, а поля сторінки обходить вкладений `for`."
+    - "for number, page in enumerate(self.pages, start=1): for field in page: yield number, field"
+  solution: |
+    from collections.abc import Iterator
+
+    class Wizard:
+        def __init__(self, pages: list[list[str]]) -> None:
+            self.pages = pages
+
+        def __iter__(self) -> Iterator[tuple[int, str]]:
+            for number, page in enumerate(self.pages, start=1):
+                for field in page:
+                    yield number, field
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    ids = (f for f in ["email", "phone", "age"])
+    print("phone" in ids, "email" in ids, list(ids))
+    ```
+  options:
+    - "True True ['email', 'phone', 'age']"
+    - "True False ['age']"
+    - "True False []"
+    - "True True []"
+  answer: 2
+  explain: |
+    `in` на генераторі споживає елементи, доки не знайде збіг. Перша перевірка забирає `email` і `phone` і повертає
+    `True`. Друга шукає `email` у залишку, забирає `age`, не знаходить і повертає `False`, вичерпавши генератор.
+    `list(ids)` отримує порожній залишок. `['age']` спокусливий, якщо вважати, що невдала перевірка нічого не
+    забирає; варіанти з другим `True` це інтуїція списку, де `in` нічого не споживає.
+
+- id: t2
+  type: code
+  title: "Лінивий парсер рядків конфігу"
+  prompt: |
+    Напишіть генератор `parse_rows(lines)`, який приймає будь-який iterable рядків виду `key = value`
+    і віддає пари `(key, value)` з обрізаними пробілами з обох боків.
+
+    - порожні рядки (після `strip`) і рядки, що починаються з `#`, пропускаються;
+    - рядки без `=` пропускаються;
+    - ділити по першому `=`: `"a=b=c"` дає `("a", "b=c")`.
+
+    Функція має бути лінивою: не читати наступний рядок джерела, поки споживач не попросив наступну пару.
+    Харнес перевіряє це, подаючи джерело, яке друкує кожне читання, і беручи лише дві пари через `islice`.
+
+    ```python
+    list(parse_rows(["# c", "email = a@b.c", "age=30"]))
+    # [('email', 'a@b.c'), ('age', '30')]
+    ```
+  starter: |
+    from collections.abc import Iterable, Iterator
+
+    def parse_rows(lines: Iterable[str]) -> Iterator[tuple[str, str]]:
+        ...
+  harness: |
+    from itertools import islice
+
+    def noisy(lines):
+        for line in lines:
+            print("read", repr(line))
+            yield line
+
+    rows = ["# config", "email = a@b.c", "", "url=https://x.io/?a=1", "city = Kyiv", "broken"]
+    print(list(parse_rows(rows)))
+    for pair in islice(parse_rows(noisy(rows)), 2):
+        print("got", pair)
+    print(list(parse_rows([])))
+  expected: |
+    [('email', 'a@b.c'), ('url', 'https://x.io/?a=1'), ('city', 'Kyiv')]
+    read '# config'
+    read 'email = a@b.c'
+    got ('email', 'a@b.c')
+    read ''
+    read 'url=https://x.io/?a=1'
+    got ('url', 'https://x.io/?a=1')
+    []
+  hints:
+    - "Список-акумулятор ламає лінивість: харнес побачить усі `read` до першого `got`. Кожну пару треба віддавати через `yield` одразу, як вона готова."
+    - "`str.partition('=')` ділить по першому входженню і повертає `(head, sep, tail)`; порожній `sep` означає, що `=` не було."
+    - "for line in lines: line = line.strip(); if not line or line.startswith('#'): continue; key, sep, value = line.partition('='); if sep: yield key.strip(), value.strip()"
+  solution: |
+    from collections.abc import Iterable, Iterator
+
+    def parse_rows(lines: Iterable[str]) -> Iterator[tuple[str, str]]:
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, sep, value = line.partition("=")
+            if sep:
+                yield key.strip(), value.strip()
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Фільтр дублікатів через send"
+  prompt: |
+    Напишіть генератор-корутину `seen_filter()`, який приймає id полів через `send` і відповідає,
+    чи бачить цей id уперше.
+
+    - після priming (`next(f)`) генератор віддає `None`;
+    - `f.send("email")` повертає `True`, якщо `email` ще не надсилали, і `False`, якщо вже надсилали;
+    - `f.send("")` (порожній рядок) завершує генератор, і `return` віддає кількість унікальних id;
+      викликач отримує її з `StopIteration.value`.
+
+    ```python
+    f = seen_filter()
+    next(f)            # None
+    f.send("email")    # True
+    f.send("email")    # False
+    f.send("")         # StopIteration, .value == 1
+    ```
+  starter: |
+    from collections.abc import Generator
+
+    def seen_filter() -> Generator[bool | None, str, int]:
+        ...
+  harness: |
+    f = seen_filter()
+    print(next(f))
+    for field_id in ["email", "age", "email", "phone", "age"]:
+        print(field_id, f.send(field_id))
+    try:
+        f.send("")
+    except StopIteration as stop:
+        print("unique", stop.value)
+
+    g = seen_filter()
+    next(g)
+    try:
+        g.send("")
+    except StopIteration as stop:
+        print("unique", stop.value)
+  expected: |
+    None
+    email True
+    age True
+    email False
+    phone True
+    age False
+    unique 3
+    unique 0
+  hints:
+    - "Стан (множина побачених id) живе в локальній змінній генератора між `yield`. Відповідь на поточний `send` віддається наступним `yield`."
+    - "Перший `yield` віддає `None`; далі в циклі `field_id = yield answer`, де `answer` обчислено з попереднього значення."
+    - "seen = set(); answer = None; while True: field_id = yield answer; if not field_id: return len(seen); answer = field_id not in seen; seen.add(field_id)"
+  solution: |
+    from collections.abc import Generator
+
+    def seen_filter() -> Generator[bool | None, str, int]:
+        seen: set[str] = set()
+        answer: bool | None = None
+        while True:
+            field_id = yield answer
+            if not field_id:
+                return len(seen)
+            answer = field_id not in seen
+            seen.add(field_id)
+  requires: []
+  runtime: browser
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    def inner():
+        yield 1
+        return "done"
+
+    def outer():
+        result = yield from inner()
+        yield result
+
+    print(list(outer()), list(inner()))
+    ```
+  options:
+    - "[1, 'done'] [1]"
+    - "[1, 'done'] [1, 'done']"
+    - "[1, None] [1]"
+    - "[1] [1]"
+  answer: 0
+  explain: |
+    Значення виразу `yield from inner()` дорівнює тому, що `inner` повернув через `return`, тобто `"done"`, і `outer`
+    віддає його наступним `yield`. Сам `list(inner())` значення `return` викидає, як `[...gen]` у JS викидає `value`
+    з фінального `{ done: true }`, тому там лише `[1]`. `[1, None]` це очікування, що `yield from` як вираз нічого не
+    повертає, як ручний `for`, який `return` вкладеного не бачить; `[1, 'done']` для `list(inner())` плутає `return` з `yield`.
+
+- id: t4
+  type: code
+  title: "Шляхи до полів через yield from"
+  prompt: |
+    Конфіг форми це дерево: кожен елемент має `name`, контейнери мають `children`.
+    Напишіть рекурсивний генератор `leaf_paths(element)`, який віддає шлях до кожного листа (елемента без
+    `children` або з порожнім `children`) у вигляді імен через `/`, починаючи з кореня, у порядку обходу в глибину.
+
+    Рекурсію оформіть через `yield from`, без списку-акумулятора.
+
+    ```python
+    leaf_paths({"name": "f", "children": [{"name": "a"}, {"name": "s", "children": [{"name": "b"}]}]})
+    # віддає "f/a", "f/s/b"
+    ```
+  starter: |
+    from collections.abc import Iterator
+
+    def leaf_paths(element: dict, prefix: str = "") -> Iterator[str]:
+        ...
+  harness: |
+    form = {"name": "signup", "children": [
+        {"name": "contact", "children": [
+            {"name": "email"},
+            {"name": "phones", "children": [{"name": "mobile"}, {"name": "work"}]},
+        ]},
+        {"name": "plan"},
+        {"name": "extras", "children": []},
+    ]}
+    print(list(leaf_paths(form)))
+    print(next(leaf_paths(form)))
+    print(list(leaf_paths({"name": "single"})))
+  expected: |
+    ['signup/contact/email', 'signup/contact/phones/mobile', 'signup/contact/phones/work', 'signup/plan', 'signup/extras']
+    signup/contact/email
+    ['single']
+  hints:
+    - "Шлях поточного елемента це `prefix + '/' + name`, а для кореня, де префікса ще немає, просто `name`. Цей шлях і є префіксом для дітей."
+    - "Лист віддає свій шлях і завершується; контейнер для кожної дитини робить `yield from leaf_paths(child, path)`."
+    - "path = f\"{prefix}/{element['name']}\" if prefix else element['name']; children = element.get('children'); if not children: yield path; return; for child in children: yield from leaf_paths(child, path)"
+  solution: |
+    from collections.abc import Iterator
+
+    def leaf_paths(element: dict, prefix: str = "") -> Iterator[str]:
+        path = f"{prefix}/{element['name']}" if prefix else element["name"]
+        children = element.get("children")
+        if not children:
+            yield path
+            return
+        for child in children:
+            yield from leaf_paths(child, path)
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Конвеєр публікації пачками"
+  prompt: |
+    Зберіть конвеєр генерації сторінок капстоуну з трьох генераторів.
+
+    - `valid(configs)` пропускає лише конфіги з непорожнім списком `fields`.
+    - `render(configs)` віддає для кожного конфігу рядок `"<id>:<кількість полів>"`, наприклад `"c2:2"`.
+    - `publish(configs, size)` з'єднує `valid → render`, віддає результати пачками (списками) до `size` елементів,
+      а коли елементи скінчились, повертає через `return` загальну кількість опублікованих сторінок.
+      Усе тіло `publish` загорніть у `try/finally`, де `finally` друкує `publish closed`: це має спрацювати і при
+      нормальному завершенні, і при `close()` посеред роботи.
+
+    Конвеєр має бути лінивим: перша пачка не повинна читати з джерела більше конфігів, ніж потрібно для неї.
+    Харнес перевіряє це джерелом, що друкує кожне читання.
+  starter: |
+    from collections.abc import Generator, Iterable, Iterator
+    from itertools import islice
+
+    def valid(configs: Iterable[dict]) -> Iterator[dict]:
+        ...
+
+    def render(configs: Iterable[dict]) -> Iterator[str]:
+        ...
+
+    def publish(configs: Iterable[dict], size: int) -> Generator[list[str], None, int]:
+        ...
+  harness: |
+    def source(n):
+        for i in range(1, n + 1):
+            print(f"load c{i}")
+            yield {"id": f"c{i}", "fields": ["email"] * (i % 3)}
+
+    gen = publish(source(5), 2)
+    print(next(gen))
+    gen.close()
+    print("---")
+    gen = publish(source(5), 2)
+    while True:
+        try:
+            print(next(gen))
+        except StopIteration as stop:
+            print("published", stop.value)
+            break
+  expected: |
+    load c1
+    load c2
+    ['c1:1', 'c2:2']
+    publish closed
+    ---
+    load c1
+    load c2
+    ['c1:1', 'c2:2']
+    load c3
+    load c4
+    load c5
+    ['c4:1', 'c5:2']
+    publish closed
+    published 4
+  hints:
+    - "`valid` і `render` це звичайні генератори з `for` і `yield`. Уся складність у `publish`: пачки треба брати з одного й того самого ітератора, а не створювати конвеєр заново на кожну пачку."
+    - "`list(islice(pages, size))` бере наступну пачку; порожній список означає, що дані скінчились. `while batch := ...` зручно поєднує обидва кроки."
+    - "pages = render(valid(configs)); published = 0; try: while batch := list(islice(pages, size)): published += len(batch); yield batch; return published; finally: print('publish closed')"
+  solution: |
+    from collections.abc import Generator, Iterable, Iterator
+    from itertools import islice
+
+    def valid(configs: Iterable[dict]) -> Iterator[dict]:
+        for config in configs:
+            if config.get("fields"):
+                yield config
+
+    def render(configs: Iterable[dict]) -> Iterator[str]:
+        for config in configs:
+            yield f"{config['id']}:{len(config['fields'])}"
+
+    def publish(configs: Iterable[dict], size: int) -> Generator[list[str], None, int]:
+        pages = render(valid(configs))
+        published = 0
+        try:
+            while batch := list(islice(pages, size)):
+                published += len(batch)
+                yield batch
+            return published
+        finally:
+            print("publish closed")
+  requires: []
+  runtime: browser

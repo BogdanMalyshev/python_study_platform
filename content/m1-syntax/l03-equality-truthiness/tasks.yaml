@@ -1,0 +1,352 @@
+- id: t1
+  type: code
+  title: "Оператор ?? без or"
+  prompt: |
+    У Python немає `??`. Напишіть `with_default(value, default)`, яка поводиться як `value ?? default` у JS:
+    повертає `default` лише тоді, коли `value` це `None`. Будь-яке інше значення, включно з `0`, `""`, `[]`
+    і `False`, повертається як є.
+
+    ```python
+    with_default(None, 10)   # 10
+    with_default(0, 10)      # 0
+    with_default("", "n/a")  # ''
+    ```
+  starter: |
+    def with_default(value: object, default: object) -> object:
+        ...
+  harness: |
+    print(with_default(None, 10))
+    print(with_default(0, 10))
+    print(repr(with_default("", "n/a")))
+    print(with_default(False, True))
+    print(with_default([], ["x"]))
+    print(with_default("value", "n/a"))
+  expected: |
+    10
+    0
+    ''
+    False
+    []
+    value
+  hints:
+    - "value or default тут не підходить: or підміняє будь-яке falsy-значення, а не лише None."
+    - "return value if value is not None else default"
+  solution: |
+    def with_default(value: object, default: object) -> object:
+        return value if value is not None else default
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Статус відповіді на поле форми"
+  prompt: |
+    Напишіть `answer_status(value)`, яка повертає один з трьох рядків:
+
+    - `"missing"`, якщо значення `None`;
+    - `"empty"`, якщо значення falsy: порожній рядок, порожній список, порожній словник;
+    - `"filled"` для всього іншого.
+
+    Числа й булеві значення це завжди відповідь: `0`, `0.0` і `False` мають статус `"filled"`,
+    хоча вони falsy. Рядок з пробілу вважається заповненим (очищення пробілів буде в m1-l04).
+
+    ```python
+    answer_status(None)   # 'missing'
+    answer_status([])     # 'empty'
+    answer_status(0)      # 'filled'
+    answer_status(False)  # 'filled'
+    ```
+  starter: |
+    def answer_status(value: object) -> str:
+        ...
+  harness: |
+    for v in [None, "", [], {}, 0, 0.0, False, "0", " ", [0], "a@b.c"]:
+        print(repr(v), answer_status(v))
+  expected: |
+    None missing
+    '' empty
+    [] empty
+    {} empty
+    0 filled
+    0.0 filled
+    False filled
+    '0' filled
+    ' ' filled
+    [0] filled
+    'a@b.c' filled
+  hints:
+    - "Порядок перевірок важливий: спершу None, потім числа, і лише потім truthiness. Згадайте, що bool це підклас int."
+    - "if value is None: ...; if isinstance(value, (int, float)): return \"filled\"; if not value: return \"empty\"."
+  solution: |
+    def answer_status(value: object) -> str:
+        if value is None:
+            return "missing"
+        if isinstance(value, (int, float)):
+            return "filled"
+        if not value:
+            return "empty"
+        return "filled"
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Список помилок, який сам знає, чи він порожній"
+  prompt: |
+    Клас `Errors` збирає повідомлення валідації. Допишіть його так, щоб:
+
+    - `len(errors)` повертав кількість повідомлень;
+    - `if errors:` був істинним, коли є хоч одна помилка, і хибним для порожнього. Метод `__bool__` не писати:
+      truthiness має випливати з довжини;
+    - `Errors(["a"]) == Errors(["a"])` був `True`: два об'єкти рівні, якщо в них однакові повідомлення в тому
+      самому порядку. Порівняння з будь-чим, що не `Errors`, дає `False`.
+
+    ```python
+    errors = Errors()
+    bool(errors)                       # False
+    errors.add("email: required")
+    bool(errors), len(errors)          # (True, 1)
+    Errors(["a"]) == Errors(["a"])     # True
+    Errors() == []                     # False
+    ```
+  starter: |
+    class Errors:
+        def __init__(self, items: list[str] | None = None):
+            self.items = list(items) if items is not None else []
+
+        def add(self, message: str) -> None:
+            self.items.append(message)
+  harness: |
+    errors = Errors()
+    print(bool(errors), len(errors))
+    errors.add("email: required")
+    print(bool(errors), len(errors))
+    print(Errors(["a"]) == Errors(["a"]), Errors(["a"]) == Errors(["b"]))
+    print(Errors() == [], Errors() == None)
+    print(Errors(["a"]) != Errors(["a"]))
+    print("ok" if not Errors() else "has errors")
+    print("__bool__" in Errors.__dict__)
+  expected: |
+    False 0
+    True 1
+    True False
+    False False
+    False
+    ok
+    False
+  hints:
+    - "Потрібні два dunder-методи: один дає довжину, другий рівність. Truthiness і != Python виведе з них сам."
+    - "def __len__(self) -> int: return len(self.items); def __eq__(self, other): return isinstance(other, Errors) and self.items == other.items"
+  solution: |
+    class Errors:
+        def __init__(self, items: list[str] | None = None):
+            self.items = list(items) if items is not None else []
+
+        def add(self, message: str) -> None:
+            self.items.append(message)
+
+        def __len__(self) -> int:
+            return len(self.items)
+
+        def __eq__(self, other: object) -> bool:
+            return isinstance(other, Errors) and self.items == other.items
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Часткове оновлення поля через sentinel"
+  prompt: |
+    Напишіть `patch_field(field, *, label=..., placeholder=..., max_length=...)`, яка повертає новий словник
+    поля з такими правилами для кожного з трьох параметрів:
+
+    - параметр не передали: ключ не змінюється;
+    - передали `None`: ключ видаляється з результату (якщо його не було, нічого не відбувається);
+    - передали будь-яке інше значення, включно з `""` і `0`: ключ встановлюється в це значення.
+
+    Вхідний словник не змінювати. `None` тут не може означати "не передали", тому значенням за замовчуванням
+    має бути sentinel `MISSING`, і перевіряти його треба так, щоб чужий `__eq__` не міг підробити відповідь.
+
+    ```python
+    field = {"id": "email", "label": "Email", "max_length": 255}
+    patch_field(field, label="")          # {'id': 'email', 'label': '', 'max_length': 255}
+    patch_field(field, max_length=None)   # {'id': 'email', 'label': 'Email'}
+    ```
+  starter: |
+    MISSING = object()
+
+
+    def patch_field(field: dict, *, label=MISSING, placeholder=MISSING, max_length=MISSING) -> dict:
+        ...
+  harness: |
+    field = {"id": "email", "label": "Email", "placeholder": "you@example.com", "max_length": 255}
+    print(patch_field(field))
+    print(patch_field(field, label="E-mail"))
+    print(patch_field(field, placeholder=None))
+    print(patch_field(field, label="", max_length=0))
+    print(patch_field({"id": "age"}, label=None, max_length=3))
+    print(field)
+  expected: |
+    {'id': 'email', 'label': 'Email', 'placeholder': 'you@example.com', 'max_length': 255}
+    {'id': 'email', 'label': 'E-mail', 'placeholder': 'you@example.com', 'max_length': 255}
+    {'id': 'email', 'label': 'Email', 'max_length': 255}
+    {'id': 'email', 'label': '', 'placeholder': 'you@example.com', 'max_length': 0}
+    {'id': 'age', 'max_length': 3}
+    {'id': 'email', 'label': 'Email', 'placeholder': 'you@example.com', 'max_length': 255}
+  hints:
+    - "Три стани на параметр: is MISSING, is None, усе інше. Truthiness тут не допоможе, бо \"\" і 0 це легальні значення. Почніть з копії dict(field)."
+    - "for key, value in ((\"label\", label), (\"placeholder\", placeholder), (\"max_length\", max_length)): if value is MISSING: continue; if value is None: updated.pop(key, None); else: updated[key] = value"
+  solution: |
+    MISSING = object()
+
+
+    def patch_field(field: dict, *, label=MISSING, placeholder=MISSING, max_length=MISSING) -> dict:
+        updated = dict(field)
+        for key, value in (("label", label), ("placeholder", placeholder), ("max_length", max_length)):
+            if value is MISSING:
+                continue
+            if value is None:
+                updated.pop(key, None)
+            else:
+                updated[key] = value
+        return updated
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Валідація відповіді за конфігом поля"
+  prompt: |
+    Напишіть `validate_answer(field, value)`, яка повертає рядок з помилкою або `None`, якщо відповідь валідна.
+    Конфіг поля це словник з ключами `"type"` (`"number"`, `"text"` або `"choice"`), `"required"` (bool),
+    необов'язковими `"min"` і `"max"` та `"options"` для `"choice"`. Перевірки по черзі:
+
+    1. Значення порожнє, якщо це `None`, `""` або `[]`. Для порожнього значення повернути `"required"`, якщо поле
+       обов'язкове, інакше `None`. `0` і `False` порожніми не вважаються.
+    2. `"number"`: значення має бути `int` або `float`, але не `bool`, інакше `"not a number"`. Потім межі:
+       якщо значення поза `[min, max]`, повернути `"out of range"`.
+    3. `"text"`: значення має бути `str`, інакше `"not a string"`. Межі `min`/`max` застосовуються до довжини
+       рядка, порушення дає `"out of range"`.
+    4. `"choice"`: значення має бути одним з `options`, інакше `"unknown option"`.
+
+    Межа відсутня, якщо ключа немає або значення `None`. Межа `0` це справжня межа, а не її відсутність.
+    Перевірку меж напишіть одним ланцюжковим порівнянням.
+
+    ```python
+    age = {"type": "number", "required": True, "min": 0, "max": 120}
+    validate_answer(age, 0)      # None
+    validate_answer(age, True)   # 'not a number'
+    validate_answer(age, 121)    # 'out of range'
+    ```
+  starter: |
+    def validate_answer(field: dict, value: object) -> str | None:
+        ...
+  harness: |
+    age = {"type": "number", "required": True, "min": 0, "max": 120}
+    print([validate_answer(age, v) for v in [0, 120, None, -1, 121, True, "30"]])
+    discount = {"type": "number", "required": False, "min": None, "max": 0}
+    print([validate_answer(discount, v) for v in [-5, 0, 1, None]])
+    note = {"type": "text", "required": False, "max": 5}
+    print([validate_answer(note, v) for v in ["", "hello", "hello!", 5]])
+    code = {"type": "text", "required": True, "min": 2, "max": 2}
+    print([validate_answer(code, v) for v in ["ua", "u", ""]])
+    plan = {"type": "choice", "required": True, "options": ["free", "pro"]}
+    print([validate_answer(plan, v) for v in ["pro", "", [], "team", ["pro"]]])
+  expected: |
+    [None, None, 'required', 'out of range', 'out of range', 'not a number', 'not a number']
+    [None, None, 'out of range', None]
+    [None, None, 'out of range', 'not a string']
+    [None, 'out of range', 'required']
+    [None, 'required', 'required', 'unknown option', 'unknown option']
+  hints:
+    - "Три пастки з уроку: not value вважає 0 порожнім, field.get(\"max\") or ... губить межу 0, а True проходить isinstance(value, int)."
+    - "Відсутню межу замініть на нескінченність: low = field.get(\"min\"); low = low if low is not None else float(\"-inf\"). Тоді перевірка це if not low <= value <= high."
+    - "Порожнеча: if value is None or value == \"\" or value == []: return \"required\" if field[\"required\"] else None. Для числа: if isinstance(value, bool) or not isinstance(value, (int, float)): return \"not a number\"."
+  solution: |
+    def validate_answer(field: dict, value: object) -> str | None:
+        if value is None or value == "" or value == []:
+            return "required" if field["required"] else None
+        low = field.get("min")
+        high = field.get("max")
+        low = low if low is not None else float("-inf")
+        high = high if high is not None else float("inf")
+        if field["type"] == "number":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return "not a number"
+            if not low <= value <= high:
+                return "out of range"
+        elif field["type"] == "text":
+            if not isinstance(value, str):
+                return "not a string"
+            if not low <= len(value) <= high:
+                return "out of range"
+        elif field["type"] == "choice":
+            if value not in field["options"]:
+                return "unknown option"
+        return None
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    a = [1, 2]
+    b = [1, 2]
+    print(a == b, a is b)
+    ```
+  options: ["True False", "False False", "True True", "False True"]
+  answer: 0
+  explain: |
+    `==` порівнює вміст списків поелементно, тож `True`; `is` питає, чи це один об'єкт, а це два різні списки,
+    тож `False`. `False False` це JS-інтуїція, де `[1, 2] == [1, 2]` і `===` обидва порівнюють посилання.
+    `True True` плутає `is` зі "строгим ==". `False True` неможливе: той самий об'єкт завжди дорівнює собі
+    для списку.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    print([1, 2] == (1, 2), {"a": 1, "b": 2} == {"b": 2, "a": 1})
+    ```
+  options: ["False True", "True True", "False False", "TypeError"]
+  answer: 0
+  explain: |
+    Список і кортеж різні типи, і `==` не приводить їх один до одного, тому `False` без помилки. Словники рівні,
+    якщо в них однакові пари ключ-значення, порядок вставки при порівнянні не важить, тому `True`.
+    `True True` це очікування "порівнюється лише вміст". `False False` це досвід з `JSON.stringify`, чутливим
+    до порядку ключів. `TypeError` дають порівняння порядку (`<`) між різними типами, а не `==`.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    count = 0
+    print(count or 10, count and 10)
+    ```
+  options: ["10 0", "0 10", "10 False", "True False"]
+  answer: 0
+  explain: |
+    `or` повертає перший truthy-операнд або останній: `0` falsy, тож `10`. `and` повертає перший falsy-операнд
+    або останній: `0` falsy, тож саме `0`. `0 10` це очікування поведінки `??`, якого в Python немає.
+    `10 False` і `True False` виходять з думки, що логічні оператори повертають `bool`; у Python, як і в JS,
+    вони повертають один з операндів.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    x = 3
+    print(x == 1 or 2)
+    ```
+  options: ["False", "2", "True", "SyntaxError"]
+  answer: 1
+  explain: |
+    `==` має вищий пріоритет за `or`, тож це `(x == 1) or 2`. Ліва частина `False`, і `or` повертає правий
+    операнд, число `2`. `False` це прочитання "x дорівнює 1 або 2", яке Python не підтримує; правильна форма
+    `x in (1, 2)`. `True` вийшло б, якби `or` повертав `bool`. `SyntaxError` ні: вираз легальний,
+    і саме тому пастка небезпечна, в `if` він завжди істинний.

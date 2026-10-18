@@ -1,0 +1,421 @@
+- id: t1
+  type: code
+  title: "Тривалість між двома ISO-мітками"
+  prompt: |
+    Фронтенд присилає дві мітки часу у форматі ISO 8601: з `Z` або з явним зсувом.
+    Напишіть `duration_seconds(start, end)`, яка повертає кількість секунд між ними як `float`.
+
+    Мітки можуть бути в різних зсувах: `09:30Z` і `12:31+03:00` це різниця в одну хвилину,
+    а не в три години. Різниця може бути більшою за добу, тож потрібна повна тривалість,
+    а не лише "секундна частина".
+
+    ```python
+    duration_seconds("2026-10-18T09:30:00Z", "2026-10-18T09:31:30Z")         # 90.0
+    duration_seconds("2026-10-18T09:30:00Z", "2026-10-18T12:31:30.5+03:00")  # 90.5
+    ```
+  starter: |
+    from datetime import datetime
+
+
+    def duration_seconds(start: str, end: str) -> float:
+        ...
+  harness: |
+    print(duration_seconds("2026-10-18T09:30:00Z", "2026-10-18T09:31:30Z"))
+    print(duration_seconds("2026-10-18T09:30:00Z", "2026-10-18T12:31:30.5+03:00"))
+    print(duration_seconds("2026-10-18T23:59:00Z", "2026-10-19T00:01:00Z"))
+    print(duration_seconds("2026-10-17T09:30:00Z", "2026-10-18T09:30:10Z"))
+    print(duration_seconds("2026-10-18T09:30:00Z", "2026-10-18T09:30:00Z"))
+  expected: |
+    90.0
+    90.5
+    120.0
+    86410.0
+    0.0
+  hints:
+    - "Обидва рядки парсяться одним методом класу datetime, який з 3.11 розуміє `Z`. Віднімання двох aware datetime дає timedelta, і зсуви враховуються автоматично."
+    - "У timedelta є атрибут `.seconds` і метод `.total_seconds()`. Атрибут містить лише залишок після цілих днів, тож на четвертому виклику він дасть 10."
+    - "return (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()"
+  solution: |
+    from datetime import datetime
+
+
+    def duration_seconds(start: str, end: str) -> float:
+        started = datetime.fromisoformat(start)
+        finished = datetime.fromisoformat(end)
+        return (finished - started).total_seconds()
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "На вході тільки aware, на виході тільки UTC"
+  prompt: |
+    Напишіть `to_utc(value)`, яку сервіс викликає на межі перед записом будь-якої мітки часу.
+
+    - aware `datetime` у будь-якому зсуві повертається як той самий момент у UTC;
+    - naive `datetime` (без `tzinfo`) не вгадується: функція кидає `ValueError` з повідомленням
+      `naive datetime: <isoformat значення>`.
+
+    Не перетворюйте naive через `astimezone`: він мовчки прийме локальний пояс машини, а саме цього
+    функція має не допустити. Часові пояси в перевірці задані фіксованими зсувами `timezone(timedelta(hours=...))`.
+
+    ```python
+    to_utc(datetime(2026, 10, 18, 12, 30, tzinfo=timezone(timedelta(hours=3))))
+    # datetime(2026, 10, 18, 9, 30, tzinfo=UTC)
+    to_utc(datetime(2026, 10, 18, 9, 30))
+    # ValueError: naive datetime: 2026-10-18T09:30:00
+    ```
+  starter: |
+    from datetime import UTC, datetime
+
+
+    def to_utc(value: datetime) -> datetime:
+        ...
+  harness: |
+    from datetime import timedelta, timezone
+
+    print(to_utc(datetime(2026, 10, 18, 12, 30, tzinfo=timezone(timedelta(hours=3)))).isoformat())
+    print(to_utc(datetime(2026, 10, 18, 9, 30, tzinfo=UTC)).isoformat())
+    print(to_utc(datetime(2026, 10, 18, 20, 0, tzinfo=timezone(timedelta(hours=-5)))).isoformat())
+    print(to_utc(datetime(2026, 10, 18, 9, 30, tzinfo=timezone(timedelta(hours=5, minutes=30)))).isoformat())
+    try:
+        to_utc(datetime(2026, 10, 18, 9, 30))
+    except ValueError as e:
+        print("ValueError:", e)
+  expected: |
+    2026-10-18T09:30:00+00:00
+    2026-10-18T09:30:00+00:00
+    2026-10-19T01:00:00+00:00
+    2026-10-18T04:00:00+00:00
+    ValueError: naive datetime: 2026-10-18T09:30:00
+  hints:
+    - "Naive це datetime, у якого `tzinfo is None`. Перевірте це до будь-яких перетворень."
+    - "Для aware достатньо `value.astimezone(UTC)`: момент той самий, змінюється лише зсув у поданні."
+    - "if value.tzinfo is None: raise ValueError(f\"naive datetime: {value.isoformat()}\"); return value.astimezone(UTC)"
+  solution: |
+    from datetime import UTC, datetime
+
+
+    def to_utc(value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(f"naive datetime: {value.isoformat()}")
+        return value.astimezone(UTC)
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Генератор днів і робочі дні"
+  prompt: |
+    Напишіть дві функції.
+
+    `iter_days(start, end)` це генератор (функція з `yield`), який віддає кожну дату з напіввідкритого
+    інтервалу `[start, end)`: `start` входить, `end` ні, як у `range`. Список усередині не будувати.
+
+    `business_days(start, end)` повертає список дат з того самого інтервалу без суботи й неділі.
+    Використайте `iter_days` і номер дня тижня, де понеділок це `0`.
+
+    ```python
+    list(iter_days(date(2026, 10, 16), date(2026, 10, 19)))
+    # [date(2026, 10, 16), date(2026, 10, 17), date(2026, 10, 18)]
+    business_days(date(2026, 10, 16), date(2026, 10, 20))
+    # [date(2026, 10, 16), date(2026, 10, 19)]   пт і пн
+    ```
+  starter: |
+    from collections.abc import Iterator
+    from datetime import date, timedelta
+
+
+    def iter_days(start: date, end: date) -> Iterator[date]:
+        ...
+
+
+    def business_days(start: date, end: date) -> list[date]:
+        ...
+  harness: |
+    gen = iter_days(date(2026, 10, 16), date(2026, 10, 20))
+    print(type(gen).__name__)
+    print([d.isoformat() for d in gen])
+    print([d.isoformat() for d in iter_days(date(2026, 2, 27), date(2026, 3, 2))])
+    print([d.isoformat() for d in business_days(date(2026, 10, 16), date(2026, 10, 20))])
+    print(len(business_days(date(2026, 10, 1), date(2026, 11, 1))))
+    print(business_days(date(2026, 10, 18), date(2026, 10, 18)))
+  expected: |
+    generator
+    ['2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19']
+    ['2026-02-27', '2026-02-28', '2026-03-01']
+    ['2026-10-16', '2026-10-19']
+    22
+    []
+  hints:
+    - "Генератор тримає поточну дату в локальній змінній і крутить while, поки вона менша за end. Крок це timedelta на один день: про довжину місяців дбає date."
+    - "`weekday()` дає 0 для понеділка і 6 для неділі, тож робочі дні це `weekday() < 5`. `isoweekday()` рахує з 1 до 7."
+    - "current = start; while current < end: yield current; current += timedelta(days=1). Далі [d for d in iter_days(start, end) if d.weekday() < 5]."
+  solution: |
+    from collections.abc import Iterator
+    from datetime import date, timedelta
+
+
+    def iter_days(start: date, end: date) -> Iterator[date]:
+        current = start
+        while current < end:
+            yield current
+            current += timedelta(days=1)
+
+
+    def business_days(start: date, end: date) -> list[date]:
+        return [d for d in iter_days(start, end) if d.weekday() < 5]
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Межі локального дня в UTC"
+  prompt: |
+    Звіт "задачі за сьогодні" користувач бачить у своєму поясі, а в базі мітки лежать в UTC.
+    Щоб вибрати записи, потрібні межі локального дня, переведені в UTC.
+
+    Напишіть `local_day_bounds(instant, tz)`. `instant` це aware `datetime` (будь-який зсув), `tz` це пояс
+    користувача. Функція повертає кортеж `(start, end)` в UTC, де `start` це північ того локального дня,
+    у який потрапляє `instant`, а `end` це північ наступного локального дня (інтервал напіввідкритий).
+
+    Зверніть увагу: локальний день визначається після переведення `instant` у `tz`, а не за датою
+    в UTC. `22:30Z` у поясі `+03:00` це вже наступна доба.
+
+    У перевірці пояси задані фіксованими зсувами `timezone(timedelta(hours=...))`; з `ZoneInfo` той
+    самий код працює й на днях переходу на літній час, якщо `end` рахувати як північ наступної
+    дати, а не як `start + 24 години` в UTC.
+  starter: |
+    from datetime import UTC, datetime, time, timedelta, tzinfo
+
+
+    def local_day_bounds(instant: datetime, tz: tzinfo) -> tuple[datetime, datetime]:
+        ...
+  harness: |
+    from datetime import timezone
+
+    def show(bounds):
+        start, end = bounds
+        print(start.isoformat(), "..", end.isoformat())
+
+    plus3 = timezone(timedelta(hours=3))
+    minus5 = timezone(timedelta(hours=-5))
+    show(local_day_bounds(datetime(2026, 10, 18, 9, 30, tzinfo=UTC), plus3))
+    show(local_day_bounds(datetime(2026, 10, 18, 22, 30, tzinfo=UTC), plus3))
+    show(local_day_bounds(datetime(2026, 10, 18, 3, 0, tzinfo=UTC), minus5))
+    show(local_day_bounds(datetime(2026, 10, 18, 1, 0, tzinfo=plus3), UTC))
+  expected: |
+    2026-10-17T21:00:00+00:00 .. 2026-10-18T21:00:00+00:00
+    2026-10-18T21:00:00+00:00 .. 2026-10-19T21:00:00+00:00
+    2026-10-17T05:00:00+00:00 .. 2026-10-18T05:00:00+00:00
+    2026-10-17T00:00:00+00:00 .. 2026-10-18T00:00:00+00:00
+  hints:
+    - "Три кроки: перевести instant у tz і взяти дату; зібрати з цієї дати північ у tz; перевести обидві межі в UTC."
+    - "`datetime.combine(local_date, time.min, tzinfo=tz)` дає північ локального дня як aware datetime. Наступна північ це та сама конструкція з `local_date + timedelta(days=1)`."
+    - "local_date = instant.astimezone(tz).date(); start = datetime.combine(local_date, time.min, tzinfo=tz); end = datetime.combine(local_date + timedelta(days=1), time.min, tzinfo=tz); return start.astimezone(UTC), end.astimezone(UTC)"
+  solution: |
+    from datetime import UTC, datetime, time, timedelta, tzinfo
+
+
+    def local_day_bounds(instant: datetime, tz: tzinfo) -> tuple[datetime, datetime]:
+        local_date = instant.astimezone(tz).date()
+        start = datetime.combine(local_date, time.min, tzinfo=tz)
+        end = datetime.combine(local_date + timedelta(days=1), time.min, tzinfo=tz)
+        return start.astimezone(UTC), end.astimezone(UTC)
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Звіт по задачах генерації"
+  prompt: |
+    Задачі генерації статики зберігаються як словники з ISO-рядками:
+    `{"id": "build-2", "created_at": "2026-10-18T09:00:00Z", "finished_at": "2026-10-18T12:01:35.25+03:00"}`.
+    У `finished_at` може бути `None`, якщо задача ще виконується. Зсуви в рядках різні: частину міток
+    записав старий сервіс у локальному часі з `+03:00`.
+
+    Напишіть `job_report(jobs, tz, now, ttl)`, яка повертає список рядків, по одному на задачу,
+    відсортований за справжнім моментом `created_at` (не за рядком).
+
+    Кожен рядок починається з `"<id> <created_at у поясі tz як %d.%m %H:%M>"`, далі одне з трьох:
+
+    - ` expired`, якщо від `created_at` до `now` минуло більше за `ttl`;
+    - ` running <N>m`, якщо задача не завершена; `N` це повні хвилини від `created_at` до `now`, з відкиданням залишку;
+    - ` done in <S>s`, якщо завершена; `S` це ціле число секунд між `created_at` і `finished_at`, дробову частину відкинути.
+
+    `now` передається параметром, а не береться з годинника: так функцію можна перевірити.
+
+    ```python
+    job_report([...], timezone(timedelta(hours=3)), datetime(2026, 10, 18, 9, 30, tzinfo=UTC), timedelta(days=14))
+    # ['build-1 01.10 11:00 expired', 'build-3 18.10 11:57 running 32m', ...]
+    ```
+  starter: |
+    from datetime import datetime, timedelta, tzinfo
+
+
+    def job_report(jobs: list[dict], tz: tzinfo, now: datetime, ttl: timedelta) -> list[str]:
+        ...
+  harness: |
+    from datetime import UTC, timezone
+
+    jobs = [
+        {"id": "build-2", "created_at": "2026-10-18T09:00:00Z", "finished_at": "2026-10-18T12:01:35.25+03:00"},
+        {"id": "build-3", "created_at": "2026-10-18T11:57:20+03:00", "finished_at": None},
+        {"id": "build-1", "created_at": "2026-10-01T08:00:00Z", "finished_at": "2026-10-01T08:00:42Z"},
+        {"id": "build-4", "created_at": "2026-10-18T09:05:00Z", "finished_at": "2026-10-18T09:05:07Z"},
+    ]
+    now = datetime(2026, 10, 18, 9, 30, tzinfo=UTC)
+    for line in job_report(jobs, timezone(timedelta(hours=3)), now, timedelta(days=14)):
+        print(line)
+    print("---")
+    for line in job_report(jobs, UTC, now, timedelta(days=30)):
+        print(line)
+    print(job_report([], UTC, now, timedelta(days=1)))
+  expected: |
+    build-1 01.10 11:00 expired
+    build-3 18.10 11:57 running 32m
+    build-2 18.10 12:00 done in 95s
+    build-4 18.10 12:05 done in 7s
+    ---
+    build-1 01.10 08:00 done in 42s
+    build-3 18.10 08:57 running 32m
+    build-2 18.10 09:00 done in 95s
+    build-4 18.10 09:05 done in 7s
+    []
+  hints:
+    - "Спершу розпарсіть рядки в aware datetime і сортуйте за ними: рядок `11:57:20+03:00` лексикографічно більший за `09:00:00Z`, хоча момент раніший."
+    - "Віднімання двох aware datetime дає timedelta. Повні хвилини дає ділення timedelta на timedelta з відкиданням: `delta // timedelta(minutes=1)`. Цілі секунди: `int(delta.total_seconds())`."
+    - "Для дати в поясі tz: f\"{created.astimezone(tz):%d.%m %H:%M}\". Порядок перевірок: спершу ttl, потім finished_at is None, потім done."
+  solution: |
+    from datetime import datetime, timedelta, tzinfo
+
+
+    def job_report(jobs: list[dict], tz: tzinfo, now: datetime, ttl: timedelta) -> list[str]:
+        parsed = []
+        for job in jobs:
+            created = datetime.fromisoformat(job["created_at"])
+            raw_finished = job["finished_at"]
+            finished = datetime.fromisoformat(raw_finished) if raw_finished else None
+            parsed.append((created, job["id"], finished))
+
+        lines = []
+        for created, job_id, finished in sorted(parsed, key=lambda item: item[0]):
+            label = f"{job_id} {created.astimezone(tz):%d.%m %H:%M}"
+            if now - created > ttl:
+                lines.append(f"{label} expired")
+            elif finished is None:
+                minutes = (now - created) // timedelta(minutes=1)
+                lines.append(f"{label} running {minutes}m")
+            else:
+                seconds = int((finished - created).total_seconds())
+                lines.append(f"{label} done in {seconds}s")
+        return lines
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from datetime import UTC, datetime
+
+    a = datetime(2026, 10, 18, 9, 30)
+    b = datetime(2026, 10, 18, 9, 30, tzinfo=UTC)
+    print(a == b)
+    print(a < b)
+    ```
+  options:
+    - "`True`, потім `False`"
+    - "`False`, потім `TypeError`"
+    - "`TypeError` уже на першому `print`"
+    - "`False`, потім `False`"
+  answer: 1
+  explain: |
+    Naive і aware datetime не можна впорядкувати: `<` кидає `TypeError: can't compare offset-naive and offset-aware datetimes`.
+    А `==` між ними не падає, а завжди повертає `False`, бо рівність у Python не має права кидати виняток
+    (інакше такі об'єкти ламали б `in` і пошук у словнику). `True` це інтуїція "naive це і є UTC", яка в Python
+    хибна: naive не означає жодного поясу. `TypeError` на першому рядку здається послідовним, але для `==` зроблено
+    виняток. `False`/`False` це очікування JS, де `Date` завжди порівнюється як число мілісекунд.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from datetime import timedelta
+
+    print(timedelta(hours=-1).seconds)
+    ```
+  options: ["-3600", "82800", "3600", "0"]
+  answer: 1
+  explain: |
+    `timedelta` зберігає три нормалізовані поля: `days`, `seconds` у діапазоні `0..86399` і `microseconds`.
+    Мінус година зберігається як `days=-1, seconds=82800`, тобто "мінус доба плюс 23 години", і `repr` це показує:
+    `-1 day, 23:00:00`. `-3600` це те, що повертає `total_seconds()`, і саме його треба брати для тривалості.
+    `3600` це очікування модуля, а `0` плутає `.seconds` з цілими хвилинами чи годинами.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код? У Києві 29 березня 2026 року о 03:00 годинник переводять на 04:00.
+    ```python
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    KYIV = ZoneInfo("Europe/Kyiv")
+    before = datetime(2026, 3, 28, 12, 0, tzinfo=KYIV)
+    after = datetime(2026, 3, 29, 12, 0, tzinfo=KYIV)
+    print(after - before)
+    ```
+  options: ["1 day, 0:00:00", "23:00:00", "1 day, 1:00:00", "ValueError: ambiguous time"]
+  answer: 0
+  explain: |
+    Якщо обидва datetime мають той самий об'єкт `tzinfo`, Python рахує різницю за настінним годинником і ігнорує
+    зсуви: від полудня до полудня рівно доба. Реальних годин минуло 23, і це видно лише після переведення обох у UTC:
+    `after.astimezone(UTC) - before.astimezone(UTC)` дає `23:00:00`. Саме тому тривалості рахують в UTC.
+    `1 day, 1:00:00` переплутав напрям переходу (весною годину забирають). `ValueError` не буває: `datetime`
+    ніколи не кидає виняток на перехідних часах, неоднозначність вирішує атрибут `fold`.
+
+- id: q4
+  type: quiz
+  question: |
+    18 жовтня 2026 року це неділя. Що надрукує код?
+    ```python
+    from datetime import date
+
+    d = date(2026, 10, 18)
+    print(d.weekday(), d.isoweekday())
+    ```
+  options: ["0 7", "6 7", "0 0", "6 0"]
+  answer: 1
+  explain: |
+    Обидва методи вважають понеділок першим днем тижня: `weekday()` рахує з нуля (пн `0`, нд `6`), `isoweekday()`
+    за ISO 8601 з одиниці (пн `1`, нд `7`). `0` для неділі це `Date.prototype.getDay()` з JS, де тиждень починається
+    з неділі, і саме ця звичка ламає перевірки на вихідні при перенесенні коду.
+
+- id: p1
+  type: project
+  title: "Модуль часу для задач генерації"
+  prompt: |
+    У капстоуні додайте модуль `src/formbuilder/timeutils.py`, через який проходить увесь час у проєкті.
+
+    - `Clock = Callable[[], datetime]` і `utc_now() -> datetime`, що повертає aware UTC.
+    - `to_utc(value: datetime) -> datetime` з завдання t2: naive дає `ValueError`.
+    - `parse_iso(raw: str) -> datetime`: `fromisoformat` + `to_utc`; рядок без зсуву це помилка.
+    - `format_local(value: datetime, tz: str = "Europe/Kyiv") -> str` у форматі `18.10.2026 12:30`.
+    - `is_expired(created_at: datetime, ttl: timedelta, clock: Clock = utc_now) -> bool` для TTL старих версій статики.
+    - `@dataclass` `JobTiming` з полями `created_at`, `finished_at: datetime | None` і `duration_s: float | None`,
+      і контекстний менеджер або функція-обгортка `timed(fn, clock=utc_now)`, яка ставить `created_at`/`finished_at`
+      з `clock`, а `duration_s` міряє через `time.perf_counter()`.
+
+    Додайте залежність `tzdata` (`uv add tzdata`), щоб `ZoneInfo` працював у slim-образі Docker без системної бази.
+    Тести в `tests/test_timeutils.py` не звертаються до реального годинника: усюди `clock=lambda: FIXED`.
+  checklist:
+    - "`tzdata` є в `[project] dependencies`, `uv.lock` оновлено"
+    - "`to_utc` і `parse_iso` кидають `ValueError` на naive і на рядку без зсуву; `parse_iso(\"2026-10-18T12:30:00+03:00\")` дає `09:30` UTC"
+    - "`format_local` перевірено на обох боках переходу на зимовий час: `2026-10-25T00:30Z` дає `03:30`, `2026-10-25T01:30Z` теж `03:30`"
+    - "`is_expired` перевірено з фіксованим `clock` на межі TTL (рівно `ttl` ще не прострочено)"
+    - "`JobTiming` з `timed` має `created_at` і `finished_at` з tzinfo UTC, `duration_s >= 0`; тест не залежить від реального часу, крім перевірки знака тривалості"
+    - "`ruff check` і `mypy` проходять для нового модуля"
+  verify: "cd capstone && uv run pytest tests/test_timeutils.py -q"

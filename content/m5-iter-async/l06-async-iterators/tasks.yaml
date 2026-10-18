@@ -1,0 +1,531 @@
+- id: t1
+  type: code
+  title: "Асинхронний Countdown на протоколі"
+  prompt: |
+    Напишіть клас `AsyncCountdown(start, delay)` без генераторів, лише через протокол:
+    `__aiter__` і `__anext__`. Перед кожним елементом ітератор чекає `delay` секунд через
+    `asyncio.sleep`, віддає `start, start - 1, ..., 1`, а потім сигналізує кінець.
+
+    ```python
+    async for n in AsyncCountdown(3, 0.01):
+        print(n)          # 3, 2, 1
+    await anext(aiter(AsyncCountdown(0, 0.01)), "empty")   # "empty"
+    ```
+  starter: |
+    import asyncio
+
+    class AsyncCountdown:
+        def __init__(self, start: int, delay: float) -> None:
+            ...
+  harness: |
+    async def main() -> None:
+        async for n in AsyncCountdown(3, 0.01):
+            print(n)
+        print(await anext(aiter(AsyncCountdown(0, 0.01)), "empty"))
+        it = aiter(AsyncCountdown(1, 0.01))
+        print(it is aiter(it))
+
+    asyncio.run(main())
+  expected: |
+    3
+    2
+    1
+    empty
+    True
+  hints:
+    - "Стан (поточне число) зберігається в атрибуті екземпляра. __aiter__ звичайний def і повертає self; __anext__ async def."
+    - "Кінець сигналізується не return і не None, а винятком StopAsyncIteration з __anext__."
+    - "async def __anext__(self) -> int: if self.current <= 0: raise StopAsyncIteration; await asyncio.sleep(self.delay); self.current -= 1; return self.current + 1"
+  solution: |
+    import asyncio
+
+    class AsyncCountdown:
+        def __init__(self, start: int, delay: float) -> None:
+            self.current = start
+            self.delay = delay
+
+        def __aiter__(self) -> "AsyncCountdown":
+            return self
+
+        async def __anext__(self) -> int:
+            if self.current <= 0:
+                raise StopAsyncIteration
+            await asyncio.sleep(self.delay)
+            self.current -= 1
+            return self.current + 1
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що станеться під час запуску?
+    ```python
+    import asyncio
+
+    async def pages():
+        yield "page 1"
+        yield "page 2"
+
+    async def main() -> None:
+        for p in pages():
+            print(p)
+
+    asyncio.run(main())
+    ```
+  options:
+    - "Надрукує page 1 і page 2: усередині async def звичайний for сам чекає елементи"
+    - "TypeError: 'async_generator' object is not iterable"
+    - "Надрукує два об'єкти корутин, а в stderr з'явиться RuntimeWarning про never awaited"
+    - "Нічого не надрукує: цикл порожній, бо генератор ще не стартував"
+  answer: 1
+  explain: |
+    Асинхронний генератор реалізує лише `__aiter__`/`__anext__`, а звичайний `for` шукає
+    `__iter__`, тож падає ще до першої ітерації. Варіант 1 це надія, що контекст `async def`
+    змінює поведінку `for`: не змінює, асинхронна ітерація пишеться лише явно через `async for`.
+    Варіант 3 описує, що було б, якби `for` викликав `__anext__` і не чекав результат; але до
+    `__anext__` справа не доходить. Варіант 4 переносить ідею "генератор лінивий" не туди:
+    лінивість означає, що тіло не виконується до запиту, а не що ітерація тихо порожня.
+
+- id: t2
+  type: code
+  title: "Пагінація асинхронним генератором"
+  prompt: |
+    API віддає поля форми сторінками: `await fetch_page(page)` повертає
+    `{"items": [...], "has_more": bool}`, сторінки нумеруються з 1. Напишіть асинхронний
+    генератор `iter_items(fetch_page)`, який віддає елементи всіх сторінок по одному і запитує
+    наступну сторінку лише тоді, коли попередня вичерпана, а `has_more` істинний.
+
+    ```python
+    async for field in iter_items(fetch_page):
+        ...           # email, phone, age, city, note; запити: 1, 2, 3
+    ```
+    Якщо споживач зупинився на першому елементі, має бути зроблено рівно один запит.
+  starter: |
+    import asyncio
+    from collections.abc import AsyncIterator, Awaitable, Callable
+
+    async def iter_items(fetch_page: Callable[[int], Awaitable[dict]]) -> AsyncIterator[str]:
+        ...
+  harness: |
+    PAGES = [["email", "phone"], ["age", "city"], ["note"]]
+    calls: list[int] = []
+
+    async def fetch_page(page: int) -> dict:
+        calls.append(page)
+        await asyncio.sleep(0.01)
+        return {"items": PAGES[page - 1], "has_more": page < len(PAGES)}
+
+    async def main() -> None:
+        items = []
+        async for field in iter_items(fetch_page):
+            items.append(field)
+        print(items)
+        print("calls:", calls)
+
+        calls.clear()
+        async for field in iter_items(fetch_page):
+            print("first:", field)
+            break
+        print("calls:", calls)
+
+    asyncio.run(main())
+  expected: |
+    ['email', 'phone', 'age', 'city', 'note']
+    calls: [1, 2, 3]
+    first: email
+    calls: [1]
+  hints:
+    - "Це async def з yield усередині циклу по сторінках. Номер сторінки це локальна змінна генератора, вона доживе між yield."
+    - "yield from в асинхронному генераторі заборонений: елементи сторінки віддаються вкладеним for item in data['items']: yield item."
+    - "page = 1; while True: data = await fetch_page(page); for item in data['items']: yield item; if not data['has_more']: return; page += 1"
+  solution: |
+    import asyncio
+    from collections.abc import AsyncIterator, Awaitable, Callable
+
+    async def iter_items(fetch_page: Callable[[int], Awaitable[dict]]) -> AsyncIterator[str]:
+        page = 1
+        while True:
+            data = await fetch_page(page)
+            for item in data["items"]:
+                yield item
+            if not data["has_more"]:
+                return
+            page += 1
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Оренда з'єднання з пулу"
+  prompt: |
+    Напишіть асинхронний контекстний менеджер `lease(pool)`. На вході він бере з'єднання
+    через `await pool.acquire()` і віддає його в `as`. На виході завжди повертає з'єднання
+    через `await pool.release(conn)`. Якщо тіло `async with` впало, перед поверненням
+    з'єднання треба скинути через `await conn.reset()`, а виняток має полетіти далі без змін.
+
+    ```python
+    async with lease(pool) as conn:
+        await conn.query("select 1")
+    # pool.log: ['acquire c1', 'c1: select 1', 'release c1']
+    ```
+  starter: |
+    import asyncio
+    from collections.abc import AsyncIterator
+    from contextlib import asynccontextmanager
+
+    class FakeConn:
+        def __init__(self, name: str, log: list[str]) -> None:
+            self.name, self.log = name, log
+
+        async def query(self, sql: str) -> str:
+            await asyncio.sleep(0.01)
+            self.log.append(f"{self.name}: {sql}")
+            return "ok"
+
+        async def reset(self) -> None:
+            await asyncio.sleep(0.01)
+            self.log.append(f"{self.name}: reset")
+
+    class FakePool:
+        def __init__(self) -> None:
+            self.log: list[str] = []
+            self.counter = 0
+
+        async def acquire(self) -> FakeConn:
+            await asyncio.sleep(0.01)
+            self.counter += 1
+            conn = FakeConn(f"c{self.counter}", self.log)
+            self.log.append(f"acquire {conn.name}")
+            return conn
+
+        async def release(self, conn: FakeConn) -> None:
+            await asyncio.sleep(0.01)
+            self.log.append(f"release {conn.name}")
+
+    # ваш lease(pool) тут
+  harness: |
+    async def main() -> None:
+        pool = FakePool()
+        async with lease(pool) as conn:
+            await conn.query("select 1")
+        try:
+            async with lease(pool) as conn:
+                await conn.query("insert form")
+                raise ValueError("duplicate id")
+        except ValueError as e:
+            pool.log.append(f"caught: {e}")
+        for line in pool.log:
+            print(line)
+
+    asyncio.run(main())
+  expected: |
+    acquire c1
+    c1: select 1
+    release c1
+    acquire c2
+    c2: insert form
+    c2: reset
+    release c2
+    caught: duplicate id
+  hints:
+    - "@asynccontextmanager над async def з одним yield: код до yield це вхід, після нього вихід. Виняток з тіла прилітає в генератор у точці yield."
+    - "Обгорніть yield у try: except з reset і raise, а release поставте у finally, щоб він виконався в обох гілках."
+    - "conn = await pool.acquire(); try: yield conn / except BaseException: await conn.reset(); raise / finally: await pool.release(conn)"
+  solution: |
+    import asyncio
+    from collections.abc import AsyncIterator
+    from contextlib import asynccontextmanager
+
+    class FakeConn:
+        def __init__(self, name: str, log: list[str]) -> None:
+            self.name, self.log = name, log
+
+        async def query(self, sql: str) -> str:
+            await asyncio.sleep(0.01)
+            self.log.append(f"{self.name}: {sql}")
+            return "ok"
+
+        async def reset(self) -> None:
+            await asyncio.sleep(0.01)
+            self.log.append(f"{self.name}: reset")
+
+    class FakePool:
+        def __init__(self) -> None:
+            self.log: list[str] = []
+            self.counter = 0
+
+        async def acquire(self) -> FakeConn:
+            await asyncio.sleep(0.01)
+            self.counter += 1
+            conn = FakeConn(f"c{self.counter}", self.log)
+            self.log.append(f"acquire {conn.name}")
+            return conn
+
+        async def release(self, conn: FakeConn) -> None:
+            await asyncio.sleep(0.01)
+            self.log.append(f"release {conn.name}")
+
+    @asynccontextmanager
+    async def lease(pool: FakePool) -> AsyncIterator[FakeConn]:
+        conn = await pool.acquire()
+        try:
+            yield conn
+        except BaseException:
+            await conn.reset()
+            raise
+        finally:
+            await pool.release(conn)
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    У якому порядку друкуються рядки?
+    ```python
+    import asyncio
+
+    async def events():
+        try:
+            yield 1
+            yield 2
+        finally:
+            print("cleanup")
+
+    async def main() -> None:
+        stream = events()
+        async for e in stream:
+            print(e)
+            break
+        print("after loop")
+        await asyncio.sleep(0.01)
+        print("main end")
+
+    asyncio.run(main())
+    ```
+  options:
+    - "1, cleanup, after loop, main end"
+    - "1, after loop, cleanup, main end"
+    - "1, after loop, main end, cleanup"
+    - "1, after loop, main end; cleanup не надрукується ніколи"
+  answer: 2
+  explain: |
+    `break` не закриває асинхронний генератор, а посилання `stream` тримає його живим до кінця
+    `main`. Закриває його `asyncio.run`: після повернення `main` він викликає
+    `shutdown_asyncgens()`, і `finally` друкує `cleanup` останнім. Варіант 1 це поведінка
+    синхронного генератора або JS, де `break` у `for await` одразу викликає `return()`.
+    Варіант 2 був би близький до правди, якби посилання не було: тоді генератор зібрали б і
+    закрили через кілька ітерацій циклу, під час `sleep`. Варіант 4 недооцінює `asyncio.run`:
+    він закриває всі незакриті асинхронні генератори перед зупинкою циклу.
+
+- id: q3
+  type: quiz
+  question: |
+    Скільки приблизно триває `main`?
+    ```python
+    async def produce():
+        for i in range(3):
+            await asyncio.sleep(0.1)     # "завантажити" елемент
+            yield i
+
+    async def main() -> None:
+        async for i in produce():
+            await asyncio.sleep(0.1)     # "обробити" елемент
+    ```
+  options:
+    - "≈0.3 с: виробник і споживач працюють одночасно"
+    - "≈0.4 с: поки споживач обробляє елемент, генератор уже завантажує наступний"
+    - "≈0.6 с: кроки виробника й споживача строго чергуються"
+    - "≈0.1 с: усі sleep запускаються конкурентно на одному циклі"
+  answer: 2
+  explain: |
+    Генератор стоїть на `yield`, поки споживач не попросить наступний елемент, тому
+    0.1 завантаження + 0.1 обробки повторюються тричі. Варіант 2 описує буферизований стрім
+    з попереднім завантаженням, як у Node streams з `highWaterMark`; асинхронний генератор
+    такого не робить ні в Python, ні в JS. Варіанти 1 і 4 плутають "асинхронний" з
+    "паралельним": паралельність з'являється лише з Task, `as_completed` або продюсером із
+    чергою.
+
+- id: t4
+  type: code
+  title: "Стрім результатів у порядку завершення"
+  prompt: |
+    Напишіть асинхронний генератор `render_stream(jobs)`: запускає `render(name, delay)` для
+    всіх `jobs` одночасно і віддає пари `(name, html)` у порядку завершення, а не в порядку
+    `jobs`. `render` у стартері рахує пік одночасних викликів: для трьох задач він має бути 3.
+
+    ```python
+    async for name, html in render_stream([("landing", 0.03), ("signup", 0.01), ("survey", 0.02)]):
+        ...   # signup, survey, landing
+    ```
+  starter: |
+    import asyncio
+    from collections.abc import AsyncIterator
+
+    active = 0
+    peak = 0
+
+    async def render(name: str, delay: float) -> str:
+        global active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(delay)
+        active -= 1
+        return f"<{name}/>"
+
+    async def render_stream(jobs: list[tuple[str, float]]) -> AsyncIterator[tuple[str, str]]:
+        ...
+  harness: |
+    async def main() -> None:
+        jobs = [("landing", 0.03), ("signup", 0.01), ("survey", 0.02)]
+        async for name, html in render_stream(jobs):
+            print(name, html)
+        print("peak:", peak)
+
+    asyncio.run(main())
+  expected: |
+    signup <signup/>
+    survey <survey/>
+    landing <landing/>
+    peak: 3
+  hints:
+    - "Цикл з await render(...) усередині генератора дасть порядок jobs і peak 1. Потрібен інструмент, який віддає awaitable-и в порядку готовності."
+    - "asyncio.as_completed у 3.12 це звичайний ітератор: for fut in asyncio.as_completed(...): result = await fut. Щоб знати ім'я, обгорніть render у корутину, що повертає пару."
+    - "async def named(n, d): return n, await render(n, d); for fut in asyncio.as_completed([named(n, d) for n, d in jobs]): yield await fut"
+  solution: |
+    import asyncio
+    from collections.abc import AsyncIterator
+
+    active = 0
+    peak = 0
+
+    async def render(name: str, delay: float) -> str:
+        global active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(delay)
+        active -= 1
+        return f"<{name}/>"
+
+    async def render_stream(jobs: list[tuple[str, float]]) -> AsyncIterator[tuple[str, str]]:
+        async def named(name: str, delay: float) -> tuple[str, str]:
+            return name, await render(name, delay)
+
+        for fut in asyncio.as_completed([named(n, d) for n, d in jobs]):
+            yield await fut
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "merge: кілька потоків в один"
+  prompt: |
+    Напишіть асинхронний генератор `merge(*sources)`, який одночасно читає кілька асинхронних
+    iterable і віддає їхні елементи в порядку надходження. Потік закінчується, коли вичерпані
+    всі джерела. Якщо споживач перервав потік і закрив `merge` (через `aclosing`), усі
+    джерела мають бути зупинені до того, як `aclose` поверне керування: їхні `finally` мають
+    відпрацювати.
+
+    У харнесі `ticker("a", 3, 0.05)` віддає `a0, a1, a2` з інтервалом 50 мс, `ticker("b", 3, 0.02)`
+    віддає `b0, b1, b2` з інтервалом 20 мс. Усі моменти надходження різні (20, 40, 50, 60, 100,
+    150 мс), тому порядок однозначний.
+
+    ```python
+    [x async for x in merge(ticker("a", 3, 0.05, log), ticker("b", 3, 0.02, log))]
+    # ['b0', 'b1', 'a0', 'b2', 'a1', 'a2']
+    ```
+  starter: |
+    import asyncio
+    from collections.abc import AsyncIterable, AsyncIterator
+    from contextlib import aclosing
+
+    async def merge(*sources: AsyncIterable[str]) -> AsyncIterator[str]:
+        ...
+  harness: |
+    async def ticker(name: str, n: int, delay: float, log: list[str]):
+        try:
+            for i in range(n):
+                await asyncio.sleep(delay)
+                yield f"{name}{i}"
+        finally:
+            log.append(f"{name} closed")
+
+    async def main() -> None:
+        log: list[str] = []
+        print([x async for x in merge(ticker("a", 3, 0.05, log), ticker("b", 3, 0.02, log))])
+        print(log)
+
+        log = []
+        got = []
+        async with aclosing(merge(ticker("a", 3, 0.05, log), ticker("b", 3, 0.02, log))) as stream:
+            async for x in stream:
+                got.append(x)
+                if len(got) == 2:
+                    break
+        print(got, sorted(log))
+
+    asyncio.run(main())
+  expected: |
+    ['b0', 'b1', 'a0', 'b2', 'a1', 'a2']
+    ['b closed', 'a closed']
+    ['b0', 'b1'] ['a closed', 'b closed']
+  hints:
+    - "Патерн продюсер плюс черга: на кожне джерело окрема Task, яка проганяє його через async for і кладе елементи в asyncio.Queue. Генератор merge читає з черги й робить yield."
+    - "Як дізнатись, що джерела вичерпані: продюсер після циклу кладе в чергу sentinel, наприклад None (черга типу asyncio.Queue[str | None]), а merge рахує, скільки sentinel-ів отримав. Зупинка при перериванні: try/finally навколо циклу читання, у finally cancel() кожної задачі й await asyncio.gather(*tasks, return_exceptions=True)."
+    - "async def pump(src): async for x in src: queue.put_nowait(x); queue.put_nowait(None). tasks = [asyncio.create_task(pump(s)) for s in sources]; try: remaining = len(tasks); while remaining: item = await queue.get(); if item is None: remaining -= 1 else: yield item / finally: скасувати й дочекатись tasks."
+  solution: |
+    import asyncio
+    from collections.abc import AsyncIterable, AsyncIterator
+    from contextlib import aclosing
+
+    async def merge(*sources: AsyncIterable[str]) -> AsyncIterator[str]:
+        queue: asyncio.Queue[str | None] = asyncio.Queue()   # None: джерело вичерпане
+
+        async def pump(source: AsyncIterable[str]) -> None:
+            async for item in source:
+                queue.put_nowait(item)
+            queue.put_nowait(None)
+
+        tasks = [asyncio.create_task(pump(s)) for s in sources]
+        try:
+            remaining = len(tasks)
+            while remaining:
+                item = await queue.get()
+                if item is None:
+                    remaining -= 1
+                else:
+                    yield item
+        finally:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "Події статусу й пул воркерів у капстоуні"
+  prompt: |
+    Розширте `src/formbuilder/worker.py` з проєктного завдання m5-l05. Додайте до `GenerationJob`
+    чергу подій статусу і два публічні API, на які в модулі 7 спиратимуться lifespan (m7-l01) і
+    WebSocket-ендпоінт (m7-l04):
+
+    - `async def watch(job) -> AsyncGenerator[StatusEvent, None]`: віддає події `queued`,
+      `running`, `done` або `failed` (з текстом помилки) і завершується сам на термінальному
+      статусі. `StatusEvent` це Pydantic-модель або `TypedDict` з полями `job_id`, `status`,
+      `error`.
+    - `@asynccontextmanager async def worker_pool(n, render) -> AsyncIterator[Submitter]`:
+      на вході запускає `n` воркерів, віддає об'єкт із методом `submit(job)` (ставить `queued`
+      і кладе задачу в чергу), на виході чекає обробки черги і зупиняє воркерів через `cancel()`
+      і `gather(..., return_exceptions=True)` у `finally`.
+
+    Рендер і далі імітуйте через `asyncio.sleep`.
+  checklist:
+    - "`watch` для успішної задачі віддає рівно `queued → running → done` і завершується без зовнішнього `break`"
+    - "`render`, що кинув виняток, дає подію `failed` з текстом помилки, а воркер бере наступну задачу"
+    - "Виняток з тіла `async with worker_pool(...)` виходить назовні своїм типом, а не `ExceptionGroup`, і воркери при цьому зупинені"
+    - "Споживач, який перервав `watch` через `aclosing`, не лишає незакритого генератора: `finally` у `watch` відпрацьовує до виходу з `async with`"
+    - "`watch` анотований як `AsyncGenerator`, `uv run mypy --strict src/formbuilder/worker.py` проходить без помилок"
+    - "Тести на всі пункти в `tests/test_worker_events.py`"
+  verify: "cd capstone && uv run pytest tests/test_worker_events.py -q"

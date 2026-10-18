@@ -1,0 +1,460 @@
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from pathlib import Path
+
+    p = Path("dist/contact.tar.gz")
+    print(p.stem, p.with_suffix(".zip").name)
+    ```
+  options:
+    - "contact.tar contact.tar.zip"
+    - "contact contact.zip"
+    - "contact.tar contact.zip"
+    - "contact contact.tar.zip"
+  answer: 0
+  explain: |
+    `Path` вважає суфіксом лише частину після останньої крапки: `.suffix` дорівнює `.gz`, а `.stem`
+    це все до неї, `contact.tar`. `with_suffix` замінює так само лише останній суфікс, тому виходить
+    `contact.tar.zip`. Варіанти з `contact` і `contact.zip` відповідають інтуїції "розширення це все після
+    першої крапки", яку `Path` не поділяє; повний список розширень дає `.suffixes`, `['.tar', '.gz']`.
+    У Node `path.extname` поводиться так само, як `.suffix`, тож пастка тут не в Python, а в очікуванні
+    "архівного" розширення.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код на Linux або macOS?
+    ```python
+    from pathlib import Path
+
+    root = Path("/srv/out")
+    print(root / "/etc/passwd")
+    ```
+  options:
+    - "/srv/out/etc/passwd"
+    - "/etc/passwd"
+    - "ValueError: абсолютний шлях не можна приєднати"
+    - "/srv/out//etc/passwd"
+  answer: 1
+  explain: |
+    Якщо праворуч від `/` абсолютний шлях, ліва частина відкидається повністю: так поводиться і
+    `os.path.join`, і `path.resolve` у Node. `/srv/out/etc/passwd` це результат `path.join` у Node, який
+    просто склеює сегменти, і саме ця інтуїція робить `root / user_input` небезпечним: користувач, що
+    передав абсолютний шлях, виходить за корінь без жодного `..`. Помилки Python не кидає, а подвійних
+    роздільників `Path` не лишає ніколи.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код? Директорії `/srv/out` на диску може й не бути.
+    ```python
+    from pathlib import Path
+
+    root = Path("/srv/out")
+    target = root / "../secrets.json"
+    print(target.is_relative_to(root), target.resolve().is_relative_to(root))
+    ```
+  options:
+    - "True False"
+    - "False False"
+    - "True True"
+    - "ValueError: шлях виходить за межі кореня"
+  answer: 0
+  explain: |
+    `is_relative_to` порівнює частини шляху як текст і `..` не схлопує: `/srv/out/../secrets.json`
+    починається з частин `/srv`, `out`, тому перша перевірка `True`. Лише `resolve()` перетворює шлях
+    на `/srv/secrets.json`, і тоді перевірка чесно дає `False`. "False False" це очікування, що
+    `is_relative_to` сам нормалізує шлях; на цьому й будуються path traversal-вразливості. Винятку немає:
+    `is_relative_to` повертає `bool`, а `resolve()` у нестрогому режимі працює і для неіснуючих шляхів.
+
+- id: t1
+  type: code
+  title: "Ім'я файлу з хешем вмісту"
+  prompt: |
+    Збирачі фронтенду дописують хеш вмісту в ім'я файлу (`[name].[contenthash].js`), щоб CDN
+    кешував файли назавжди. Напишіть `cache_busted(path, digest)`, яка вставляє `digest` перед
+    останнім розширенням і повертає шлях рядком з роздільником `/`.
+
+    ```python
+    cache_busted("assets/app.js", "a1b2c3")         # 'assets/app.a1b2c3.js'
+    cache_busted("assets/vendor.min.js", "a1b2c3")  # 'assets/vendor.min.a1b2c3.js'
+    cache_busted("favicon", "a1b2c3")               # 'favicon.a1b2c3'
+    ```
+
+    Розбирайте шлях через `pathlib`, а не через `split(".")`.
+  starter: |
+    from pathlib import PurePosixPath
+
+
+    def cache_busted(path: str, digest: str) -> str:
+        ...
+  harness: |
+    print(cache_busted("assets/app.js", "a1b2c3"))
+    print(cache_busted("assets/vendor.min.js", "a1b2c3"))
+    print(cache_busted("img/icons/logo.svg", "ff00"))
+    print(cache_busted("favicon", "a1b2c3"))
+    print(cache_busted("app.js", "0"))
+  expected: |
+    assets/app.a1b2c3.js
+    assets/vendor.min.a1b2c3.js
+    img/icons/logo.ff00.svg
+    favicon.a1b2c3
+    app.0.js
+  hints:
+    - "Потрібні три частини шляху: директорія, ім'я без останнього розширення і саме розширення. У Path усі три є атрибутами."
+    - "p.stem і p.suffix дають 'vendor.min' і '.js'; нове ім'я склеюється f-рядком, а замінити ім'я в шляху вміє p.with_name(...)."
+    - "p = PurePosixPath(path); return str(p.with_name(f\"{p.stem}.{digest}{p.suffix}\"))"
+  solution: |
+    from pathlib import PurePosixPath
+
+
+    def cache_busted(path: str, digest: str) -> str:
+        p = PurePosixPath(path)
+        return str(p.with_name(f"{p.stem}.{digest}{p.suffix}"))
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Нормалізація текстового файлу: BOM і CRLF"
+  prompt: |
+    Конфіги форм іноді приходять з Windows: з BOM на початку і з `\r\n` у кінці рядків.
+    Напишіть `normalize_text_file(path)`, яка приводить файл до UTF-8 без BOM з кінцями рядків `\n`
+    і повертає `True`, якщо файл довелося переписати, і `False`, якщо він уже був нормальним
+    (тоді файл не перезаписується зовсім).
+
+    ```python
+    path.write_bytes(b"\xef\xbb\xbfa\r\nb\r\n")
+    normalize_text_file(path)   # True
+    path.read_bytes()           # b'a\nb\n'
+    normalize_text_file(path)   # False
+    ```
+
+    Вхідні файли завжди в UTF-8 (з BOM або без), окремих `\r` без `\n` у них немає.
+  starter: |
+    from pathlib import Path
+
+
+    def normalize_text_file(path: Path) -> bool:
+        ...
+  harness: |
+    import codecs
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        windows = root / "windows.json"
+        windows.write_bytes(codecs.BOM_UTF8 + '{"title": "Контакт"}\r\n'.encode())
+        clean = root / "clean.json"
+        clean.write_bytes('{"title": "Лід"}\n'.encode())
+        crlf = root / "crlf.txt"
+        crlf.write_bytes(b"a\r\nb\r\n")
+
+        print(normalize_text_file(windows), windows.read_bytes())
+        print(normalize_text_file(windows))
+        print(normalize_text_file(clean), clean.read_text(encoding="utf-8"), end="")
+        print(normalize_text_file(crlf), crlf.read_bytes())
+  expected: |
+    True b'{"title": "\xd0\x9a\xd0\xbe\xd0\xbd\xd1\x82\xd0\xb0\xd0\xba\xd1\x82"}\n'
+    False
+    False {"title": "Лід"}
+    True b'a\nb\n'
+  hints:
+    - "Порівнювати треба байти: прочитайте файл як bytes, побудуйте нормалізовані bytes і записуйте лише тоді, коли вони відрізняються."
+    - "Кодування utf-8-sig при декодуванні прибирає BOM, якщо він є, і нічого не робить, якщо його немає. Після цього лишається замінити '\\r\\n' на '\\n' і закодувати назад у utf-8."
+    - "raw = path.read_bytes(); new = raw.decode(\"utf-8-sig\").replace(\"\\r\\n\", \"\\n\").encode(\"utf-8\"); if new == raw: return False; path.write_bytes(new); return True"
+  solution: |
+    from pathlib import Path
+
+
+    def normalize_text_file(path: Path) -> bool:
+        raw = path.read_bytes()
+        normalized = raw.decode("utf-8-sig").replace("\r\n", "\n").encode("utf-8")
+        if normalized == raw:
+            return False
+        path.write_bytes(normalized)
+        return True
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Знайти конфіги форм"
+  prompt: |
+    Напишіть `find_configs(root)`, яка повертає всі файли `*.json` у дереві під `root`
+    на будь-якій глибині, крім тих, у відносному шляху яких є частина, що починається з `.` або `_`
+    (приховані й службові директорії та файли). Директорії, чиє ім'я закінчується на `.json`,
+    у результат не потрапляють.
+
+    Результат: відсортований список відносних шляхів від `root` з роздільником `/`.
+
+    ```python
+    find_configs(root)   # ['contact.json', 'lead/form.json', 'lead/old/v1.json']
+    ```
+  starter: |
+    from pathlib import Path
+
+
+    def find_configs(root: Path) -> list[str]:
+        ...
+  harness: |
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "forms"
+        for rel in ["lead/old/v1.json", "contact.json", ".draft.json", "lead/form.json",
+                    "_shared/base.json", "lead/theme.css", ".git/config.json",
+                    "lead/_partial.json", "quiz/README.md"]:
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}", encoding="utf-8")
+        (root / "legacy.json").mkdir()
+
+        print(find_configs(root))
+        print(find_configs(root / "lead"))
+        print(find_configs(root / "quiz"))
+  expected: |
+    ['contact.json', 'lead/form.json', 'lead/old/v1.json']
+    ['form.json', 'old/v1.json']
+    []
+  hints:
+    - "rglob знаходить усе за шаблоном рекурсивно, включно з дотфайлами і директоріями. Решта фільтрів це умова в comprehension, а порядок дасть лише sorted."
+    - "Для кожного знайденого p візьміть rel = p.relative_to(root): rel.parts дає частини шляху для перевірки startswith, а rel.as_posix() рядок для результату. Не забудьте p.is_file()."
+    - "for path in root.rglob(\"*.json\"): rel = path.relative_to(root); пропустити, якщо not path.is_file() або any(part.startswith((\".\", \"_\")) for part in rel.parts); інакше result.append(rel.as_posix()). Наприкінці return sorted(result)."
+  solution: |
+    from pathlib import Path
+
+
+    def find_configs(root: Path) -> list[str]:
+        result = []
+        for path in root.rglob("*.json"):
+            rel = path.relative_to(root)
+            if not path.is_file():
+                continue
+            if any(part.startswith((".", "_")) for part in rel.parts):
+                continue
+            result.append(rel.as_posix())
+        return sorted(result)
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Атомарний запис потоку байтів"
+  prompt: |
+    Рендерер віддає сторінку шматками через генератор і може впасти посередині.
+    Напишіть `atomic_write_bytes(path, chunks)`, яка:
+
+    - створює батьківські директорії `path`, якщо їх немає;
+    - пише всі шматки з `chunks` у тимчасовий файл у тій самій директорії, що й `path`;
+    - атомарно замінює ним `path` і повертає кількість записаних байтів;
+    - якщо `chunks` кинув виняток, лишає попередній `path` без змін, не лишає тимчасових файлів
+      і пропускає виняток далі.
+
+    ```python
+    atomic_write_bytes(index, iter([b"<main>", b"</main>"]))   # 13
+    ```
+  starter: |
+    import os
+    import tempfile
+    from collections.abc import Iterable
+    from pathlib import Path
+
+
+    def atomic_write_bytes(path: Path, chunks: Iterable[bytes]) -> int:
+        ...
+  harness: |
+    import tempfile
+    from pathlib import Path
+
+    def render(*parts: bytes, fail: bool = False):
+        yield from parts
+        if fail:
+            raise RuntimeError("render failed")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        index = root / "out" / "contact" / "index.html"
+        print(atomic_write_bytes(index, render(b"<main>", "Контакт".encode(), b"</main>")))
+        print(index.read_text(encoding="utf-8"))
+        try:
+            atomic_write_bytes(index, render(b"<main>", b"half", fail=True))
+        except RuntimeError as e:
+            print("error:", e)
+        print(index.read_text(encoding="utf-8"))
+        print(atomic_write_bytes(index, []))
+        print(repr(index.read_text(encoding="utf-8")))
+        print(sorted(p.relative_to(root).as_posix() for p in root.rglob("*")))
+  expected: |
+    27
+    <main>Контакт</main>
+    error: render failed
+    <main>Контакт</main>
+    0
+    ''
+    ['out', 'out/contact', 'out/contact/index.html']
+  hints:
+    - "Рецепт з уроку: tempfile.mkstemp(dir=path.parent) дає дескриптор і ім'я тимчасового файлу поруч із ціллю; вміст пишеться туди, а Path.replace ставить файл на місце. Батьківські директорії треба створити ще до mkstemp."
+    - "open(fd, \"wb\") загортає дескриптор у файловий об'єкт. Увесь запис і replace тримайте в try, а в except BaseException видаляйте тимчасовий файл через unlink(missing_ok=True) і робіть голий raise."
+    - "path.parent.mkdir(parents=True, exist_ok=True); fd, name = tempfile.mkstemp(dir=path.parent, suffix=\".tmp\"); tmp = Path(name); try: with open(fd, \"wb\") as f: total = sum(f.write(c) for c in chunks); tmp.replace(path); return total; except BaseException: tmp.unlink(missing_ok=True); raise"
+  solution: |
+    import os
+    import tempfile
+    from collections.abc import Iterable
+    from pathlib import Path
+
+
+    def atomic_write_bytes(path: Path, chunks: Iterable[bytes]) -> int:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+        tmp = Path(name)
+        try:
+            total = 0
+            with open(fd, "wb") as f:
+                for chunk in chunks:
+                    total += f.write(chunk)
+                f.flush()
+                os.fsync(f.fileno())
+            tmp.replace(path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        return total
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Синхронізація assets: rsync у мініатюрі"
+  prompt: |
+    Перед публікацією assets копіюються з `src` у `dst`, але копіювати все щоразу дорого.
+    Напишіть `sync_tree(src, dst)`, яка робить `dst` дзеркалом `src` для файлів:
+
+    - файл з `src`, якого немає в `dst` або який відрізняється розміром (`st_size`)
+      чи часом зміни (`st_mtime_ns`), копіюється зі збереженням часу зміни; потрібні
+      директорії створюються;
+    - файл у `dst`, якого немає в `src`, видаляється;
+    - решта файлів не чіпається;
+    - файли, у відносному шляху яких є частина, що починається з `.`, ігноруються з обох боків:
+      не копіюються, не видаляються і не потрапляють у звіт;
+    - `dst` може ще не існувати.
+
+    Повертає словник `{"copied": [...], "deleted": [...], "skipped": [...]}`, де кожен список
+    відсортований і містить відносні шляхи з `/`. Порожні директорії в `dst` можна не прибирати.
+  starter: |
+    import shutil
+    from pathlib import Path
+
+
+    def sync_tree(src: Path, dst: Path) -> dict[str, list[str]]:
+        ...
+  harness: |
+    import os
+    import tempfile
+    from pathlib import Path
+
+    def put(path: Path, text: str, mtime: int = 1_700_000_000) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        os.utime(path, (mtime, mtime))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        src, dst = Path(tmp) / "src", Path(tmp) / "dst"
+        put(src / "index.html", "<main>")
+        put(src / "assets" / "app.js", "init()")
+        put(src / "assets" / "img" / "logo.svg", "<svg/>")
+        put(src / ".DS_Store", "junk")
+        print(sync_tree(src, dst))
+        print(sync_tree(src, dst))
+
+        put(src / "assets" / "app.js", "init(2)", mtime=1_700_000_100)
+        (src / "assets" / "img" / "logo.svg").unlink()
+        put(src / "assets" / "form.css", "form{}")
+        put(src / "index.html", "<main>", mtime=1_700_000_200)
+        put(dst / ".keep", "")
+        print(sync_tree(src, dst))
+
+        print(sorted(p.relative_to(dst).as_posix() for p in dst.rglob("*") if p.is_file()))
+        app = dst / "assets" / "app.js"
+        print(app.read_text(encoding="utf-8"), app.stat().st_mtime_ns == 1_700_000_100 * 10**9)
+  expected: |
+    {'copied': ['assets/app.js', 'assets/img/logo.svg', 'index.html'], 'deleted': [], 'skipped': []}
+    {'copied': [], 'deleted': [], 'skipped': ['assets/app.js', 'assets/img/logo.svg', 'index.html']}
+    {'copied': ['assets/app.js', 'assets/form.css', 'index.html'], 'deleted': ['assets/img/logo.svg'], 'skipped': []}
+    ['.keep', 'assets/app.js', 'assets/form.css', 'index.html']
+    init(2) True
+  hints:
+    - "Розбийте задачу на два словники 'відносний шлях -> Path': файли src і файли dst, обидва через rglob з фільтром is_file і без частин, що починаються з крапки. Далі це операції над ключами: що є лише в src, що лише в dst, що в обох."
+    - "Порівняння двох файлів: a.stat() і b.stat(), поля st_size і st_mtime_ns. Копіювання з часом зміни це shutil.copy2, а перед ним target.parent.mkdir(parents=True, exist_ok=True). Видалення це unlink."
+    - "def files(root): return {p.relative_to(root).as_posix(): p for p in root.rglob('*') if p.is_file() and not any(part.startswith('.') for part in p.relative_to(root).parts)} if root.exists() else {}. Потім цикл по sorted(src_files): якщо rel немає в dst_files або stat різний, copy2 у dst / rel; цикл по dst_files, яких немає в src_files: unlink."
+  solution: |
+    import shutil
+    from pathlib import Path
+
+
+    def _files(root: Path) -> dict[str, Path]:
+        if not root.exists():
+            return {}
+        result = {}
+        for path in root.rglob("*"):
+            rel = path.relative_to(root)
+            if path.is_file() and not any(part.startswith(".") for part in rel.parts):
+                result[rel.as_posix()] = path
+        return result
+
+
+    def _same(a: Path, b: Path) -> bool:
+        sa, sb = a.stat(), b.stat()
+        return sa.st_size == sb.st_size and sa.st_mtime_ns == sb.st_mtime_ns
+
+
+    def sync_tree(src: Path, dst: Path) -> dict[str, list[str]]:
+        src_files, dst_files = _files(src), _files(dst)
+        report: dict[str, list[str]] = {"copied": [], "deleted": [], "skipped": []}
+        for rel in sorted(src_files):
+            target = dst / rel
+            if rel in dst_files and _same(src_files[rel], dst_files[rel]):
+                report["skipped"].append(rel)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_files[rel], target)
+            report["copied"].append(rel)
+        for rel in sorted(dst_files.keys() - src_files.keys()):
+            dst_files[rel].unlink()
+            report["deleted"].append(rel)
+        return report
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "StaticPublisher у капстоуні"
+  prompt: |
+    У репозиторії капстоуну створіть `src/formbuilder/publisher.py` з класом `StaticPublisher`
+    і тести до нього в `tests/test_publisher.py`. За основу візьміть клас з розділу "Для капстоуну".
+
+    - `StaticPublisher(root: Path, keep: int = 3)`; корінь лише параметром, жодного `Path.cwd()`
+      чи захардкодженого `out/` усередині класу.
+    - `publish(form_id, version, html, assets=None) -> Path` пише `root/<form_id>/<version>/index.html`
+      атомарно (тимчасовий файл у тій самій директорії, `chmod 0o644`, `replace`), assets копіює через
+      `shutil.copytree(..., dirs_exist_ok=True)` до запису `index.html`, після успіху прибирає версії,
+      старші за `keep` останніх, сортуючи номери як числа.
+    - `form_id` перевіряється до будь-якого запису: дозволені лише `[a-z0-9-]`, довжина 1–64
+      (`re.fullmatch`; повністю регулярні вирази в m6-l04). `version` має бути додатним `int`.
+    - Метод `latest(form_id) -> int | None` повертає номер найновішої опублікованої версії, тобто
+      найбільший номер директорії, у якій є `index.html`; `None`, якщо форми немає (EAFP, без `exists()`).
+
+    Тести пишуться з `tmp_path` і нічого не мокають.
+  checklist:
+    - "Тест: після `publish` файл `index.html` має очікуваний вміст, assets скопійовані, у директорії версії немає файлів `*.tmp`"
+    - "Тест: при публікації версій 9, 10, 11 з `keep=2` лишаються `10` і `11` (числове, а не рядкове сортування)"
+    - "Тест: якщо `html` не рядок або запис падає (через `monkeypatch` на `os.replace` або `Path.replace`), попередній `index.html` цієї версії лишається без змін і тимчасових файлів немає"
+    - "Параметризований тест: `..`, `a/b`, `/etc`, порожній рядок, `Contact` кидають `ValueError`, і в `tmp_path` не з'являється жодного файлу"
+    - "Тест: `latest` повертає `None` для невідомої форми і ігнорує директорію версії без `index.html`"
+    - "Права опублікованого `index.html` дорівнюють `0o644`"
+    - "`mypy --strict` і `ruff check` проходять для `publisher.py`"
+  verify: "cd capstone && uv run pytest tests/test_publisher.py -q && uv run mypy --strict src/formbuilder/publisher.py && uv run ruff check src/formbuilder/publisher.py tests/test_publisher.py"

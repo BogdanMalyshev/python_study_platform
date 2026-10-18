@@ -1,0 +1,893 @@
+- id: t1
+  type: code
+  title: "Правила валідації: стратегії-функції замість класів"
+  prompt: |
+    У старому коді кожне правило валідації поля це клас з методом `check`:
+
+    ```python
+    class Rule(ABC):
+        @abstractmethod
+        def check(self, value: str) -> str | None: ...
+
+    class Required(Rule): ...
+    class MaxLen(Rule):
+        def __init__(self, n: int) -> None: ...
+    ```
+
+    Перепишіть на функції. Правило це `Callable[[str], str | None]`: повертає текст помилки або `None`.
+
+    - `required(value)` повертає `"required"`, якщо після `strip()` рядок порожній.
+    - `max_len(n)` повертає **правило**, яке дає `f"max {n} chars"`, коли `len(value) > n`.
+    - `one_of(*allowed)` повертає правило, яке дає `"one of: s, m, l"` (варіанти через `", "` у порядку
+      аргументів), коли значення не входить у `allowed`.
+    - `validate(value, rules)` застосовує правила по черзі й повертає список усіх помилок.
+
+    ```python
+    validate("abcd", [required, max_len(3)])   # ['max 3 chars']
+    ```
+  starter: |
+    from collections.abc import Callable, Iterable
+
+    Rule = Callable[[str], str | None]
+
+
+    def required(value: str) -> str | None:
+        ...
+
+
+    def max_len(n: int) -> Rule:
+        ...
+
+
+    def one_of(*allowed: str) -> Rule:
+        ...
+
+
+    def validate(value: str, rules: Iterable[Rule]) -> list[str]:
+        ...
+  harness: |
+    print(validate("", [required, max_len(3)]))
+    print(validate("abcd", [required, max_len(3)]))
+    print(validate("xl", [one_of("s", "m", "l")]))
+    print(validate("m", [required, one_of("s", "m", "l"), max_len(1)]))
+    print(validate("xxl", [required, one_of("s", "m"), max_len(2)]))
+    print(validate("", []))
+    print(callable(max_len(3)), type(required).__name__, type(max_len(3)).__name__)
+  expected: |
+    ['required']
+    ['max 3 chars']
+    ['one of: s, m, l']
+    []
+    ['one of: s, m', 'max 2 chars']
+    []
+    True function function
+  hints:
+    - "`max_len` і `one_of` це фабрики: усередині визначте вкладену функцію, яка бачить `n` або `allowed` через замикання, і поверніть її."
+    - "Для `validate` достатньо comprehension: викликати кожне правило і залишити лише результати, що не `None`."
+    - "def max_len(n):\n    def rule(value):\n        return f\"max {n} chars\" if len(value) > n else None\n    return rule\n\ndef validate(value, rules):\n    return [e for rule in rules if (e := rule(value)) is not None]"
+  solution: |
+    from collections.abc import Callable, Iterable
+
+    Rule = Callable[[str], str | None]
+
+
+    def required(value: str) -> str | None:
+        return "required" if not value.strip() else None
+
+
+    def max_len(n: int) -> Rule:
+        def rule(value: str) -> str | None:
+            return f"max {n} chars" if len(value) > n else None
+        return rule
+
+
+    def one_of(*allowed: str) -> Rule:
+        message = "one of: " + ", ".join(allowed)
+
+        def rule(value: str) -> str | None:
+            return None if value in allowed else message
+        return rule
+
+
+    def validate(value: str, rules: Iterable[Rule]) -> list[str]:
+        return [error for rule in rules if (error := rule(value)) is not None]
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Observer: шина подій зі списками callback-ів"
+  prompt: |
+    Напишіть `EventBus` без жодного інтерфейсу `Observer`: підписники це будь-які callable з одним аргументом.
+
+    - `subscribe(event, callback)` додає callback до списку події і повертає функцію відписки.
+      Повторний виклик функції відписки нічого не робить і не падає.
+    - `once(event, callback)` підписує callback так, щоб він спрацював лише на першу подію, а потім
+      сам відписався. Теж повертає функцію відписки.
+    - `emit(event, payload)` викликає callback-и події в порядку підписки і повертає, скільки їх викликано.
+      Подія без підписників повертає `0`.
+
+    Підписник, який відписується під час `emit` (як це робить `once`), не повинен призводити до того,
+    що наступний за ним підписник пропустить подію.
+  starter: |
+    from collections.abc import Callable
+
+    Callback = Callable[[str], None]
+
+
+    class EventBus:
+        def __init__(self) -> None:
+            ...
+
+        def subscribe(self, event: str, callback: Callback) -> Callable[[], None]:
+            ...
+
+        def once(self, event: str, callback: Callback) -> Callable[[], None]:
+            ...
+
+        def emit(self, event: str, payload: str) -> int:
+            ...
+  harness: |
+    bus = EventBus()
+    log = []
+    bus.subscribe("status", lambda p: log.append(("a", p)))
+    off_b = bus.subscribe("status", lambda p: log.append(("b", p)))
+    bus.once("status", lambda p: log.append(("once", p)))
+    bus.subscribe("status", lambda p: log.append(("c", p)))
+    print(bus.emit("status", "rendering"))
+    print(bus.emit("status", "published"))
+    off_b()
+    off_b()
+    print(bus.emit("status", "failed"))
+    print(bus.emit("other", "x"))
+    off_once = bus.once("other", lambda p: log.append(("never", p)))
+    off_once()
+    print(bus.emit("other", "y"))
+    for entry in log:
+        print(entry)
+  expected: |
+    4
+    3
+    2
+    0
+    0
+    ('a', 'rendering')
+    ('b', 'rendering')
+    ('once', 'rendering')
+    ('c', 'rendering')
+    ('a', 'published')
+    ('b', 'published')
+    ('c', 'published')
+    ('a', 'failed')
+    ('c', 'failed')
+  hints:
+    - "Зберігайте `dict[str, list[Callback]]` (зручно через `defaultdict(list)`). Функція відписки це замикання, яке видаляє саме цей callback зі списку, якщо він там ще є."
+    - "У `emit` ітеруйте копію списку: `for cb in list(self._subs[event])`. Інакше `once`, видаляючи себе, зсуне список, і `c` пропустить подію."
+    - "def once(self, event, callback):\n    def wrapper(payload):\n        off()\n        callback(payload)\n    off = self.subscribe(event, wrapper)\n    return off"
+  solution: |
+    from collections import defaultdict
+    from collections.abc import Callable
+
+    Callback = Callable[[str], None]
+
+
+    class EventBus:
+        def __init__(self) -> None:
+            self._subs: defaultdict[str, list[Callback]] = defaultdict(list)
+
+        def subscribe(self, event: str, callback: Callback) -> Callable[[], None]:
+            self._subs[event].append(callback)
+
+            def unsubscribe() -> None:
+                if callback in self._subs[event]:
+                    self._subs[event].remove(callback)
+            return unsubscribe
+
+        def once(self, event: str, callback: Callback) -> Callable[[], None]:
+            def wrapper(payload: str) -> None:
+                off()
+                callback(payload)
+            off = self.subscribe(event, wrapper)
+            return off
+
+        def emit(self, event: str, payload: str) -> int:
+            callbacks = list(self._subs.get(event, []))
+            for callback in callbacks:
+                callback(payload)
+            return len(callbacks)
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Registry через __init_subclass__ і фабрика from_dict"
+  prompt: |
+    Елементи форми приходять із JSON як словники з ключем `"type"`. Зробіть так, щоб кожен підклас
+    `Element` реєструвався автоматично в момент оголошення, а `Element.from_dict(data)` створював
+    екземпляр потрібного підкласу.
+
+    - `__init_subclass__(cls, *, kind, **kwargs)` кладе клас у `Element.registry[kind]`. Якщо `kind` уже
+      зайнятий, кидає `TypeError(f"duplicate kind: {kind!r}")` і нічого не реєструє.
+    - `Element.from_dict(data)` (classmethod) шукає клас за `data["type"]`. Невідомий тип дає
+      `ValueError(f"unknown element type: {type!r}")`. Екземпляр створюється з `id=data["id"]` і
+      `label=data.get("label", "")`.
+
+    Підкласи `Input` і `Button` уже оголошені в стартері, їх не змінюйте. Харнес оголосить ще `Checkbox`
+    після вашого коду, і він має потрапити в реєстр без жодного ручного кроку.
+  starter: |
+    from typing import Any, ClassVar
+
+
+    class Element:
+        registry: ClassVar[dict[str, type["Element"]]] = {}
+
+        def __init__(self, id: str, label: str = "") -> None:
+            self.id = id
+            self.label = label
+
+        def __init_subclass__(cls, *, kind: str, **kwargs: Any) -> None:
+            ...
+
+        @classmethod
+        def from_dict(cls, data: dict[str, Any]) -> "Element":
+            ...
+
+        def render(self) -> str:
+            raise NotImplementedError
+
+
+    class Input(Element, kind="input"):
+        def render(self) -> str:
+            return f'<input id="{self.id}" placeholder="{self.label}">'
+
+
+    class Button(Element, kind="button"):
+        def render(self) -> str:
+            return f"<button>{self.label}</button>"
+  harness: |
+    print(sorted(Element.registry))
+    for data in [
+        {"type": "input", "id": "email", "label": "Email"},
+        {"type": "button", "id": "send", "label": "Send"},
+    ]:
+        el = Element.from_dict(data)
+        print(type(el).__name__, el.render())
+
+
+    class Checkbox(Element, kind="checkbox"):
+        def render(self) -> str:
+            return f'<input type="checkbox" id="{self.id}">'
+
+
+    print(Element.from_dict({"type": "checkbox", "id": "terms"}).render())
+    try:
+        Element.from_dict({"type": "video", "id": "v"})
+    except ValueError as e:
+        print("ValueError:", e)
+    try:
+        class Other(Element, kind="input"):
+            pass
+    except TypeError as e:
+        print("TypeError:", e)
+    print(sorted(Element.registry), Element.registry["input"].__name__)
+  expected: |
+    ['button', 'input']
+    Input <input id="email" placeholder="Email">
+    Button <button>Send</button>
+    <input type="checkbox" id="terms">
+    ValueError: unknown element type: 'video'
+    TypeError: duplicate kind: 'input'
+    ['button', 'checkbox', 'input'] Input
+  hints:
+    - "`__init_subclass__` викликається на батьківському класі з `cls`, рівним новому підкласу. Не забудьте передати решту `kwargs` у `super().__init_subclass__(**kwargs)`."
+    - "Записуйте в `Element.registry`, а не присвоюйте новий словник у `cls.registry`: інакше кожен підклас отримає власний реєстр."
+    - "@classmethod\ndef from_dict(cls, data):\n    kind = data[\"type\"]\n    if kind not in Element.registry:\n        raise ValueError(f\"unknown element type: {kind!r}\")\n    return Element.registry[kind](id=data[\"id\"], label=data.get(\"label\", \"\"))"
+  solution: |
+    from typing import Any, ClassVar
+
+
+    class Element:
+        registry: ClassVar[dict[str, type["Element"]]] = {}
+
+        def __init__(self, id: str, label: str = "") -> None:
+            self.id = id
+            self.label = label
+
+        def __init_subclass__(cls, *, kind: str, **kwargs: Any) -> None:
+            super().__init_subclass__(**kwargs)
+            if kind in Element.registry:
+                raise TypeError(f"duplicate kind: {kind!r}")
+            Element.registry[kind] = cls
+
+        @classmethod
+        def from_dict(cls, data: dict[str, Any]) -> "Element":
+            kind = data["type"]
+            if kind not in Element.registry:
+                raise ValueError(f"unknown element type: {kind!r}")
+            return Element.registry[kind](id=data["id"], label=data.get("label", ""))
+
+        def render(self) -> str:
+            raise NotImplementedError
+
+
+    class Input(Element, kind="input"):
+        def render(self) -> str:
+            return f'<input id="{self.id}" placeholder="{self.label}">'
+
+
+    class Button(Element, kind="button"):
+        def render(self) -> str:
+            return f"<button>{self.label}</button>"
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "State: Enum і таблиця переходів"
+  prompt: |
+    Життєвий цикл чернетки форми це скінченний автомат. Опишіть його даними, а не класами станів.
+
+    Заповніть `TRANSITIONS: dict[tuple[DraftState, str], DraftState]` (пара "стан, подія" → новий стан):
+
+    | Стан | Подія | Новий стан |
+    |---|---|---|
+    | draft | submit | review |
+    | review | approve | published |
+    | review | reject | draft |
+    | published | archive | archived |
+    | published | edit | draft |
+    | archived | restore | draft |
+
+    - `apply(state, event)` повертає новий стан або кидає `InvalidTransition(f"cannot {event!r} from {state}")`.
+    - `replay(events, start=DraftState.DRAFT)` застосовує події по черзі й повертає пару
+      `(states, error)`: `states` це список усіх пройдених станів, включно зі стартовим; на першій недопустимій
+      події обробка зупиняється, а `error` це текст винятку. Якщо всі події допустимі, `error` дорівнює `None`.
+  starter: |
+    from collections.abc import Iterable
+    from enum import StrEnum, auto
+
+
+    class DraftState(StrEnum):
+        DRAFT = auto()
+        REVIEW = auto()
+        PUBLISHED = auto()
+        ARCHIVED = auto()
+
+
+    class InvalidTransition(ValueError):
+        pass
+
+
+    TRANSITIONS: dict[tuple[DraftState, str], DraftState] = {}
+
+
+    def apply(state: DraftState, event: str) -> DraftState:
+        ...
+
+
+    def replay(
+        events: Iterable[str], start: DraftState = DraftState.DRAFT
+    ) -> tuple[list[DraftState], str | None]:
+        ...
+  harness: |
+    print(apply(DraftState.DRAFT, "submit"))
+    states, error = replay(["submit", "reject", "submit", "approve", "archive"])
+    print([str(s) for s in states], error)
+    states, error = replay(["submit", "archive", "approve"])
+    print([str(s) for s in states], error)
+    states, error = replay([], start=DraftState.ARCHIVED)
+    print([str(s) for s in states], error)
+    try:
+        apply(DraftState.ARCHIVED, "submit")
+    except InvalidTransition as e:
+        print(type(e).__name__, e, isinstance(e, ValueError))
+    print(len(TRANSITIONS), all(isinstance(v, DraftState) for v in TRANSITIONS.values()))
+  expected: |
+    review
+    ['draft', 'review', 'draft', 'review', 'published', 'archived'] None
+    ['draft', 'review'] cannot 'archive' from review
+    ['archived'] None
+    InvalidTransition cannot 'submit' from archived True
+    6 True
+  hints:
+    - "Ключ словника це кортеж `(DraftState.DRAFT, \"submit\")`. `apply` це один пошук у словнику; відсутність ключа і є недопустимим переходом."
+    - "У `replay` ловіть `InvalidTransition` навколо `apply` і повертайте `(states, str(e))`, не додаючи нового стану."
+    - "def apply(state, event):\n    try:\n        return TRANSITIONS[(state, event)]\n    except KeyError:\n        raise InvalidTransition(f\"cannot {event!r} from {state}\") from None"
+  solution: |
+    from collections.abc import Iterable
+    from enum import StrEnum, auto
+
+
+    class DraftState(StrEnum):
+        DRAFT = auto()
+        REVIEW = auto()
+        PUBLISHED = auto()
+        ARCHIVED = auto()
+
+
+    class InvalidTransition(ValueError):
+        pass
+
+
+    TRANSITIONS: dict[tuple[DraftState, str], DraftState] = {
+        (DraftState.DRAFT, "submit"): DraftState.REVIEW,
+        (DraftState.REVIEW, "approve"): DraftState.PUBLISHED,
+        (DraftState.REVIEW, "reject"): DraftState.DRAFT,
+        (DraftState.PUBLISHED, "archive"): DraftState.ARCHIVED,
+        (DraftState.PUBLISHED, "edit"): DraftState.DRAFT,
+        (DraftState.ARCHIVED, "restore"): DraftState.DRAFT,
+    }
+
+
+    def apply(state: DraftState, event: str) -> DraftState:
+        try:
+            return TRANSITIONS[(state, event)]
+        except KeyError:
+            raise InvalidTransition(f"cannot {event!r} from {state}") from None
+
+
+    def replay(
+        events: Iterable[str], start: DraftState = DraftState.DRAFT
+    ) -> tuple[list[DraftState], str | None]:
+        states = [start]
+        for event in events:
+            try:
+                states.append(apply(states[-1], event))
+            except InvalidTransition as e:
+                return states, str(e)
+        return states, None
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Pipeline з інʼєктованих частин і fake-и до нього"
+  prompt: |
+    Зберіть пайплайн генерації з розділу "Для капстоуну" і доведіть його до робочого стану. Типи, протоколи
+    й `JobResult` дано в стартері. Напишіть три класи.
+
+    **`FakeClock(start, step)`**: callable-об'єкт, що відповідає типу `Clock`. Перший виклик повертає `start`,
+    кожен наступний на `step` пізніше.
+
+    **`MemoryPublisher`**: fake для `Publisher`. Атрибут `pages: dict[str, str]`; `publish(slug, html)` кладе
+    сторінку в `pages` і повертає `f"memory://{slug}"`.
+
+    **`Pipeline(validator, renderer, publisher, clock=utc_now)`**:
+
+    - `subscribe(listener)` додає спостерігача і повертає функцію відписки.
+    - `run(job_id, raw)`:
+      1. `started_at = clock()`;
+      2. статус `VALIDATING`, `form = validator.validate(raw)`;
+      3. статус `RENDERING`, HTML це результати `renderer.render(element, form.theme)` для всіх елементів,
+         з'єднані через `"\n"`;
+      4. статус `PUBLISHING`, `url = publisher.publish(form.slug, html)`;
+      5. статус `PUBLISHED`, `finished_at = clock()`, повернути `JobResult` зі статусом `PUBLISHED`, `url` і
+         `error=None`.
+    - Якщо будь-який із кроків 2–4 кидає `Exception`: статус `FAILED`, `finished_at = clock()`, повернути
+      `JobResult` зі статусом `FAILED`, `url=None` і `error=f"{type(exc).__name__}: {exc}"`. Виняток назовні
+      не виходить.
+    - Статус розсилається всім спостерігачам викликом `listener(job_id, status)` у порядку підписки.
+
+    `Pipeline` не має створювати жодної залежності сам і не має знати про конкретні класи: харнес передасть
+    власні `DictValidator`, `TextRenderer` і `BrokenPublisher`.
+  starter: |
+    from collections.abc import Callable, Mapping
+    from dataclasses import dataclass
+    from datetime import UTC, datetime, timedelta
+    from enum import StrEnum, auto
+    from typing import Protocol
+
+
+    @dataclass(frozen=True)
+    class Theme:
+        name: str
+        accent: str
+
+
+    @dataclass(frozen=True)
+    class Element:
+        kind: str
+        id: str
+        label: str
+
+
+    @dataclass(frozen=True)
+    class Form:
+        slug: str
+        theme: Theme
+        elements: tuple[Element, ...]
+
+
+    class JobStatus(StrEnum):
+        VALIDATING = auto()
+        RENDERING = auto()
+        PUBLISHING = auto()
+        PUBLISHED = auto()
+        FAILED = auto()
+
+
+    class Validator(Protocol):
+        def validate(self, raw: Mapping[str, object]) -> Form: ...
+
+
+    class Renderer(Protocol):
+        def render(self, element: Element, theme: Theme) -> str: ...
+
+
+    class Publisher(Protocol):
+        def publish(self, slug: str, html: str) -> str: ...
+
+
+    Clock = Callable[[], datetime]
+    StatusListener = Callable[[str, JobStatus], None]
+
+
+    def utc_now() -> datetime:
+        return datetime.now(UTC)
+
+
+    @dataclass(frozen=True)
+    class JobResult:
+        job_id: str
+        status: JobStatus
+        url: str | None
+        error: str | None
+        started_at: datetime
+        finished_at: datetime
+
+
+    class FakeClock:
+        def __init__(self, start: datetime, step: timedelta) -> None:
+            ...
+
+        def __call__(self) -> datetime:
+            ...
+
+
+    class MemoryPublisher:
+        def __init__(self) -> None:
+            ...
+
+        def publish(self, slug: str, html: str) -> str:
+            ...
+
+
+    class Pipeline:
+        def __init__(
+            self,
+            validator: Validator,
+            renderer: Renderer,
+            publisher: Publisher,
+            clock: Clock = utc_now,
+        ) -> None:
+            ...
+
+        def subscribe(self, listener: StatusListener) -> Callable[[], None]:
+            ...
+
+        def run(self, job_id: str, raw: Mapping[str, object]) -> JobResult:
+            ...
+  harness: |
+    class DictValidator:
+        def validate(self, raw):
+            items = raw.get("elements")
+            if not items:
+                raise ValueError("form has no elements")
+            return Form(
+                slug=str(raw["slug"]),
+                theme=Theme("light", "#0066cc"),
+                elements=tuple(Element(**item) for item in items),
+            )
+
+
+    class TextRenderer:
+        def render(self, element, theme):
+            return f"{element.kind}:{element.id} [{theme.name}]"
+
+
+    class BrokenPublisher:
+        def publish(self, slug, html):
+            raise OSError(f"disk full while writing {slug}")
+
+
+    clock = FakeClock(datetime(2026, 10, 18, 12, 0, tzinfo=UTC), timedelta(seconds=1))
+    publisher = MemoryPublisher()
+    pipeline = Pipeline(DictValidator(), TextRenderer(), publisher, clock)
+    events = []
+    pipeline.subscribe(lambda job_id, status: events.append(f"{job_id}:{status}"))
+    off = pipeline.subscribe(lambda job_id, status: print(f"[ws] {job_id} {status}"))
+
+    raw = {"slug": "contact", "elements": [
+        {"kind": "input", "id": "email", "label": "Email"},
+        {"kind": "button", "id": "send", "label": "Send"},
+    ]}
+    ok = pipeline.run("j1", raw)
+    print(ok.status, ok.url, ok.error)
+    print(ok.started_at.time(), ok.finished_at.time())
+    print(publisher.pages)
+
+    off()
+    bad = pipeline.run("j2", {"slug": "empty", "elements": []})
+    print(bad.status, bad.url, bad.error)
+    print(bad.started_at.time(), bad.finished_at.time())
+
+    broken = Pipeline(DictValidator(), TextRenderer(), BrokenPublisher(), clock)
+    broken.subscribe(lambda job_id, status: events.append(f"{job_id}:{status}"))
+    res = broken.run("j3", raw)
+    print(res.status, res.error, res.finished_at.time())
+    print(events)
+    print(sorted(publisher.pages))
+  expected: |
+    [ws] j1 validating
+    [ws] j1 rendering
+    [ws] j1 publishing
+    [ws] j1 published
+    published memory://contact None
+    12:00:00 12:00:01
+    {'contact': 'input:email [light]\nbutton:send [light]'}
+    failed None ValueError: form has no elements
+    12:00:02 12:00:03
+    failed OSError: disk full while writing contact 12:00:05
+    ['j1:validating', 'j1:rendering', 'j1:publishing', 'j1:published', 'j2:validating', 'j2:failed', 'j3:validating', 'j3:rendering', 'j3:publishing', 'j3:failed']
+    ['contact']
+  hints:
+    - "`FakeClock` тримає поточний момент в атрибуті: `__call__` запам'ятовує значення, зсуває атрибут на `step` і повертає запам'ятоване. Об'єкт з `__call__` підходить під `Callable[[], datetime]` так само, як функція."
+    - "Відписка й розсилка такі самі, як у розділі про Observer: функція-замикання з `remove` і `for listener in list(self._listeners)`. Кроки 2–4 обгорніть одним `try/except Exception as exc`."
+    - "def run(self, job_id, raw):\n    started = self._clock()\n    try:\n        self._notify(job_id, JobStatus.VALIDATING)\n        form = self._validator.validate(raw)\n        ...\n    except Exception as exc:\n        self._notify(job_id, JobStatus.FAILED)\n        return JobResult(job_id, JobStatus.FAILED, None, f\"{type(exc).__name__}: {exc}\", started, self._clock())\n    self._notify(job_id, JobStatus.PUBLISHED)\n    return JobResult(job_id, JobStatus.PUBLISHED, url, None, started, self._clock())"
+  solution: |
+    from collections.abc import Callable, Mapping
+    from dataclasses import dataclass
+    from datetime import UTC, datetime, timedelta
+    from enum import StrEnum, auto
+    from typing import Protocol
+
+
+    @dataclass(frozen=True)
+    class Theme:
+        name: str
+        accent: str
+
+
+    @dataclass(frozen=True)
+    class Element:
+        kind: str
+        id: str
+        label: str
+
+
+    @dataclass(frozen=True)
+    class Form:
+        slug: str
+        theme: Theme
+        elements: tuple[Element, ...]
+
+
+    class JobStatus(StrEnum):
+        VALIDATING = auto()
+        RENDERING = auto()
+        PUBLISHING = auto()
+        PUBLISHED = auto()
+        FAILED = auto()
+
+
+    class Validator(Protocol):
+        def validate(self, raw: Mapping[str, object]) -> Form: ...
+
+
+    class Renderer(Protocol):
+        def render(self, element: Element, theme: Theme) -> str: ...
+
+
+    class Publisher(Protocol):
+        def publish(self, slug: str, html: str) -> str: ...
+
+
+    Clock = Callable[[], datetime]
+    StatusListener = Callable[[str, JobStatus], None]
+
+
+    def utc_now() -> datetime:
+        return datetime.now(UTC)
+
+
+    @dataclass(frozen=True)
+    class JobResult:
+        job_id: str
+        status: JobStatus
+        url: str | None
+        error: str | None
+        started_at: datetime
+        finished_at: datetime
+
+
+    class FakeClock:
+        def __init__(self, start: datetime, step: timedelta) -> None:
+            self._now = start
+            self._step = step
+
+        def __call__(self) -> datetime:
+            now = self._now
+            self._now += self._step
+            return now
+
+
+    class MemoryPublisher:
+        def __init__(self) -> None:
+            self.pages: dict[str, str] = {}
+
+        def publish(self, slug: str, html: str) -> str:
+            self.pages[slug] = html
+            return f"memory://{slug}"
+
+
+    class Pipeline:
+        def __init__(
+            self,
+            validator: Validator,
+            renderer: Renderer,
+            publisher: Publisher,
+            clock: Clock = utc_now,
+        ) -> None:
+            self._validator = validator
+            self._renderer = renderer
+            self._publisher = publisher
+            self._clock = clock
+            self._listeners: list[StatusListener] = []
+
+        def subscribe(self, listener: StatusListener) -> Callable[[], None]:
+            self._listeners.append(listener)
+
+            def unsubscribe() -> None:
+                if listener in self._listeners:
+                    self._listeners.remove(listener)
+            return unsubscribe
+
+        def _notify(self, job_id: str, status: JobStatus) -> None:
+            for listener in list(self._listeners):
+                listener(job_id, status)
+
+        def run(self, job_id: str, raw: Mapping[str, object]) -> JobResult:
+            started_at = self._clock()
+            try:
+                self._notify(job_id, JobStatus.VALIDATING)
+                form = self._validator.validate(raw)
+                self._notify(job_id, JobStatus.RENDERING)
+                html = "\n".join(self._renderer.render(el, form.theme) for el in form.elements)
+                self._notify(job_id, JobStatus.PUBLISHING)
+                url = self._publisher.publish(form.slug, html)
+            except Exception as exc:
+                self._notify(job_id, JobStatus.FAILED)
+                return JobResult(
+                    job_id, JobStatus.FAILED, None, f"{type(exc).__name__}: {exc}",
+                    started_at, self._clock(),
+                )
+            self._notify(job_id, JobStatus.PUBLISHED)
+            return JobResult(job_id, JobStatus.PUBLISHED, url, None, started_at, self._clock())
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class Fields:
+        def __init__(self, items: list[str]) -> None:
+            self._items = items
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._items, name)
+
+    f = Fields(["email", "phone"])
+    print(f.count("email"))
+    print("email" in f)
+    ```
+  options:
+    - "1, потім True"
+    - "1, потім TypeError: argument of type 'Fields' is not iterable"
+    - "AttributeError: 'Fields' object has no attribute 'count' на першому print"
+    - "RecursionError: __getattr__ викликає сам себе"
+  answer: 1
+  explain: |
+    `f.count` це звичайний доступ до атрибута: на екземплярі й класі його немає, тож спрацьовує `__getattr__`,
+    і повертається зв'язаний метод списку. Оператор `in` атрибутів через екземпляр не шукає: він дивиться на тип
+    `Fields` у пошуках `__contains__`, потім `__iter__`, потім `__getitem__`, не знаходить жодного і кидає
+    `TypeError`. `True` це очікування JS-`Proxy`, у якого трапи ловлять усе. `AttributeError` був би без
+    `__getattr__`. `RecursionError` з'являється, коли `__getattr__` звертається до атрибута, якого ще немає
+    (наприклад, `self._items` до присвоєння в `__init__`), але тут `_items` уже знайдено звичайним шляхом.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class MemoryPublisher:
+        def __init__(self) -> None:
+            self.pages: dict[str, str] = {}
+
+        def publish(self, slug: str, html: str) -> str:
+            self.pages[slug] = html
+            return slug
+
+
+    class Pipeline:
+        def __init__(self, publisher: MemoryPublisher = MemoryPublisher()) -> None:
+            self.publisher = publisher
+
+
+    a = Pipeline()
+    b = Pipeline()
+    a.publisher.publish("contact", "<p>a</p>")
+    print(b.publisher.pages)
+    ```
+  options:
+    - "{}"
+    - "{'contact': '<p>a</p>'}"
+    - "TypeError: default argument must be immutable"
+    - "AttributeError: 'Pipeline' object has no attribute 'publisher'"
+  answer: 1
+  explain: |
+    Значення за замовчуванням обчислюється один раз, коли виконується рядок `def __init__`, тобто при створенні
+    класу. Обидва пайплайни отримують той самий екземпляр `MemoryPublisher`, і запис через `a` видно через `b`.
+    `{}` це JS-інтуїція: у JS дефолтний параметр обчислюється при кожному виклику. `TypeError` Python не кидає
+    ніколи, змінювані дефолти дозволені, і саме тому ця пастка тиха. Виправлення: `publisher: Publisher | None = None`
+    і створення в тілі, або `field(default_factory=MemoryPublisher)` у dataclass.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей "Singleton"?
+    ```python
+    class Settings:
+        _instance = None
+
+        def __new__(cls, *args, **kwargs):
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+            return cls._instance
+
+        def __init__(self, debug: bool = False) -> None:
+            self.debug = debug
+
+    a = Settings(debug=True)
+    b = Settings()
+    print(a is b, a.debug)
+    ```
+  options:
+    - "True True"
+    - "True False"
+    - "False True"
+    - "TypeError: object.__new__() takes exactly one argument"
+  answer: 1
+  explain: |
+    `Settings()` це два кроки: `__new__` повертає об'єкт, потім Python викликає `__init__` на ньому, якщо
+    об'єкт є екземпляром класу. `__new__` повертає той самий екземпляр, тож `a is b`, але `__init__` при другому
+    виклику перезаписує `debug` значенням за замовчуванням. `True True` це очікування, що "конструктор" спрацює
+    один раз, як у JS-синглтоні з `if (instance) return instance` у `constructor`. `False True` означало б, що
+    `__new__` не впливає на результат. `TypeError` був би, якби в `super().__new__` передали `*args`. Модуль або
+    `@cache` на фабриці цієї пастки не мають.
+
+- id: p1
+  type: project
+  title: "Pipeline генерації в капстоуні"
+  prompt: |
+    Перенесіть `Pipeline` з рішення t5 у капстоун, у `src/formbuilder/generate.py` поруч з `generate()` з m3-l04:
+    це той самий крок генерації, тепер із залежностями в `__init__` і спостерігачами. У цьому модулі живуть лише
+    `Validator` і `Clock`; `Renderer` імпортуйте з `formbuilder.renderers` (m2-l07), `Publisher` з
+    `formbuilder.publisher` (m3-l04), а не дублюйте. Той `Publisher` асинхронний, тож `Pipeline.run` у капстоуні
+    стає `async def` з `await self._publisher.publish(...)`; тести запускають його через `asyncio.run`, як у m3-l04.
+    `Element`, `Theme` і `FormConfig` беріть з `formbuilder.domain` (`Form.slug` з t5 це `FormConfig.id`);
+    `JobStatus` з `formbuilder.jobs` (m4-l06), доповнивши його потрібними членами.
+
+    Composition root `build_pipeline(fmt, out_dir)` покладіть у `src/formbuilder/cli.py`: це верхній шар з m3-l01,
+    єдине місце, яке знає конкретні класи (валідатор на `FormConfig` і `to_domain` з `config.py`, рендерер через
+    `get_renderer(fmt)`, `DirPublisher(out_dir)`). Команда `formbuilder build` у m6-l06 викличе саме його, а для
+    вебзастосунку в m7-l01 з'явиться другий composition root, `create_app` в `api/app.py`. Fake-и (`FakeClock`,
+    `MemoryPublisher`) покладіть у `tests/fakes.py`, не в `src/`.
+  checklist:
+    - "`generate.py` не імпортує жодної конкретної реалізації: `grep -E 'Html|DirPublisher|pydantic|formbuilder.config' src/formbuilder/generate.py` нічого не знаходить"
+    - "Усі залежності приходять параметрами `__init__`; дефолт є лише в `clock`, і це функція, а не екземпляр"
+    - "`tests/test_pipeline.py` перевіряє щасливий шлях, падіння валідації, падіння публікації і відписку спостерігача, використовуючи лише fake-и, без `unittest.mock`"
+    - "Тест на щасливий шлях перевіряє точну послідовність статусів і `started_at`/`finished_at` від `FakeClock`"
+    - "`uv run mypy --strict src/formbuilder/generate.py src/formbuilder/cli.py` без помилок"
+  verify: "cd capstone && uv run pytest tests/test_pipeline.py -q"

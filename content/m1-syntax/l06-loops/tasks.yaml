@@ -1,0 +1,271 @@
+- id: t1
+  type: code
+  title: "Нумерований список через enumerate"
+  prompt: |
+    Напишіть `numbered(items, start=1)`, яка повертає список рядків виду `"<номер>. <елемент>"`.
+    Нумерація починається з `start`. Індекс вручну не рахувати: `enumerate` з параметром `start`.
+
+    ```python
+    numbered(["email", "phone"])        # ['1. email', '2. phone']
+    numbered(["only"], start=10)        # ['10. only']
+    numbered([])                        # []
+    ```
+  starter: |
+    def numbered(items: list[str], start: int = 1) -> list[str]:
+        ...
+  harness: |
+    print(numbered(["email", "phone", "age"]))
+    print(numbered(["only"], start=10))
+    print(numbered([]))
+  expected: |
+    ['1. email', '2. phone', '3. age']
+    ['10. only']
+    []
+  hints:
+    - "enumerate віддає пари (номер, елемент), і номер можна зсунути, не додаючи нічого вручну."
+    - "for n, item in enumerate(items, start=start): і f-рядок f\"{n}. {item}\" у список."
+  solution: |
+    def numbered(items: list[str], start: int = 1) -> list[str]:
+        result = []
+        for n, item in enumerate(items, start=start):
+            result.append(f"{n}. {item}")
+        return result
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Таблиця в записи через zip strict"
+  prompt: |
+    Таблиця приходить як список заголовків і список рядків. Напишіть `rows_to_records(headers, rows)`,
+    яка повертає список словників: ключі з `headers`, значення з відповідного рядка.
+
+    Якщо довжина якогось рядка не збігається з кількістю заголовків, функція має кинути `ValueError`,
+    а не мовчки відкинути зайве чи заповнити відсутнє. Самостійно довжини не порівнюйте:
+    є параметр `zip`, який робить це за вас.
+
+    ```python
+    rows_to_records(["id", "type"], [["email", "text"]])   # [{'id': 'email', 'type': 'text'}]
+    rows_to_records(["id", "type"], [["email"]])           # ValueError
+    ```
+  starter: |
+    def rows_to_records(headers: list[str], rows: list[list]) -> list[dict]:
+        ...
+  harness: |
+    print(rows_to_records(["id", "type"], [["email", "text"], ["age", "number"]]))
+    print(rows_to_records(["id"], []))
+    try:
+        rows_to_records(["id", "type"], [["email"]])
+    except ValueError as e:
+        print("ValueError:", e)
+  expected: |
+    [{'id': 'email', 'type': 'text'}, {'id': 'age', 'type': 'number'}]
+    []
+    ValueError: zip() argument 2 is shorter than argument 1
+  hints:
+    - "dict(zip(keys, values)) збирає словник з двох послідовностей; лишається зробити це для кожного рядка."
+    - "zip(headers, row, strict=True) сам кине ValueError при розбіжності довжин."
+  solution: |
+    def rows_to_records(headers: list[str], rows: list[list]) -> list[dict]:
+        records = []
+        for row in rows:
+            records.append(dict(zip(headers, row, strict=True)))
+        return records
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Межі сторінок через range зі step"
+  prompt: |
+    Напишіть `page_ranges(total, page_size)`, яка повертає список кортежів `(start, end)` для посторінкового
+    обходу `total` елементів по `page_size`: `start` включно, `end` виключно, остання сторінка може бути коротшою.
+    Без `while` і без ручного лічильника: один `range` з кроком.
+
+    ```python
+    page_ranges(7, 3)   # [(0, 3), (3, 6), (6, 7)]
+    page_ranges(0, 3)   # []
+    ```
+  starter: |
+    def page_ranges(total: int, page_size: int) -> list[tuple[int, int]]:
+        ...
+  harness: |
+    print(page_ranges(7, 3))
+    print(page_ranges(6, 3))
+    print(page_ranges(2, 5))
+    print(page_ranges(0, 3))
+  expected: |
+    [(0, 3), (3, 6), (6, 7)]
+    [(0, 3), (3, 6)]
+    [(0, 2)]
+    []
+  hints:
+    - "range(start, stop, step) дає всі початки сторінок; кінець кожної це початок плюс розмір, але не більше за total."
+    - "for start in range(0, total, page_size): ranges.append((start, min(start + page_size, total)))"
+  solution: |
+    def page_ranges(total: int, page_size: int) -> list[tuple[int, int]]:
+        ranges = []
+        for start in range(0, total, page_size):
+            ranges.append((start, min(start + page_size, total)))
+        return ranges
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Замикання в циклі без пізнього зв'язування"
+  prompt: |
+    Напишіть `make_limit_checks(limits)`, яка для кожного ліміту повертає функцію-перевірку:
+    `checks[k](value)` повертає `True`, якщо `value <= limits[k]`. Функції створюються в циклі.
+
+    Наївна версія з `lambda value: value <= limit` дасть усім перевіркам останній ліміт.
+    Зафіксуйте значення так, щоб кожна функція пам'ятала свій.
+
+    ```python
+    checks = make_limit_checks([10, 20, 30])
+    [check(15) for check in checks]   # [False, True, True]
+    ```
+  starter: |
+    def make_limit_checks(limits: list[int]) -> list:
+        ...
+  harness: |
+    checks = make_limit_checks([10, 20, 30])
+    print([check(15) for check in checks])
+    print([check(5) for check in checks])
+    print([check(30) for check in checks])
+    print(make_limit_checks([]))
+  expected: |
+    [False, True, True]
+    [True, True, True]
+    [False, False, True]
+    []
+  hints:
+    - "Замикання читає змінну limit при виклику, а не при створенні; потрібно, щоб кожна функція мала власну копію значення."
+    - "Будь-який з трьох способів з уроку: lambda value, limit=limit: value <= limit, functools.partial, або внутрішня фабрика def make_check(limit)."
+  solution: |
+    def make_limit_checks(limits: list[int]) -> list:
+        checks = []
+        for limit in limits:
+            checks.append(lambda value, limit=limit: value <= limit)
+        return checks
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Перше незаповнене обов'язкове поле"
+  prompt: |
+    Конфіг форми це список сторінок, кожна сторінка список полів `{"id": str, "required": bool}`.
+    Відповіді це словник `{field_id: value}`. Напишіть `first_missing_required(pages, answers)`,
+    яка повертає рядок `"page <N>: <field_id>"` для першого обов'язкового поля без відповіді,
+    де `N` це номер сторінки з 1, або `None`, якщо всі обов'язкові заповнені.
+
+    Поле вважається незаповненим, якщо ключа немає в `answers`, або значення `None`, або `""`.
+    Число `0` і `False` це заповнене поле, тож голе `not value` тут не підходить.
+    Пошук має зупинитися на першому знайденому, а не перебирати все.
+
+    ```python
+    pages = [[{"id": "email", "required": True}], [{"id": "age", "required": True}]]
+    first_missing_required(pages, {"email": "a@b.c"})            # 'page 2: age'
+    first_missing_required(pages, {"email": "a@b.c", "age": 0})  # None
+    ```
+  starter: |
+    def first_missing_required(pages: list[list[dict]], answers: dict) -> str | None:
+        ...
+  harness: |
+    pages = [
+        [{"id": "email", "required": True}, {"id": "phone", "required": False}],
+        [{"id": "age", "required": True}, {"id": "note", "required": True}],
+    ]
+    print(first_missing_required(pages, {"email": "a@b.c", "age": 0}))
+    print(first_missing_required(pages, {"email": "a@b.c", "age": 0, "note": "x"}))
+    print(first_missing_required(pages, {"phone": "+380"}))
+    print(first_missing_required(pages, {"email": "", "age": 1, "note": "x"}))
+    print(first_missing_required([], {}))
+  expected: |
+    page 2: note
+    None
+    page 1: email
+    page 1: email
+    None
+  hints:
+    - "Два вкладені for з enumerate(start=1) на зовнішньому; вихід з обох одразу це return із функції."
+    - "value = answers.get(field['id']); незаповнене, якщо value is None or value == ''. Після обох циклів return None."
+  solution: |
+    def first_missing_required(pages: list[list[dict]], answers: dict) -> str | None:
+        for page_no, page in enumerate(pages, start=1):
+            for field in page:
+                if not field["required"]:
+                    continue
+                value = answers.get(field["id"])
+                if value is None or value == "":
+                    return f"page {page_no}: {field['id']}"
+        return None
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    for field in []:
+        pass
+    print(field)
+    ```
+  options: ["[]", "None", "NameError", "порожній рядок"]
+  answer: 2
+  explain: |
+    Тіло циклу не виконалось жодного разу, тож присвоєння `field = ...` не сталось, і змінної не існує: `NameError`.
+    `None` спокусливий з інтуїції "оголошена, але не присвоєна", як `let field;` у JS, але Python не оголошує змінну
+    окремо від присвоєння. `[]` плутає змінну циклу з iterable. Якби список був непорожнім, `field` лишилась би
+    після циклу з останнім значенням, бо `for` не створює scope.
+
+- id: q2
+  type: quiz
+  question: |
+    Скільки елементів у результаті?
+    ```python
+    len(list(zip("abc", [1, 2], range(10))))
+    ```
+  options: ["2", "3", "10", "ValueError"]
+  answer: 0
+  explain: |
+    `zip` без `strict=True` зупиняється на найкоротшому iterable, тут це `[1, 2]`, тому 2 кортежі.
+    `3` і `10` це інтуїція "довжина першого" або "довжина найдовшого з undefined у порожніх місцях", як робив би
+    ручний `map` по індексу в JS. `ValueError` з'явився б лише зі `strict=True`.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    for n in [1, 3, 5]:
+        if n % 2 == 0:
+            print("even")
+            break
+    else:
+        print("no even")
+    ```
+  options: ["no even", "even", "нічого", "SyntaxError"]
+  answer: 0
+  explain: |
+    `else` у `for` виконується, коли цикл дійшов до кінця без `break`. Парних чисел немає, `break` не спрацював,
+    тож друкується `no even`. Читання `else` як "інакше до `if`" підказує, що він мав би спрацювати на кожному непарному
+    і надрукувати тричі, але відступ показує, що він належить циклу, а не `if`. `SyntaxError` ні: конструкція легальна.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    fns = [lambda: n * 10 for n in range(3)]
+    print(fns[0]())
+    ```
+  options: ["0", "20", "NameError", "30"]
+  answer: 1
+  explain: |
+    Усі три `lambda` замикають одну й ту саму змінну `n`, і читають її при виклику, коли цикл уже завершився з `n == 2`.
+    Тому `fns[0]()` дає `20`, а не `0`. `0` це інтуїція `let` з JS, де кожна ітерація має свою прив'язку.
+    `NameError` ні: змінна comprehension живе всередині замикання. `30` переплутало останнє значення `range(3)` з його довжиною.
+    Виправлення: `lambda n=n: n * 10`, `functools.partial` або фабрика-функція.

@@ -1,0 +1,653 @@
+- id: t1
+  type: code
+  title: "repr і str для поля форми"
+  prompt: |
+    Допишіть `__repr__` і `__str__` класу `Field`.
+
+    - `repr(field)` виглядає як вираз, що створює рівний об'єкт, з усіма трьома параметрами:
+      `Field('email', kind='email', required=True)`. Рядки в лапках, тому значення підставляйте через `!r`.
+      Ім'я класу беріть з `type(self).__name__`, щоб підклас друкувався своїм іменем.
+    - `str(field)` для людини: `email [email] *` для обов'язкового поля, `note [text]` для необов'язкового.
+
+    ```python
+    print([Field("email", "email", required=True), Field("note")])
+    # [Field('email', kind='email', required=True), Field('note', kind='text', required=False)]
+    ```
+  starter: |
+    class Field:
+        def __init__(self, name: str, kind: str = "text", required: bool = False) -> None:
+            self.name = name
+            self.kind = kind
+            self.required = required
+
+        def __repr__(self) -> str:
+            ...
+
+        def __str__(self) -> str:
+            ...
+  harness: |
+    f = Field("email", "email", required=True)
+    n = Field("note")
+    print(repr(f))
+    print(str(n))
+    print(f)
+    print(f"{f!r} / {n}")
+    print([f, n])
+
+
+    class Checkbox(Field):
+        pass
+
+
+    print(repr(Checkbox("agree", "checkbox")))
+    print(repr(Field("it's", "text")))
+  expected: |
+    Field('email', kind='email', required=True)
+    note [text]
+    email [email] *
+    Field('email', kind='email', required=True) / note [text]
+    [Field('email', kind='email', required=True), Field('note', kind='text', required=False)]
+    Checkbox('agree', kind='checkbox', required=False)
+    Field("it's", kind='text', required=False)
+  hints:
+    - "Список друкує repr кожного елемента, тому п'ятий рядок виводу залежить лише від __repr__. Конвертер !r сам обирає лапки для рядка з апострофом."
+    - "f\"{type(self).__name__}({self.name!r}, kind={self.kind!r}, required={self.required!r})\""
+    - "__str__: f\"{self.name} [{self.kind}]\" + (\" *\" if self.required else \"\")"
+  solution: |
+    class Field:
+        def __init__(self, name: str, kind: str = "text", required: bool = False) -> None:
+            self.name = name
+            self.kind = kind
+            self.required = required
+
+        def __repr__(self) -> str:
+            return (
+                f"{type(self).__name__}({self.name!r}, "
+                f"kind={self.kind!r}, required={self.required!r})"
+            )
+
+        def __str__(self) -> str:
+            return f"{self.name} [{self.kind}]" + (" *" if self.required else "")
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Version: рівність, хеш і порядок"
+  prompt: |
+    Напишіть клас `Version` для рядків на кшталт `"1.2.3"` (будь-яка кількість частин, лише цифри).
+
+    - Нулі в кінці незначущі: `Version("1.2") == Version("1.2.0") == Version("1.2.0.0")`.
+      Рівні версії зобов'язані мати рівний хеш, тож `{Version("1.2"), Version("1.2.0")}` має один елемент.
+    - Порядок числовий за частинами: `Version("1.10") > Version("1.9.9")`.
+    - Усі шість порівнянь працюють; визначте `__eq__`, `__lt__` і `__hash__`, решту добудуйте `functools.total_ordering`.
+    - Для чужого типу методи повертають `NotImplemented`: тоді `==` з рядком дає `False`, а `<` з рядком `TypeError`.
+    - `repr` показує вихідний текст: `Version('1.2')`.
+  starter: |
+    from functools import total_ordering
+
+
+    @total_ordering
+    class Version:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            ...
+
+        def __repr__(self) -> str:
+            ...
+
+        def __eq__(self, other: object) -> bool:
+            ...
+
+        def __lt__(self, other: object) -> bool:
+            ...
+
+        def __hash__(self) -> int:
+            ...
+  harness: |
+    a, b, c = Version("1.2"), Version("1.2.0"), Version("1.10")
+    print(a == b, a != b, hash(a) == hash(b))
+    print(len({a, b, c}))
+    print(sorted([c, Version("1.2.1"), a]))
+    print(a < c, c >= b, a <= b, a > b)
+    print(max([Version("0.9"), c, Version("1.9.9")]))
+    print(a == "1.2", a.__eq__("1.2"), a.__lt__("1.2"))
+    try:
+        a < "1.3"
+    except TypeError as e:
+        print("TypeError:", e)
+    print({Version("2.0"): "major"}[Version("2")])
+  expected: |
+    True False True
+    2
+    [Version('1.2'), Version('1.2.1'), Version('1.10')]
+    True True True False
+    Version('1.10')
+    False NotImplemented NotImplemented
+    TypeError: '<' not supported between instances of 'Version' and 'str'
+    major
+  hints:
+    - "Зберігайте нормалізований кортеж цілих чисел без нулів у кінці і порівнюйте та хешуйте саме його: кортежі вже порівнюються поелементно."
+    - "parts = [int(p) for p in text.split('.')]; while parts and parts[-1] == 0: parts.pop(); self._key = tuple(parts)"
+    - "def __lt__(self, other):\n    if not isinstance(other, Version):\n        return NotImplemented\n    return self._key < other._key"
+  solution: |
+    from functools import total_ordering
+
+
+    @total_ordering
+    class Version:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            parts = [int(p) for p in text.split(".")]
+            while parts and parts[-1] == 0:
+                parts.pop()
+            self._key = tuple(parts)
+
+        def __repr__(self) -> str:
+            return f"Version({self.text!r})"
+
+        def __eq__(self, other: object) -> bool:
+            if not isinstance(other, Version):
+                return NotImplemented
+            return self._key == other._key
+
+        def __lt__(self, other: object) -> bool:
+            if not isinstance(other, Version):
+                return NotImplemented
+            return self._key < other._key
+
+        def __hash__(self) -> int:
+            return hash(self._key)
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "FieldList: індекс, зріз і пошук за id"
+  prompt: |
+    `FieldList` обгортає список полів форми, кожне поле це словник з ключами `"id"` і `"type"`.
+    Реалізуйте контейнерні методи.
+
+    - `len(fl)` кількість полів; `bool(fl)` хибний для порожнього (окремий `__bool__` не потрібен).
+    - `fl[i]` поле за індексом, включно з від'ємним; індекс за межами дає `IndexError` від списку.
+    - `fl[1:]`, `fl[::-1]` новий `FieldList` (той самий тип, а не список).
+    - `fl["phone"]` поле за `id`; невідомий id дає `KeyError` з цим id.
+    - Ключ іншого типу дає `TypeError` з текстом `FieldList indices must be int, slice or str, not float`
+      (ім'я типу підставляється).
+    - `"phone" in fl` перевіряє id за O(1); для не-рядка, наприклад словника, повертає `False`, а не падає.
+    - `for field in fl` віддає словники полів; `__iter__` напишіть генератором.
+    - `repr(fl)` виглядає як `<FieldList email, phone, age>`.
+  starter: |
+    class FieldList:
+        def __init__(self, fields: list[dict[str, str]]) -> None:
+            self._fields = list(fields)
+            ...
+
+        def __repr__(self) -> str:
+            ...
+
+        def __len__(self) -> int:
+            ...
+
+        def __getitem__(self, key):
+            ...
+
+        def __contains__(self, item: object) -> bool:
+            ...
+
+        def __iter__(self):
+            ...
+  harness: |
+    fl = FieldList([
+        {"id": "email", "type": "email"},
+        {"id": "phone", "type": "tel"},
+        {"id": "age", "type": "number"},
+    ])
+    print(len(fl), bool(fl), bool(FieldList([])))
+    print(fl[0]["id"], fl[-1]["id"], fl["phone"]["type"])
+    print(fl[1:], fl[::-1], type(fl[:1]).__name__)
+    print("age" in fl, "name" in fl, {"id": "age", "type": "number"} in fl)
+    print([f["id"] for f in fl], [f["type"] for f in fl])
+    print(type(iter(fl)).__name__)
+    for key in ["name", 10, 1.5]:
+        try:
+            fl[key]
+        except (KeyError, IndexError, TypeError) as e:
+            print(type(e).__name__, e)
+  expected: |
+    3 True False
+    email age tel
+    <FieldList phone, age> <FieldList age, phone, email> FieldList
+    True False False
+    ['email', 'phone', 'age'] ['email', 'tel', 'number']
+    generator
+    KeyError 'name'
+    IndexError list index out of range
+    TypeError FieldList indices must be int, slice or str, not float
+  hints:
+    - "Поруч зі списком тримайте словник {id: поле}, побудований в __init__: він дасть і fl[\"phone\"], і in за O(1). У __getitem__ розберіть тип ключа через isinstance, порядок: slice, int, str."
+    - "if isinstance(key, slice): return FieldList(self._fields[key]); для int просто self._fields[key], а для str self._by_id[key]. Для __contains__: isinstance(item, str) and item in self._by_id."
+    - "def __iter__(self):\n    yield from self._fields"
+  solution: |
+    class FieldList:
+        def __init__(self, fields: list[dict[str, str]]) -> None:
+            self._fields = list(fields)
+            self._by_id = {f["id"]: f for f in self._fields}
+
+        def __repr__(self) -> str:
+            return f"<FieldList {', '.join(f['id'] for f in self._fields)}>"
+
+        def __len__(self) -> int:
+            return len(self._fields)
+
+        def __getitem__(self, key):
+            if isinstance(key, slice):
+                return FieldList(self._fields[key])
+            if isinstance(key, int):
+                return self._fields[key]
+            if isinstance(key, str):
+                return self._by_id[key]
+            raise TypeError(
+                f"FieldList indices must be int, slice or str, not {type(key).__name__}"
+            )
+
+        def __contains__(self, item: object) -> bool:
+            return isinstance(item, str) and item in self._by_id
+
+        def __iter__(self):
+            yield from self._fields
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Spacing: арифметика відступів"
+  prompt: |
+    `Spacing` описує відступи елемента як у CSS: `top, right, bottom, left`, цілі числа. Клас незмінний:
+    жоден оператор не змінює операнди, а повертає новий об'єкт.
+
+    - `repr`: `Spacing(8, 16, 8, 16)`.
+    - `a + b` додає по сторонах; `Spacing + число` дає `TypeError` (повертайте `NotImplemented`).
+    - `sum([a, b])` працює без стартового значення: потрібен `__radd__`, який обробляє `0`.
+    - `s * 2` і `2 * s` множать кожну сторону на `int`; `s * 1.5` дає `TypeError`.
+    - `-s` змінює знак усіх сторін.
+    - `==` порівнює значення, рівні об'єкти мають рівний хеш.
+    - `bool(Spacing())` хибний, якщо всі сторони нульові.
+    - `__iadd__` не визначайте: `c += b` має створити новий об'єкт, а alias лишитись старим.
+  starter: |
+    class Spacing:
+        def __init__(self, top: int = 0, right: int = 0, bottom: int = 0, left: int = 0) -> None:
+            self.top = top
+            self.right = right
+            self.bottom = bottom
+            self.left = left
+  harness: |
+    a = Spacing(8, 16, 8, 16)
+    b = Spacing(top=4)
+    print(a + b)
+    print(2 * b, b * 3)
+    print(-b)
+    print(sum([a, b, b]))
+    print(sum([], Spacing()))
+    print(a == Spacing(8, 16, 8, 16), a != b, len({a, Spacing(8, 16, 8, 16)}))
+    print(bool(Spacing()), bool(b))
+    c = a
+    c += b
+    print(c, a)
+    for expr in (lambda: a + 1, lambda: a * 1.5, lambda: "x" + a):
+        try:
+            expr()
+        except TypeError as e:
+            print("TypeError:", e)
+  expected: |
+    Spacing(12, 16, 8, 16)
+    Spacing(8, 0, 0, 0) Spacing(12, 0, 0, 0)
+    Spacing(-4, 0, 0, 0)
+    Spacing(16, 16, 8, 16)
+    Spacing(0, 0, 0, 0)
+    True True 1
+    False True
+    Spacing(12, 16, 8, 16) Spacing(8, 16, 8, 16)
+    TypeError: unsupported operand type(s) for +: 'Spacing' and 'int'
+    TypeError: unsupported operand type(s) for *: 'Spacing' and 'float'
+    TypeError: can only concatenate str (not "Spacing") to str
+  hints:
+    - "Зручно мати метод _sides(), що повертає кортеж (top, right, bottom, left): з нього рахуються repr, __eq__, __hash__ і __bool__, а оператори будують новий Spacing з *кортежу."
+    - "__radd__: якщо other == 0, повернути self, інакше делегувати в self.__add__(other), який сам поверне NotImplemented для чужого типу. __rmul__ = __mul__."
+    - "def __mul__(self, k):\n    if not isinstance(k, int):\n        return NotImplemented\n    return Spacing(*(side * k for side in self._sides()))"
+  solution: |
+    class Spacing:
+        def __init__(self, top: int = 0, right: int = 0, bottom: int = 0, left: int = 0) -> None:
+            self.top = top
+            self.right = right
+            self.bottom = bottom
+            self.left = left
+
+        def _sides(self) -> tuple[int, int, int, int]:
+            return (self.top, self.right, self.bottom, self.left)
+
+        def __repr__(self) -> str:
+            return f"Spacing{self._sides()}"
+
+        def __eq__(self, other: object) -> bool:
+            if not isinstance(other, Spacing):
+                return NotImplemented
+            return self._sides() == other._sides()
+
+        def __hash__(self) -> int:
+            return hash(self._sides())
+
+        def __bool__(self) -> bool:
+            return any(self._sides())
+
+        def __add__(self, other: object) -> "Spacing":
+            if not isinstance(other, Spacing):
+                return NotImplemented
+            return Spacing(*(x + y for x, y in zip(self._sides(), other._sides())))
+
+        def __radd__(self, other: object) -> "Spacing":
+            if other == 0:
+                return self
+            return self.__add__(other)
+
+        def __mul__(self, k: object) -> "Spacing":
+            if not isinstance(k, int):
+                return NotImplemented
+            return Spacing(*(side * k for side in self._sides()))
+
+        __rmul__ = __mul__
+
+        def __neg__(self) -> "Spacing":
+            return Spacing(*(-side for side in self._sides()))
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Валідатори, що викликаються й комбінуються через &"
+  prompt: |
+    Зберіть маленьку бібліотеку правил валідації, у якій працює все з уроку.
+
+    - `Rule` базовий клас. Екземпляр правила викликаний: `rule(value)` повертає список повідомлень про помилки
+      (порожній, якщо значення валідне).
+    - `Required()` дає `["required"]`, якщо `value.strip()` порожній.
+    - `MaxLength(limit)` дає `[f"max {limit} chars"]`, якщо `len(value) > limit`.
+    - `a & b` повертає `AllOf`, який викликає всі правила по черзі й склеює їхні помилки.
+      Комбінації сплющуються: `(a & b) & c` і `a & (b & c)` дають той самий `AllOf` з трьома правилами.
+      `rule & щось_не_правило` дає `TypeError` (повертайте `NotImplemented`).
+    - `repr`: `Required()`, `MaxLength(5)`, а для `AllOf` правила через `" & "`: `Required() & MaxLength(5)`.
+    - Правила порівнюються за значенням і hashable: `MaxLength(5) == MaxLength(5)`, у множині вони зливаються,
+      `AllOf` годиться як ключ словника. Для чужого типу `__eq__` повертає `NotImplemented`.
+
+    Рівність і хеш реалізуйте один раз у `Rule` через метод `_key()`, який підкласи перевизначають.
+  starter: |
+    class Rule:
+        def __call__(self, value: str) -> list[str]:
+            raise NotImplementedError
+
+        def _key(self) -> tuple:
+            raise NotImplementedError
+
+        def __eq__(self, other: object) -> bool:
+            ...
+
+        def __hash__(self) -> int:
+            ...
+
+        def __and__(self, other: object) -> "AllOf":
+            ...
+
+
+    class Required(Rule):
+        ...
+
+
+    class MaxLength(Rule):
+        def __init__(self, limit: int) -> None:
+            self.limit = limit
+
+
+    class AllOf(Rule):
+        def __init__(self, *rules: Rule) -> None:
+            self.rules = rules
+  harness: |
+    r = Required()
+    m = MaxLength(5)
+    rule = r & m
+    print(rule)
+    print(rule(""), rule("abcdefg"), rule("ok"), rule("   "))
+    print(callable(rule), isinstance(rule, Rule))
+    print(r & m & MaxLength(3))
+    print((r & m) & MaxLength(3) == r & (m & MaxLength(3)))
+    print(MaxLength(5) == m, MaxLength(5) == MaxLength(6), m == 5, Required() == Required())
+    print(len({MaxLength(5), m, Required(), Required()}))
+    print({r & m: "email"}[Required() & MaxLength(5)])
+    try:
+        r & len
+    except TypeError as e:
+        print("TypeError:", e)
+  expected: |
+    Required() & MaxLength(5)
+    ['required'] ['max 5 chars'] [] ['required']
+    True True
+    Required() & MaxLength(5) & MaxLength(3)
+    True
+    True False False True
+    2
+    email
+    TypeError: unsupported operand type(s) for &: 'Required' and 'builtin_function_or_method'
+  hints:
+    - "У Rule: __eq__ перевіряє isinstance(other, Rule) (інакше NotImplemented), а далі type(self) is type(other) і рівність _key(). __hash__ хешує (type(self).__name__, self._key()). Підкласи не визначають __eq__, інакше Python скине їм __hash__ у None."
+    - "__and__: розкладіть обидва операнди на кортежі правил (для AllOf це self.rules, для решти (self,)) і поверніть AllOf(*left, *right). _key() для AllOf це self.rules: правила самі hashable."
+    - "class MaxLength(Rule):\n    ...\n    def __call__(self, value):\n        return [f\"max {self.limit} chars\"] if len(value) > self.limit else []\n    def _key(self):\n        return (self.limit,)\n    def __repr__(self):\n        return f\"MaxLength({self.limit})\""
+  solution: |
+    class Rule:
+        def __call__(self, value: str) -> list[str]:
+            raise NotImplementedError
+
+        def _key(self) -> tuple:
+            raise NotImplementedError
+
+        def __eq__(self, other: object) -> bool:
+            if not isinstance(other, Rule):
+                return NotImplemented
+            return type(self) is type(other) and self._key() == other._key()
+
+        def __hash__(self) -> int:
+            return hash((type(self).__name__, self._key()))
+
+        def _parts(self) -> tuple["Rule", ...]:
+            return (self,)
+
+        def __and__(self, other: object) -> "AllOf":
+            if not isinstance(other, Rule):
+                return NotImplemented
+            return AllOf(*self._parts(), *other._parts())
+
+
+    class Required(Rule):
+        def __call__(self, value: str) -> list[str]:
+            return ["required"] if not value.strip() else []
+
+        def _key(self) -> tuple:
+            return ()
+
+        def __repr__(self) -> str:
+            return "Required()"
+
+
+    class MaxLength(Rule):
+        def __init__(self, limit: int) -> None:
+            self.limit = limit
+
+        def __call__(self, value: str) -> list[str]:
+            return [f"max {self.limit} chars"] if len(value) > self.limit else []
+
+        def _key(self) -> tuple:
+            return (self.limit,)
+
+        def __repr__(self) -> str:
+            return f"MaxLength({self.limit})"
+
+
+    class AllOf(Rule):
+        def __init__(self, *rules: Rule) -> None:
+            self.rules = rules
+
+        def __call__(self, value: str) -> list[str]:
+            return [error for rule in self.rules for error in rule(value)]
+
+        def _key(self) -> tuple:
+            return self.rules
+
+        def _parts(self) -> tuple[Rule, ...]:
+            return self.rules
+
+        def __repr__(self) -> str:
+            return " & ".join(repr(rule) for rule in self.rules)
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class Tags:
+        def __init__(self, *tags):
+            self.tags = list(tags)
+            self.__len__ = lambda: 99
+
+        def __len__(self):
+            return len(self.tags)
+
+
+    t = Tags("a", "b")
+    print(len(t), t.__len__())
+    ```
+  options:
+    - "2 99"
+    - "99 99"
+    - "2 2"
+    - "TypeError: object of type 'Tags' has no len()"
+  answer: 0
+  explain: |
+    `len(t)` шукає `__len__` на типі, `type(t).__len__(t)`, і отримує метод класу: 2. Явне `t.__len__()` це
+    звичайний доступ через крапку, а він спершу дивиться в `__dict__` екземпляра, де лежить lambda: 99.
+    "99 99" це JS-інтуїція: там `obj[Symbol.iterator] = ...` на екземплярі перекриває метод прототипу.
+    "2 2" означало б, що присвоєння атрибута екземпляра проігнороване взагалі, але воно лише невидиме для `len()`.
+    `TypeError` був би, якби `__len__` існував лише на екземплярі без методу в класі.
+
+- id: q2
+  type: quiz
+  question: |
+    Що станеться?
+    ```python
+    class Ref:
+        def __init__(self, id):
+            self.id = id
+
+        def __eq__(self, other):
+            return isinstance(other, Ref) and self.id == other.id
+
+
+    print(Ref(1) == Ref(1))
+    print(len({Ref(1), Ref(1)}))
+    ```
+  options:
+    - "True, потім 1"
+    - "True, потім 2"
+    - "True, потім TypeError: unhashable type: 'Ref'"
+    - "False, потім 2"
+  answer: 2
+  explain: |
+    Визначивши `__eq__`, клас отримує `__hash__ = None`, тому множина з його екземплярів падає з
+    `TypeError: unhashable type: 'Ref'`. Python робить так навмисно: успадкований хеш від `id` дав би двом рівним
+    об'єктам різні хеші, і множина тримала б обидва. Саме це описує варіант "True, потім 2", який був би правдою,
+    якби хеш не скидався. Варіант з 1 вимагає `__hash__`, узгодженого з `__eq__`, наприклад `hash(self.id)`.
+    "False" для першого рядка це поведінка за замовчуванням без `__eq__`, коли рівність означає identity.
+
+- id: q3
+  type: quiz
+  question: |
+    Що станеться при виконанні останнього рядка?
+    ```python
+    class Money:
+        def __init__(self, cents):
+            self.cents = cents
+
+        def __add__(self, other):
+            if isinstance(other, Money):
+                return Money(self.cents + other.cents)
+            return NotImplemented
+
+
+    total = sum([Money(100), Money(250)])
+    ```
+  options:
+    - "total.cents == 350"
+    - "TypeError: unsupported operand type(s) for +: 'int' and 'Money'"
+    - "TypeError: unsupported operand type(s) for +: 'Money' and 'int'"
+    - "total == 0, бо sum пропускає нечислові елементи"
+  answer: 1
+  explain: |
+    `sum` починає зі стартового значення `0` і першою робить операцію `0 + Money(100)`. Лівий операнд `int`, його
+    `__add__` не знає `Money` і повертає `NotImplemented`; Python пробує `Money.__radd__`, а його немає. Звідси
+    `'int' and 'Money'` саме в такому порядку. Варіант з `'Money' and 'int'` був би при `Money(100) + 0`.
+    350 вийде, якщо додати `__radd__`, що обробляє нуль, або передати старт: `sum(items, Money(0))`.
+    `sum` нічого не пропускає і нічого не перетворює: коерції, як `valueOf` у JS, у Python немає.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class Proxy:
+        def __init__(self, target):
+            self._target = target
+
+        def __getattr__(self, name):
+            return getattr(self._target, name)
+
+
+    p = Proxy([1, 2, 3])
+    print(p.count(2))
+    print(p.__len__())
+    print(len(p))
+    ```
+  options:
+    - "1, 3, 3"
+    - "1, 3, потім TypeError: object of type 'Proxy' has no len()"
+    - "AttributeError на p.count"
+    - "RecursionError у __init__"
+  answer: 1
+  explain: |
+    `p.count` і `p.__len__` це звичайні читання через крапку: у класі таких атрибутів немає, тому спрацьовує
+    `__getattr__` і повертає метод списку. `len(p)` шукає `__len__` на типі `Proxy`, повз `__getattr__`, і не
+    знаходить. "1, 3, 3" це інтуїція JS-`Proxy`, який перехоплює будь-яку властивість. `AttributeError` був би
+    без `__getattr__`. `RecursionError` у `__init__` трапився б, якби клас перевизначав `__setattr__` і
+    записував через `self.x = ...`; `__getattr__` при записі не викликається взагалі.
+
+- id: p1
+  type: project
+  title: "ElementTree у репозиторії капстоуну"
+  prompt: |
+    Перенесіть `ElementTree` з розділу "Для капстоуну" в `src/formbuilder/domain.py`, поруч з frozen dataclass
+    з m2-l05, які він обходить, і покрийте його тестами в `tests/test_tree.py`. Окремого модуля не потрібно:
+    це той самий нижній шар, і правило з m3-l01 (`domain` нічого не імпортує з `formbuilder`) лишається.
+    `ElementTree` має покладатися лише на атрибути `name` і `children`, а не на конкретний клас елемента.
+
+    Додайте те, чого немає в уроці:
+    - `__getitem__` приймає і `int`: `tree[0]` перший елемент у порядку обходу, від'ємні індекси працюють;
+    - `__iter__` лишається генератором, а `reversed(tree)` не потрібен;
+    - `ElementTree.from_config(config)` як `classmethod`, що приймає `domain.FormConfig`.
+  checklist:
+    - "`len(tree)` рахує всі елементи з вкладеними; тест на дерево глибиною щонайменше 3"
+    - "`list(tree)` дає обхід у глибину в порядку оголошення; два послідовні `list(tree)` рівні"
+    - "`tree[name]` і `name in tree` працюють за O(1) через словник, побудований один раз; невідоме ім'я дає `KeyError`, `None in tree` дає `False`"
+    - "Дублікат `name` у дереві дає `ValueError` у конструкторі, тест перевіряє текст через `pytest.raises(..., match=...)`"
+    - "`__eq__` повертає `NotImplemented` для чужого типу; тест перевіряє і `tree == other_tree`, і `tree != \"signup\"`"
+    - "`__hash__` узгоджений з `__eq__`: два рівні дерева дають множину з одного елемента"
+    - "`repr(tree)` у кутових дужках з id форми й кількістю елементів, без адреси в пам'яті"
+    - "`uv run mypy src` у strict-режимі проходить на `domain.py`, `tests/test_layers.py` з m3-l01 зелений"
+  verify: "cd capstone && uv run pytest tests/test_tree.py -q"

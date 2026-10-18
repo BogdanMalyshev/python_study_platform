@@ -1,0 +1,489 @@
+- id: t1
+  type: code
+  title: "Нормалізоване ім'я і ім'я wheel"
+  prompt: |
+    Інсталятори порівнюють імена пакетів після нормалізації: регістр не важливий, а будь-яка
+    послідовність символів `-`, `_`, `.` дорівнює одному дефісу. У назві файлу wheel та сама
+    послідовність замінюється одним підкресленням.
+
+    Напишіть дві функції:
+    - `normalize(name)` повертає нормалізоване ім'я в нижньому регістрі з дефісами;
+    - `wheel_filename(name, version)` повертає ім'я universal wheel `{name}-{version}-py3-none-any.whl`,
+      де `name` нормалізований, але з підкресленнями замість дефісів.
+
+    ```python
+    normalize("Pydantic_Core")              # 'pydantic-core'
+    wheel_filename("fb-markdown", "0.1.0")  # 'fb_markdown-0.1.0-py3-none-any.whl'
+    ```
+  starter: |
+    import re
+
+
+    def normalize(name: str) -> str:
+        ...
+
+
+    def wheel_filename(name: str, version: str) -> str:
+        ...
+  harness: |
+    for name in ["Pydantic_Core", "pydantic-core", "PyYAML", "zope.interface", "my__weird--.name"]:
+        print(normalize(name))
+    print(normalize("Pydantic_Core") == normalize("pydantic.core"))
+    print(wheel_filename("fb-markdown", "0.1.0"))
+    print(wheel_filename("FormBuilder", "0.2.0rc1"))
+    print(wheel_filename("zope.interface", "7.2"))
+  expected: |
+    pydantic-core
+    pydantic-core
+    pyyaml
+    zope-interface
+    my-weird-name
+    True
+    fb_markdown-0.1.0-py3-none-any.whl
+    formbuilder-0.2.0rc1-py3-none-any.whl
+    zope_interface-7.2-py3-none-any.whl
+  hints:
+    - "Одна регулярка, яка ловить будь-яку непорожню послідовність з трьох символів, і lower()."
+    - "re.sub(r\"[-_.]+\", \"-\", name).lower(); для wheel та сама регулярка з \"_\" замість \"-\"."
+  solution: |
+    import re
+
+
+    def normalize(name: str) -> str:
+        return re.sub(r"[-_.]+", "-", name).lower()
+
+
+    def wheel_filename(name: str, version: str) -> str:
+        dist = re.sub(r"[-_.]+", "_", name).lower()
+        return f"{dist}-{version}-py3-none-any.whl"
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Розібрати рядок залежності PEP 508"
+  prompt: |
+    Напишіть `parse_requirement(line)`, яка розбирає рядок залежності з `pyproject.toml` на частини
+    і повертає кортеж `(name, extras, specifier, marker)`:
+
+    - `name` як написано, без пробілів навколо;
+    - `extras` відсортований список імен з квадратних дужок (порожній, якщо дужок немає);
+    - `specifier` специфікатор версії без жодних пробілів (`""`, якщо його немає);
+    - `marker` текст після `;` без пробілів по краях, або `None`.
+
+    Бібліотека `packaging` недоступна, розбирайте самі. Пробіли можуть стояти між будь-якими частинами.
+
+    ```python
+    parse_requirement("httpx[http2, brotli] >= 0.27")
+    # ('httpx', ['brotli', 'http2'], '>=0.27', None)
+    parse_requirement("uvloop>=0.21; sys_platform != 'win32'")
+    # ('uvloop', [], '>=0.21', "sys_platform != 'win32'")
+    ```
+  starter: |
+    import re
+
+
+    def parse_requirement(line: str) -> tuple[str, list[str], str, str | None]:
+        ...
+  harness: |
+    for line in [
+        "pydantic>=2.11,<3",
+        "httpx[http2, brotli] >= 0.27",
+        "uvloop>=0.21; sys_platform != 'win32'",
+        "fastapi",
+        "tomli ; python_version < '3.11'",
+        "uvicorn[standard] >=0.30, <1 ; python_version < '3.14' and sys_platform != 'win32'",
+    ]:
+        print(parse_requirement(line))
+  expected: |
+    ('pydantic', [], '>=2.11,<3', None)
+    ('httpx', ['brotli', 'http2'], '>=0.27', None)
+    ('uvloop', [], '>=0.21', "sys_platform != 'win32'")
+    ('fastapi', [], '', None)
+    ('tomli', [], '', "python_version < '3.11'")
+    ('uvicorn', ['standard'], '>=0.30,<1', "python_version < '3.14' and sys_platform != 'win32'")
+  hints:
+    - "Спочатку відріжте маркер по першій `;`: усе, що праворуч, не розбирається далі. Ліву частину розберіть регуляркою: ім'я, необов'язкові дужки, решта."
+    - "line.partition(\";\") дає ліву частину і маркер; re.fullmatch(r\"\\s*([A-Za-z0-9][A-Za-z0-9._-]*)\\s*(?:\\[([^\\]]*)\\])?\\s*(.*)\", left) дає ім'я, extras і специфікатор."
+  solution: |
+    import re
+
+    REQ = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[([^\]]*)\])?\s*(.*)")
+
+
+    def parse_requirement(line: str) -> tuple[str, list[str], str, str | None]:
+        left, sep, marker = line.partition(";")
+        match = REQ.fullmatch(left)
+        if match is None:
+            raise ValueError(f"invalid requirement: {line!r}")
+        name, extras_raw, spec = match.groups()
+        extras = sorted(e.strip() for e in (extras_raw or "").split(",") if e.strip())
+        return name, extras, re.sub(r"\s+", "", spec), marker.strip() if sep else None
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Ключ сортування версій PEP 440"
+  prompt: |
+    Звичайне сортування рядків дає `"1.10" < "1.9"`, а semver-інтуїція ставить `.post1` до фінального релізу.
+    Напишіть `version_key(v)`, яку можна передати в `sorted(key=...)`, для підмножини PEP 440:
+
+    `RELEASE[{a|b|rc}N][.postN][.devN]`, де `RELEASE` це числа через крапку.
+
+    Порядок для однакового релізу: `X.devN` < `XaN` < `XbN` < `XrcN` < `X` < `X.postN`.
+    Нулі в кінці релізу не важливі: `1.0` і `1.0.0` дають рівні ключі. Dev-суфікс після пре-релізу
+    (`1.0a1.dev2`) ставить версію перед відповідним пре-релізом (`1.0a1`).
+
+    ```python
+    sorted(["1.0", "1.0rc1", "1.0.post1", "1.0.dev0"], key=version_key)
+    # ['1.0.dev0', '1.0rc1', '1.0', '1.0.post1']
+    ```
+  starter: |
+    import re
+
+
+    def version_key(v: str) -> tuple:
+        ...
+  harness: |
+    versions = ["1.0.post1", "1.10", "1.0", "1.0rc1", "1.0.dev0", "1.0a1", "1.9", "1.0b2", "0.9", "1.0a1.dev2", "2.0rc1"]
+    print(sorted(versions, key=version_key))
+    print(version_key("1.0") == version_key("1.0.0"))
+    print(version_key("1.0.post1") > version_key("1.0"))
+    print(max(["2.0rc1", "1.10", "1.9.post3"], key=version_key))
+  expected: |
+    ['0.9', '1.0.dev0', '1.0a1.dev2', '1.0a1', '1.0b2', '1.0rc1', '1.0', '1.0.post1', '1.9', '1.10', '2.0rc1']
+    True
+    True
+    2.0rc1
+  hints:
+    - "Розберіть рядок регуляркою на чотири частини: реліз, пре-реліз, post, dev. Реліз перетворіть на кортеж int і відріжте нулі в кінці. Кожну наступну частину закодуйте так, щоб відсутність стояла в потрібному місці порядку."
+    - "Пре-реліз: (0|1|2, N) для a|b|rc; якщо пре-релізу немає, але є dev без post, це (-1, 0); інакше (3, 0) як фінал. Post: N або -1. Dev: (0, N) якщо є, інакше (1, 0)."
+  solution: |
+    import re
+
+    PATTERN = re.compile(r"(\d+(?:\.\d+)*)(?:(a|b|rc)(\d+))?(?:\.post(\d+))?(?:\.dev(\d+))?")
+    PRE_RANK = {"a": 0, "b": 1, "rc": 2}
+
+
+    def version_key(v: str) -> tuple:
+        match = PATTERN.fullmatch(v)
+        if match is None:
+            raise ValueError(f"unsupported version: {v!r}")
+        release_raw, pre_tag, pre_n, post, dev = match.groups()
+        release = tuple(int(part) for part in release_raw.split("."))
+        while len(release) > 1 and release[-1] == 0:
+            release = release[:-1]
+        if pre_tag:
+            pre = (PRE_RANK[pre_tag], int(pre_n))
+        elif dev is not None and post is None:
+            pre = (-1, 0)
+        else:
+            pre = (3, 0)
+        post_key = int(post) if post is not None else -1
+        dev_key = (0, int(dev)) if dev is not None else (1, 0)
+        return (release, pre, post_key, dev_key)
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Реєстр рендерерів з entry points"
+  prompt: |
+    Капстоун шукає рендерери в групі entry points `formbuilder.renderers`. Напишіть
+    `load_renderers(group)`, яка повертає кортеж `(renderers, errors)`:
+
+    - `renderers` словник `{ім'я entry point: завантажений об'єкт}`;
+    - `errors` список рядків про проблеми, капстоун не повинен падати через один зламаний плагін:
+      - `"<name>: <ТипВинятку>"`, якщо `ep.load()` кинув будь-який виняток;
+      - `"<name>: duplicate from <dist>"`, якщо ім'я вже зайняте іншим дистрибутивом.
+
+    Обробляйте entry points у порядку `(ep.name, ep.dist.name)`, щоб результат не залежав від порядку
+    встановлення: перший виграє, наступні з тим самим ім'ям ідуть у `errors`.
+
+    Харнес створює у тимчасовій папці три "встановлені" дистрибутиви з `dist-info` і модулями й додає її в `sys.path`.
+  starter: |
+    from importlib.metadata import entry_points
+
+
+    def load_renderers(group: str) -> tuple[dict[str, object], list[str]]:
+        ...
+  harness: |
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    site = Path(tempfile.mkdtemp())
+
+
+    def fake_dist(name, version, files, eps):
+        info = site / f"{name.replace('-', '_')}-{version}.dist-info"
+        info.mkdir()
+        (info / "METADATA").write_text(f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n")
+        (info / "entry_points.txt").write_text(eps)
+        for filename, code in files.items():
+            (site / filename).write_text(code)
+
+
+    fake_dist("formbuilder", "0.2.0", {"t4_html.py": "def render(c): return f'<h1>{c}</h1>'\n"},
+              "[formbuilder.renderers]\nhtml = t4_html:render\n")
+    fake_dist("fb-markdown", "0.1.0", {"t4_md.py": "def render(c): return f'# {c}'\n"},
+              "[formbuilder.renderers]\nmarkdown = t4_md:render\nbroken = t4_md:missing\n")
+    fake_dist("other-renderers", "1.0.0", {"t4_extra.py": "def render(c): return c.upper()\n"},
+              "[formbuilder.renderers]\nhtml = t4_extra:render\npdf = t4_absent:render\n")
+    sys.path.insert(0, str(site))
+
+    renderers, errors = load_renderers("formbuilder.renderers")
+    for name in sorted(renderers):
+        print(name, "->", renderers[name]("Signup"))
+    print(*errors, sep="\n")
+    print(load_renderers("formbuilder.nothing"))
+  expected: |
+    html -> <h1>Signup</h1>
+    markdown -> # Signup
+    broken: AttributeError
+    html: duplicate from other-renderers
+    pdf: ModuleNotFoundError
+    ({}, [])
+  hints:
+    - "entry_points(group=group) повертає entry points з усіх дистрибутивів; у кожного є name, dist.name і load(). Відсортуйте за кортежем і йдіть циклом."
+    - "Ключ сортування lambda ep: (ep.name, ep.dist.name); перед load() перевірте, чи ім'я вже в словнику; load() обгорніть у try/except Exception as exc і беріть type(exc).__name__."
+  solution: |
+    from importlib.metadata import entry_points
+
+
+    def load_renderers(group: str) -> tuple[dict[str, object], list[str]]:
+        renderers: dict[str, object] = {}
+        errors: list[str] = []
+        for ep in sorted(entry_points(group=group), key=lambda ep: (ep.name, ep.dist.name)):
+            if ep.name in renderers:
+                errors.append(f"{ep.name}: duplicate from {ep.dist.name}")
+                continue
+            try:
+                renderers[ep.name] = ep.load()
+            except Exception as exc:
+                errors.append(f"{ep.name}: {type(exc).__name__}")
+        return renderers, errors
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Аудит pyproject.toml перед публікацією"
+  prompt: |
+    Напишіть `audit(text)`, яка читає вміст `pyproject.toml` через `tomllib` і повертає список проблем
+    у такому порядку перевірок:
+
+    1. немає таблиці `[build-system]`: `"no [build-system]"`;
+    2. для кожного з полів `readme`, `license` у `[project]`, якого немає: `"missing project.<field>"`;
+    3. для кожного рядка з `dependencies`, потім з кожного extra в `optional-dependencies` (у порядку файлу):
+       - npm-синтаксис у специфікаторі, тобто `^` або `~`, за яким не йде `=`: `"npm-style specifier: <рядок>"`;
+       - інструмент розробки (`pytest`, `ruff`, `mypy`, `pre-commit` після нормалізації імені) у залежностях,
+         які побачить користувач: `"dev tool in <where>: <name>"`, де `<where>` це `dependencies` або `extra <name>`.
+         Ім'я в повідомленні нормалізоване (нижній регістр, дефіси).
+
+    `[dependency-groups]` не перевіряються: dev-інструментам там і місце. Порожній список означає, що проблем немає.
+  starter: |
+    import re
+    import tomllib
+
+    DEV_TOOLS = {"pytest", "ruff", "mypy", "pre-commit"}
+
+
+    def audit(text: str) -> list[str]:
+        ...
+  harness: |
+    bad = '''
+    [project]
+    name = "formbuilder"
+    version = "0.2.0"
+    readme = "README.md"
+    dependencies = ["pydantic^2.11", "Ruff>=0.17", "httpx~0.28"]
+
+    [project.optional-dependencies]
+    web = ["fastapi>=0.115,<1"]
+    test = ["PyTest>=9", "coverage~=7.6"]
+
+    [dependency-groups]
+    dev = ["mypy>=2.4"]
+    '''
+    good = '''
+    [project]
+    name = "formbuilder"
+    version = "0.2.0"
+    readme = "README.md"
+    license = "MIT"
+    dependencies = ["pydantic>=2.11,<3"]
+
+    [project.optional-dependencies]
+    web = ["fastapi~=0.115.0", "uvicorn[standard]>=0.30,<1"]
+
+    [dependency-groups]
+    dev = ["pytest>=9.1.1", "ruff>=0.17.1", "mypy>=2.4.0"]
+
+    [build-system]
+    requires = ["uv_build>=0.9.28,<0.10.0"]
+    build-backend = "uv_build"
+    '''
+    print(*audit(bad), sep="\n")
+    print(audit(good))
+  expected: |
+    no [build-system]
+    missing project.license
+    npm-style specifier: pydantic^2.11
+    dev tool in dependencies: ruff
+    npm-style specifier: httpx~0.28
+    dev tool in extra test: pytest
+    []
+  hints:
+    - "tomllib.loads(text) дає словник; project.get(\"optional-dependencies\", {}) зберігає порядок extras з файлу. Ім'я з рядка залежності це початок рядка до першого символу, що не може бути в імені."
+    - "npm-синтаксис: re.search(r\"\\^|~(?!=)\", line). Ім'я: re.match(r\"[A-Za-z0-9._-]+\", line).group(), далі re.sub(r\"[-_.]+\", \"-\", name).lower(). Зберіть пари (where, deps) у список і пройдіть одним циклом."
+  solution: |
+    import re
+    import tomllib
+
+    DEV_TOOLS = {"pytest", "ruff", "mypy", "pre-commit"}
+
+
+    def audit(text: str) -> list[str]:
+        data = tomllib.loads(text)
+        project = data.get("project", {})
+        problems: list[str] = []
+        if "build-system" not in data:
+            problems.append("no [build-system]")
+        for field in ("readme", "license"):
+            if field not in project:
+                problems.append(f"missing project.{field}")
+        sections = [("dependencies", project.get("dependencies", []))]
+        for extra, deps in project.get("optional-dependencies", {}).items():
+            sections.append((f"extra {extra}", deps))
+        for where, deps in sections:
+            for line in deps:
+                if re.search(r"\^|~(?!=)", line):
+                    problems.append(f"npm-style specifier: {line}")
+                raw = re.match(r"[A-Za-z0-9._-]+", line.strip())
+                name = re.sub(r"[-_.]+", "-", raw.group()).lower() if raw else ""
+                if name in DEV_TOOLS:
+                    problems.append(f"dev tool in {where}: {name}")
+        return problems
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    У `pyproject.toml` капстоуну:
+    ```toml
+    [project]
+    dependencies = ["pydantic>=2.11,<3"]
+
+    [project.optional-dependencies]
+    web = ["fastapi>=0.115,<1"]
+
+    [dependency-groups]
+    dev = ["pytest>=9.1.1"]
+    ```
+    Які рядки `Requires-Dist` будуть у `METADATA` зібраного wheel?
+  options:
+    - "`pydantic>=2.11,<3` і `fastapi>=0.115,<1 ; extra == 'web'`"
+    - "Лише `pydantic>=2.11,<3`: необов'язкові залежності в METADATA не пишуться"
+    - "`pydantic>=2.11,<3`, `fastapi>=0.115,<1 ; extra == 'web'` і `pytest>=9.1.1 ; extra == 'dev'`"
+    - "Усі пакети з `uv.lock` з точними версіями"
+  answer: 0
+  explain: |
+    Extras публікуються: кожен рядок extra потрапляє в `Requires-Dist` з маркером `extra == 'web'`, а сам extra в `Provides-Extra`. Користувач вмикає його через `formbuilder[web]`.
+    Варіант "лише pydantic" плутає extras з `devDependencies`: необов'язкові для користувача, але видимі в метаданих.
+    Варіант з `pytest ; extra == 'dev'` переносить dev-групу в extras; `[dependency-groups]` (PEP 735) не потрапляють у wheel зовсім, їх знає лише репозиторій.
+    Lock не їде у wheel: у METADATA лишаються діапазони, і той, хто ставить пакет, резолвить їх сам.
+
+- id: q2
+  type: quiz
+  question: |
+    В індексі є версії пакета `fb-demo-lib`: `0.9`, `1.0`, `1.0.post1`, `1.1rc1`. Що поставить
+    `uv pip install "fb-demo-lib>=1.0"` з налаштуваннями за замовчуванням?
+  options: ["1.0.post1", "1.1rc1", "1.0", "Помилку: специфікатор неоднозначний"]
+  answer: 0
+  explain: |
+    Пре-релізи (`a`, `b`, `rc`, `.dev`) не обираються, якщо специфікатор їх не називає і є фінальні версії, що підходять. Серед фінальних найбільша `1.0.post1`: post-реліз іде після `1.0`, а не перед ним.
+    `1.1rc1` це semver-інтуїція "найновіша, що задовольняє". Вона стала б відповіддю лише зі специфікатором `>=1.1rc1` або прапорцем `--prerelease allow`.
+    `1.0` обрав би той, хто вважає `.post1` пре-релізом; у PEP 440 це повноцінний реліз після фінального.
+    Помилки немає: `>=1.0` однозначний, а з `>=1.1` помилка таки була б, бо фінальної `1.1` немає, а rc не обирається.
+
+- id: q3
+  type: quiz
+  question: |
+    Шаблон лежить у `capstone/templates/page.html.j2`, поруч з `src/`. Модуль `src/formbuilder/pages.py`:
+    ```python
+    from pathlib import Path
+
+    TEMPLATES = Path(__file__).resolve().parents[2] / "templates"
+
+    def page_template() -> str:
+        return (TEMPLATES / "page.html.j2").read_text()
+    ```
+    `uv run python -c "from formbuilder.pages import page_template; print(page_template())"` друкує шаблон.
+    Що буде, якщо зібрати wheel через `uv build`, поставити його в чисте venv і викликати `page_template()`?
+  options:
+    - "FileNotFoundError: шляху `.../lib/python3.12/templates/page.html.j2` не існує"
+    - "Шаблон надрукується: uv_build пакує всі файли проєкту"
+    - "Шаблон надрукується: `__file__` у wheel вказує на вихідник у `src/`"
+    - "ImportError: модуль, що читає файли через `__file__`, не потрапляє у wheel"
+  answer: 0
+  explain: |
+    З editable install `__file__` веде в робочу копію, тому `parents[2]` випадково влучає в корінь проєкту. З wheel модуль лежить у `site-packages/formbuilder/`, `parents[2]` дає `lib/python3.12`, а `templates/` з кореня репозиторію в пакет не потрапляла взагалі.
+    uv_build пакує всю папку `src/formbuilder/`, а не весь проєкт: корінь, `tests/`, `docs/` у wheel не йдуть.
+    `__file__` у встановленому з wheel пакеті вказує в `site-packages`; посилання на `src/` дає лише editable install.
+    Модуль у wheel є, імпорт проходить; падає саме читання файлу. Правильно класти шаблон у `src/formbuilder/templates/` і читати через `importlib.resources.files("formbuilder")`.
+
+- id: q4
+  type: quiz
+  question: |
+    Капстоун залежить від локальної бібліотеки:
+    ```toml
+    [project]
+    dependencies = ["fb-shared", "pydantic>=2.11,<3"]
+
+    [tool.uv.sources]
+    fb-shared = { path = "../fb-shared", editable = true }
+    ```
+    Локально все працює. Колега копіює на сервер лише `formbuilder-0.1.0-py3-none-any.whl` і ставить його
+    `pip install` у чисте venv. Що станеться з `fb-shared`?
+  options:
+    - "Інсталятор шукатиме `fb-shared` за ім'ям в індексі: або не знайде й упаде, або поставить однойменний чужий пакет"
+    - "Встановиться з `../fb-shared` відносно розташування wheel"
+    - "Нічого не треба ставити: `uv build` вклав `fb-shared` у wheel"
+    - "Нічого: `uv build` відмовився б збирати wheel зі шляховою залежністю"
+  answer: 0
+  explain: |
+    `[tool.uv.sources]` це налаштування uv для розробки. У METADATA потрапляє лише `Requires-Dist: fb-shared`, без шляху, тож будь-який інсталятор шукає це ім'я в індексі. Якщо там зареєстровано однойменний пакет, встановиться він.
+    Відносного шляху у wheel немає взагалі, тож "поруч з wheel" інсталятор нічого не шукає.
+    Wheel містить лише власний пакет; залежності не вбудовуються, на відміну від бандла з webpack.
+    `uv build` збирає такий проєкт без помилок, навіть з `--no-sources`. Проблему ловить лише установка wheel у чисте оточення.
+
+- id: p1
+  type: project
+  title: "Повний pyproject.toml капстоуну і перевірка wheel"
+  prompt: |
+    Доведіть `capstone/pyproject.toml` до стану, в якому пакет можна зібрати, поставити з wheel будь-де
+    і за бажання опублікувати. Нічого не публікуйте.
+
+    1. Метадані в `[project]`: `license = "MIT"` і файл `LICENSE` у корені з `license-files = ["LICENSE"]`,
+       `authors`, `keywords`, кілька `classifiers` з офіційного списку PyPI, `[project.urls]` з `Repository`.
+    2. FastAPI і uvicorn для модуля 7 в основних залежностях: `uv add "fastapi>=0.115,<1" "uvicorn[standard]>=0.30,<1"`.
+       Не extra: капстоун і є вебзастосунок (callout у розділі про extras). Dev-інструменти лишаються в `[dependency-groups] dev`.
+    3. Шаблон `src/formbuilder/templates/page.html.j2` (будь-який HTML з `{{ title }}`) і модуль
+       `src/formbuilder/templating.py` з функцією `page_template() -> str`, що читає його через `importlib.resources.files`.
+    4. Entry point групи `formbuilder.renderers`, що вказує на рендерер з m3-l01 (наприклад
+       `html = "formbuilder.renderers.html:render"`), і функція `load_renderers()` у `src/formbuilder/plugins.py`.
+    5. `uv version --bump minor`, `uv build --clear`, установка wheel у чисте venv поза проєктом
+       і запуск `formbuilder --help` звідти.
+
+    Закомітьте `pyproject.toml`, `uv.lock`, `LICENSE` і нові файли в `src/`; `dist/` у git не йде.
+  checklist:
+    - "`uv lock --check` проходить, `uv tree --depth 1` показує fastapi і uvicorn без позначки, як pydantic, а pytest, ruff, mypy з `(group: dev)`"
+    - "`unzip -p dist/formbuilder-*.whl '*/METADATA'` містить `License-Expression: MIT`, `Requires-Dist: fastapi>=0.115,<1` без маркера `extra`, жодного `Provides-Extra` і жодного рядка з pytest, ruff чи mypy"
+    - "`unzip -l dist/formbuilder-*.whl` містить `formbuilder/templates/page.html.j2` і не містить `tests/`"
+    - "У чистому venv з wheel `formbuilder --help` виходить з кодом 0, `page_template()` повертає шаблон, `load_renderers()` знаходить `html`"
+    - "Версія `0.2.0` записана лише в `pyproject.toml`; `formbuilder --version` у чистому venv друкує `formbuilder 0.2.0`"
+    - "`uv run ruff check`, `uv run mypy src` і `uv run pytest -q` проходять"
+  verify: "cd capstone && uv run pytest -q && uv build --clear -q && uv venv -q --clear dist/venv && uv pip install -q --python dist/venv/bin/python dist/formbuilder-*.whl && dist/venv/bin/formbuilder --help && dist/venv/bin/python -c \"from importlib.metadata import metadata; from importlib.resources import files; m = metadata('formbuilder'); reqs = m.get_all('Requires-Dist') or []; assert any(r.startswith('fastapi') and 'extra ==' not in r for r in reqs), 'fastapi must be a main dependency, not an extra'; assert files('formbuilder').joinpath('templates/page.html.j2').is_file(), 'templates/page.html.j2 missing from wheel'; print('wheel ok', m['Version'])\""

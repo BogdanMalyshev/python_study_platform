@@ -1,0 +1,605 @@
+- id: t1
+  type: code
+  title: "Абстрактне правило валідації"
+  prompt: |
+    Напишіть ABC `FieldRule` і два конкретні правила.
+
+    `FieldRule`:
+
+    - абстрактний `check(self, value: str) -> bool`: чи проходить значення правило;
+    - абстрактний `error(self, field_id: str) -> str`: текст помилки;
+    - конкретний `validate(self, field_id: str, value: str) -> str | None`: `None`, якщо `check` пройшов,
+      інакше результат `error`.
+
+    Підкласи:
+
+    - `Required`: значення непорожнє після `strip()`; помилка `"<field_id>: required"`.
+    - `MaxLength(limit)`: довжина не більша за `limit`; помилка `"<field_id>: max <limit> chars"`.
+
+    Сам `FieldRule()` і підклас, що реалізував лише `check`, мають не створюватись.
+
+    ```python
+    Required().validate("name", "  ")      # 'name: required'
+    MaxLength(5).validate("name", "hello")  # None
+    ```
+  starter: |
+    from abc import ABC, abstractmethod
+
+
+    class FieldRule(ABC):
+        ...
+
+
+    class Required(FieldRule):
+        ...
+
+
+    class MaxLength(FieldRule):
+        def __init__(self, limit: int) -> None:
+            self.limit = limit
+  harness: |
+    try:
+        FieldRule()
+    except TypeError as e:
+        print("FieldRule:", e)
+
+
+    class OnlyCheck(FieldRule):
+        def check(self, value: str) -> bool:
+            return True
+
+
+    try:
+        OnlyCheck()
+    except TypeError as e:
+        print("OnlyCheck:", e)
+
+    rules = [Required(), MaxLength(5)]
+    for value in ["  ", "hello", "too long"]:
+        print(repr(value), [r.validate("name", value) for r in rules])
+    print(sorted(FieldRule.__abstractmethods__))
+  expected: |
+    FieldRule: Can't instantiate abstract class FieldRule without an implementation for abstract methods 'check', 'error'
+    OnlyCheck: Can't instantiate abstract class OnlyCheck without an implementation for abstract method 'error'
+    '  ' ['name: required', None]
+    'hello' [None, None]
+    'too long' [None, 'name: max 5 chars']
+    ['check', 'error']
+  hints:
+    - "Абстрактними мають бути рівно два методи, `check` і `error`. `validate` звичайний: він і є спільний код бази, що викликає абстрактні кроки."
+    - "Кожен абстрактний метод позначте `@abstractmethod` з тілом `...`. Без декоратора `FieldRule()` створиться, бо успадкування від `ABC` саме нічого не перевіряє."
+    - "def validate(self, field_id: str, value: str) -> str | None:\n    return None if self.check(value) else self.error(field_id)"
+  solution: |
+    from abc import ABC, abstractmethod
+
+
+    class FieldRule(ABC):
+        @abstractmethod
+        def check(self, value: str) -> bool: ...
+
+        @abstractmethod
+        def error(self, field_id: str) -> str: ...
+
+        def validate(self, field_id: str, value: str) -> str | None:
+            return None if self.check(value) else self.error(field_id)
+
+
+    class Required(FieldRule):
+        def check(self, value: str) -> bool:
+            return bool(value.strip())
+
+        def error(self, field_id: str) -> str:
+            return f"{field_id}: required"
+
+
+    class MaxLength(FieldRule):
+        def __init__(self, limit: int) -> None:
+            self.limit = limit
+
+        def check(self, value: str) -> bool:
+            return len(value) <= self.limit
+
+        def error(self, field_id: str) -> str:
+            return f"{field_id}: max {self.limit} chars"
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Експорт відповідей: template method з абстрактною property"
+  prompt: |
+    База `AnswerExporter` уже оголошує абстрактні кроки. Допишіть у ній два конкретні методи і два підкласи.
+
+    У базі:
+
+    - `export(answers)`: рядки `header()`, за ними `row(key, value)` для кожної пари в порядку словника, усе через `"\n"`;
+    - `filename(stem)`: `"<stem>.<extension>"`.
+
+    Підкласи **не** перевизначають `export` і `filename`, лише кроки:
+
+    - `CsvExporter`: `extension` дорівнює `"csv"` (можна атрибутом класу); власного заголовка немає, тож `header`
+      повертає результат бази через `super()`; `row` дає `key,value`, а значення з комою бере в подвійні лапки.
+    - `MarkdownExporter`: `extension` дорівнює `"md"`; `header` повертає два рядки `| field | value |` і
+      `| --- | --- |`; `row` дає `| key | value |`.
+
+    `header` в базі абстрактний, хоча має тіло: підклас без власного `header` не створюється.
+  starter: |
+    from abc import ABC, abstractmethod
+
+
+    class AnswerExporter(ABC):
+        @property
+        @abstractmethod
+        def extension(self) -> str: ...
+
+        @abstractmethod
+        def header(self) -> list[str]:
+            return []
+
+        @abstractmethod
+        def row(self, key: str, value: str) -> str: ...
+
+        def export(self, answers: dict[str, str]) -> str:
+            ...
+
+        def filename(self, stem: str) -> str:
+            ...
+
+
+    class CsvExporter(AnswerExporter):
+        ...
+
+
+    class MarkdownExporter(AnswerExporter):
+        ...
+  harness: |
+    answers = {"email": "a@b.c", "city": "Kyiv, UA"}
+    csv = CsvExporter()
+    md = MarkdownExporter()
+    print(csv.filename("answers"), md.filename("answers"))
+    print(csv.export(answers))
+    print(md.export(answers))
+    print(repr(csv.export({})))
+    print("export" in vars(CsvExporter), "export" in vars(MarkdownExporter))
+
+
+    class NoHeader(AnswerExporter):
+        extension = "txt"
+
+        def row(self, key: str, value: str) -> str:
+            return key
+
+
+    try:
+        NoHeader()
+    except TypeError as e:
+        print("TypeError:", e)
+    print(sorted(AnswerExporter.__abstractmethods__))
+  expected: |
+    answers.csv answers.md
+    email,a@b.c
+    city,"Kyiv, UA"
+    | field | value |
+    | --- | --- |
+    | email | a@b.c |
+    | city | Kyiv, UA |
+    ''
+    False False
+    TypeError: Can't instantiate abstract class NoHeader without an implementation for abstract method 'header'
+    ['extension', 'header', 'row']
+  hints:
+    - "Алгоритм живе в `export` бази: він викликає `self.header()` і `self.row(...)`, а що саме вони повернуть, вирішує підклас. Абстрактну property може закрити звичайний атрибут класу."
+    - "`CsvExporter.header` обов'язковий, бо в базі він абстрактний, але писати порожній список удруге не треба: `return super().header()`."
+    - "def export(self, answers: dict[str, str]) -> str:\n    lines = self.header() + [self.row(k, v) for k, v in answers.items()]\n    return \"\\n\".join(lines)"
+  solution: |
+    from abc import ABC, abstractmethod
+
+
+    class AnswerExporter(ABC):
+        @property
+        @abstractmethod
+        def extension(self) -> str: ...
+
+        @abstractmethod
+        def header(self) -> list[str]:
+            return []
+
+        @abstractmethod
+        def row(self, key: str, value: str) -> str: ...
+
+        def export(self, answers: dict[str, str]) -> str:
+            lines = self.header() + [self.row(k, v) for k, v in answers.items()]
+            return "\n".join(lines)
+
+        def filename(self, stem: str) -> str:
+            return f"{stem}.{self.extension}"
+
+
+    class CsvExporter(AnswerExporter):
+        extension = "csv"
+
+        def header(self) -> list[str]:
+            return super().header()
+
+        def row(self, key: str, value: str) -> str:
+            if "," in value:
+                value = f'"{value}"'
+            return f"{key},{value}"
+
+
+    class MarkdownExporter(AnswerExporter):
+        @property
+        def extension(self) -> str:
+            return "md"
+
+        def header(self) -> list[str]:
+            return ["| field | value |", "| --- | --- |"]
+
+        def row(self, key: str, value: str) -> str:
+            return f"| {key} | {value} |"
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "ABC, що визнає класи за формою"
+  prompt: |
+    Напишіть ABC `Exportable` з абстрактним методом `to_dict(self) -> dict[str, object]` і `__subclasshook__`,
+    який поводиться як у `Sized`:
+
+    - клас визнається, якщо хтось у його MRO визначає `to_dict` у власному `__dict__`, і це не `None`;
+    - якщо знайдений `to_dict` дорівнює `None`, клас не визнається;
+    - якщо `to_dict` не знайдено, хук повертає `NotImplemented`, щоб спрацювали звичайне наслідування і `register`;
+    - хук діє лише для самого `Exportable`; його підкласи лишаються номінальними.
+
+    Також напишіть `export_all(items)`: повертає список `to_dict()` для тих елементів, які `isinstance(..., Exportable)`,
+    і пропускає решту, у вихідному порядку.
+
+    Харнес реєструє клас `LegacyRow`, у якого `to_dict` з'являється лише на екземплярі в `__init__`:
+    у словнику класу його немає, тож визнати такий клас може лише `register`.
+  starter: |
+    from abc import ABC, abstractmethod
+    from collections.abc import Iterable
+    from typing import Any
+
+
+    class Exportable(ABC):
+        ...
+
+
+    def export_all(items: Iterable[object]) -> list[dict[str, object]]:
+        ...
+  harness: |
+    class Field:
+        def __init__(self, id: str) -> None:
+            self.id = id
+
+        def to_dict(self) -> dict[str, object]:
+            return {"id": self.id}
+
+
+    class Required(Field):
+        pass
+
+
+    class Disabled:
+        to_dict = None
+
+
+    class Note:
+        text = "hi"
+
+
+    class LegacyRow:
+        def __init__(self, data: dict[str, object]) -> None:
+            self.to_dict = lambda: dict(data)
+
+
+    Exportable.register(LegacyRow)
+
+
+    class Strict(Exportable):
+        def to_dict(self) -> dict[str, object]:
+            return {"strict": True}
+
+
+    for cls in (Field, Required, Disabled, Note, LegacyRow, Strict):
+        print(cls.__name__, issubclass(cls, Exportable))
+    print(Exportable in Field.__mro__, isinstance(Field("a"), Strict))
+    print(export_all([Field("email"), Note(), Disabled(), LegacyRow({"id": "old"}), Strict(), Required("x")]))
+    try:
+        Exportable()
+    except TypeError as e:
+        print("TypeError:", e)
+  expected: |
+    Field True
+    Required True
+    Disabled False
+    Note False
+    LegacyRow True
+    Strict True
+    False False
+    [{'id': 'email'}, {'id': 'old'}, {'strict': True}, {'id': 'x'}]
+    TypeError: Can't instantiate abstract class Exportable without an implementation for abstract method 'to_dict'
+  hints:
+    - "Хук це `@classmethod __subclasshook__(cls, other)`. Перша перевірка: якщо `cls` не сам `Exportable`, відповідь `NotImplemented`. Інакше пройдіть `other.__mro__` і подивіться в `klass.__dict__` кожного класу."
+    - "Чому не `False`, коли `to_dict` не знайдено: хук має перше слово, і `False` перекриває навіть `register`. Тоді `LegacyRow` перестане визнаватись."
+    - "for klass in other.__mro__:\n    if \"to_dict\" in klass.__dict__:\n        return klass.__dict__[\"to_dict\"] is not None\nreturn NotImplemented"
+  solution: |
+    from abc import ABC, abstractmethod
+    from collections.abc import Iterable
+    from typing import Any
+
+
+    class Exportable(ABC):
+        @abstractmethod
+        def to_dict(self) -> dict[str, object]: ...
+
+        @classmethod
+        def __subclasshook__(cls, other: type) -> Any:
+            if cls is not Exportable:
+                return NotImplemented
+            for klass in other.__mro__:
+                if "to_dict" in klass.__dict__:
+                    return klass.__dict__["to_dict"] is not None
+            return NotImplemented
+
+
+    def export_all(items: Iterable[object]) -> list[dict[str, object]]:
+        return [item.to_dict() for item in items if isinstance(item, Exportable)]
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Індекс елементів форми як Mapping"
+  prompt: |
+    Форма це дерево `Element` (у кожного `id`, `kind` і кортеж `children`). Напишіть `FormIndex`, що наслідує
+    `Mapping[str, Element]` і індексує всі елементи дерева за `id`, включно з коренем.
+
+    - Порядок ітерації: обхід у глибину, батько перед дітьми, діти в порядку кортежу.
+    - Повторний `id` у дереві: `ValueError("duplicate id: <id>")` у конструкторі.
+    - Відсутній ключ: `KeyError`, як у словника.
+    - `of_kind(kind)`: список `id` елементів цього `kind` у порядку ітерації.
+
+    Реалізуйте лише `__init__`, `__getitem__`, `__iter__`, `__len__` і `of_kind` (плюс допоміжні методи за бажанням).
+    `get`, `keys`, `items`, `values`, `in` і `==` мають прийти з `Mapping`: харнес перевіряє, що у вашому класі
+    їх немає. `of_kind` теж напишіть через `self.items()`, а не через внутрішній словник.
+  starter: |
+    from collections.abc import Iterator, Mapping
+    from dataclasses import dataclass
+
+
+    @dataclass(frozen=True)
+    class Element:
+        id: str
+        kind: str
+        children: tuple["Element", ...] = ()
+
+
+    class FormIndex(Mapping[str, Element]):
+        def __init__(self, root: Element) -> None:
+            ...
+
+        def of_kind(self, kind: str) -> list[str]:
+            ...
+  harness: |
+    form = Element("page", "page", (
+        Element("email", "input"),
+        Element("contact", "group", (Element("phone", "input"), Element("agree", "checkbox"))),
+        Element("send", "button"),
+    ))
+    idx = FormIndex(form)
+    print(len(idx), list(idx))
+    print(idx["phone"].kind, "agree" in idx, "fax" in idx)
+    print(idx.get("fax"), idx.get("fax", "n/a"))
+    print(idx.of_kind("input"), idx.of_kind("radio"))
+    print(isinstance(idx, Mapping), Mapping in type(idx).__mro__)
+    print(sorted(idx.keys() - {"page", "contact"}))
+    print(idx == FormIndex(form), idx == {})
+    try:
+        FormIndex(Element("page", "page", (Element("a", "input"), Element("g", "group", (Element("a", "input"),)))))
+    except ValueError as e:
+        print("ValueError:", e)
+    try:
+        idx["fax"]
+    except KeyError as e:
+        print("KeyError:", e)
+    print(sorted(set(vars(FormIndex)) & {"get", "keys", "items", "values", "__contains__", "__eq__"}))
+  expected: |
+    6 ['page', 'email', 'contact', 'phone', 'agree', 'send']
+    input True False
+    None n/a
+    ['email', 'phone'] []
+    True True
+    ['agree', 'email', 'phone', 'send']
+    True False
+    ValueError: duplicate id: a
+    KeyError: 'fax'
+    []
+  hints:
+    - "Зберігайте звичайний `dict` id -> Element у `__init__`, заповнений рекурсивним обходом. Три абстрактні методи `Mapping` просто делегують у нього, і `__getitem__` тоді сам кине `KeyError`."
+    - "Рекурсія: допоміжний `_add(element)` перевіряє дублікат, кладе елемент у словник і викликає себе для кожної дитини. Порядок вставки в `dict` і дасть обхід у глибину."
+    - "def of_kind(self, kind: str) -> list[str]:\n    return [key for key, el in self.items() if el.kind == kind]"
+  solution: |
+    from collections.abc import Iterator, Mapping
+    from dataclasses import dataclass
+
+
+    @dataclass(frozen=True)
+    class Element:
+        id: str
+        kind: str
+        children: tuple["Element", ...] = ()
+
+
+    class FormIndex(Mapping[str, Element]):
+        def __init__(self, root: Element) -> None:
+            self._by_id: dict[str, Element] = {}
+            self._add(root)
+
+        def _add(self, element: Element) -> None:
+            if element.id in self._by_id:
+                raise ValueError(f"duplicate id: {element.id}")
+            self._by_id[element.id] = element
+            for child in element.children:
+                self._add(child)
+
+        def __getitem__(self, key: str) -> Element:
+            return self._by_id[key]
+
+        def __iter__(self) -> Iterator[str]:
+            return iter(self._by_id)
+
+        def __len__(self) -> int:
+            return len(self._by_id)
+
+        def of_kind(self, kind: str) -> list[str]:
+            return [key for key, el in self.items() if el.kind == kind]
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from abc import ABC
+
+    class BaseRenderer(ABC):
+        def render(self, text: str) -> str:
+            raise NotImplementedError
+
+    class Html(BaseRenderer):
+        pass
+
+    h = Html()
+    print("created")
+    h.render("x")
+    ```
+  options:
+    - "created, потім NotImplementedError"
+    - "TypeError: Can't instantiate abstract class Html without an implementation for abstract method 'render'"
+    - "TypeError уже на рядку class Html(BaseRenderer)"
+    - "created, потім None"
+  answer: 0
+  explain: |
+    Наслідування від `ABC` саме нічого не перевіряє: `__abstractmethods__` у `BaseRenderer` порожня, бо жоден метод
+    не позначено `@abstractmethod`. `Html()` створюється, а `NotImplementedError` вилітає лише при виклику `render`.
+    `TypeError` при створенні був би з `@abstractmethod`, і це інтуїція "ABC означає абстрактний". Помилки на оголошенні
+    підкласу в Python не буває взагалі, це звичка з `tsc`. `None` повернув би метод з тілом `...`, а тут тіло кидає виняток.
+
+- id: q2
+  type: quiz
+  question: |
+    Що станеться при запуску `python exporter.py` і що скаже `mypy --strict exporter.py`?
+    ```python
+    from abc import ABC, abstractmethod
+
+    class Exporter(ABC):
+        @abstractmethod
+        @property
+        def extension(self) -> str: ...
+
+    print("module loaded")
+    ```
+  options:
+    - "AttributeError ще до print; mypy: Success"
+    - "module loaded; mypy: Success"
+    - "module loaded; mypy: помилка про порядок декораторів"
+    - "AttributeError ще до print; mypy: помилка про порядок декораторів"
+  answer: 0
+  explain: |
+    Декоратори застосовуються знизу вгору: спершу `property`, потім `abstractmethod`, який намагається поставити
+    `__isabstractmethod__ = True` на об'єкт property. У property цей атрибут лише для читання, тому
+    `AttributeError: attribute '__isabstractmethod__' of 'property' objects is not writable` виникає ще під час
+    виконання тіла класу, до `print`. mypy такий порядок пропускає без зауважень, тож варіанти з його помилкою це
+    надія на чекер, якої він не виправдовує. Правильно: `@property` зверху, `@abstractmethod` найближче до `def`.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from collections.abc import Sized
+
+    class Form:
+        pass
+
+    Sized.register(Form)
+    print(isinstance(Form(), Sized))
+    print(len(Form()))
+    ```
+  options:
+    - "True, потім TypeError: object of type 'Form' has no len()"
+    - "False, потім TypeError: object of type 'Form' has no len()"
+    - "TypeError уже на register: у Form немає __len__"
+    - "True, потім 0"
+  answer: 0
+  explain: |
+    `register` нічого не перевіряє і нічого не додає: він лише записує `Form` у реєстр віртуальних підкласів, тому
+    `isinstance` каже `True`. `len()` шукає `__len__` на типі, а його немає, тож `TypeError`. `False` це очікування, що
+    `Sized` побачить відсутній `__len__`: хук справді не визнав би клас, але реєстр перевіряється окремо. Помилки на
+    `register` не буде, бо там немає жодної перевірки. `0` неможливий: `register` нічого не успадковує, тож жодної
+    реалізації `__len__` у `Form` не з'являється.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from collections.abc import Iterator, Mapping
+
+    class ByIndex(Mapping[int, str]):
+        def __init__(self, *items: str) -> None:
+            self._items = list(items)
+
+        def __getitem__(self, key: int) -> str:
+            return self._items[key]
+
+        def __iter__(self) -> Iterator[int]:
+            return iter(range(len(self._items)))
+
+        def __len__(self) -> int:
+            return len(self._items)
+
+    m = ByIndex("a", "b")
+    print(1 in m)
+    print(m.get(5, "none"))
+    ```
+  options:
+    - "True, потім IndexError: list index out of range"
+    - "True, потім none"
+    - "True, потім None"
+    - "TypeError: Can't instantiate abstract class ByIndex"
+  answer: 0
+  explain: |
+    Усі три абстрактні методи реалізовані, тож клас створюється. `1 in m` і `get` це mixin-методи `Mapping`: вони
+    викликають `self[key]` і ловлять лише `KeyError`. Для ключа `1` елемент є, тому `True`. Для `5` список кидає
+    `IndexError`, `get` його не ловить, і виняток вилітає назовні. `none` чи `None` були б, якби `__getitem__`
+    перетворював відсутність ключа на `KeyError`, як того вимагає контракт `Mapping`.
+
+- id: p1
+  type: project
+  title: "BaseRenderer з template method у капстоуні"
+  prompt: |
+    У `src/formbuilder/renderers/base.py` переведіть `BaseRenderer` з m4-l04 на `ABC` за зразком розділу
+    "Для капстоуну" і переведіть на нього `HtmlRenderer` у `renderers/html.py`. Форма тепер дерево: `children`
+    у `domain.Element` вже є з m2-l05, `block` рендериться як `<fieldset>`. Реєстр через `__init_subclass__`
+    з m4-l04 лишається. `TimingMixin` і `TimedHtmlRenderer` з m4-l04 приберіть разом з їхніми тестами:
+    перевизначення `render` тепер суперечить `@final`, а вимір часу повернеться декоратором `@timed` (m5-l04).
+
+    `BaseRenderer` дає конкретні `render(element, theme)` і `render_tree(element, theme)` і два абстрактні кроки,
+    `render_element(element, children, theme)` і `wrap_page(body, theme)`. `Renderer` лишається Protocol:
+    `get_renderer` з m3-l01 і `generate` з m3-l04 знають лише про нього.
+
+    Додайте `tests/test_base_renderer.py`.
+  checklist:
+    - "`BaseRenderer` наслідує `ABC`; `render_element` і `wrap_page` позначені `@abstractmethod`; `render` і `render_tree` конкретні й позначені `@typing.final`"
+    - "`HtmlRenderer` наслідує `BaseRenderer` і не перевизначає `render` чи `render_tree`"
+    - "Сигнатури `generate` і `get_renderer` використовують `Renderer` (Protocol), а не `BaseRenderer`"
+    - "Тест: `BaseRenderer()` і підклас без `wrap_page` дають `TypeError` (`pytest.raises`)"
+    - "Тест: HTML для дерева з групою всередині сторінки містить вкладений `<fieldset>` і екранує `&` у `label`"
+    - "Тест: `generate` приймає дублер без жодної бази, лише з методом `render`"
+    - "`uv run mypy --strict src/formbuilder/renderers` без помилок"
+  verify: "cd capstone && uv run pytest tests/test_base_renderer.py -q && uv run mypy --strict src/formbuilder/renderers"

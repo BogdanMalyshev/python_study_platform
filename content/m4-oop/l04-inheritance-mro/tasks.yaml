@@ -1,0 +1,691 @@
+- id: t1
+  type: code
+  title: "Підклас, що розширює __init__ і метод через super()"
+  prompt: |
+    Базовий `Field` уже є. Допишіть `NumberField(Field)`:
+
+    - `__init__(self, id, label, min_value=None, max_value=None)` передає `id` і `label` у батьківський `__init__`
+      через `super()` і зберігає межі як `self.min_value`, `self.max_value`;
+    - `describe()` бере результат батьківського `describe()` через `super()` і дописує межі у форматі
+      ` [min..max]`. Відсутня межа друкується як порожнє місце. Якщо обох меж немає, повертається
+      батьківський рядок без змін.
+
+    `0` це валідна межа, а не "межі немає".
+
+    ```python
+    NumberField("age", "Age", 0, 120).describe()          # 'age: Age [0..120]'
+    NumberField("qty", "Quantity", min_value=1).describe() # 'qty: Quantity [1..]'
+    NumberField("score", "Score").describe()               # 'score: Score'
+    ```
+  starter: |
+    class Field:
+        def __init__(self, id: str, label: str) -> None:
+            self.id = id
+            self.label = label
+
+        def describe(self) -> str:
+            return f"{self.id}: {self.label}"
+
+
+    class NumberField(Field):
+        ...
+  harness: |
+    age = NumberField("age", "Age", 0, 120)
+    print(age.describe())
+    print(NumberField("qty", "Quantity", min_value=1).describe())
+    print(NumberField("limit", "Limit", max_value=0).describe())
+    print(NumberField("score", "Score").describe())
+    print(sorted(vars(age)))
+    print(isinstance(age, Field), issubclass(NumberField, Field))
+    print([c.__name__ for c in NumberField.__mro__])
+  expected: |
+    age: Age [0..120]
+    qty: Quantity [1..]
+    limit: Limit [..0]
+    score: Score
+    ['id', 'label', 'max_value', 'min_value']
+    True True
+    ['NumberField', 'Field', 'object']
+  hints:
+    - "Батьківський __init__ сам по собі не викличеться: у Python його треба викликати явно, і в якому місці методу, вирішуєте ви."
+    - "Перевіряйте межі через `is None`, а не через truthiness: `if self.min_value is None and self.max_value is None: return base`."
+    - "`lo = \"\" if self.min_value is None else self.min_value`, так само `hi`, і `return f\"{super().describe()} [{lo}..{hi}]\"`."
+  solution: |
+    class Field:
+        def __init__(self, id: str, label: str) -> None:
+            self.id = id
+            self.label = label
+
+        def describe(self) -> str:
+            return f"{self.id}: {self.label}"
+
+
+    class NumberField(Field):
+        def __init__(
+            self,
+            id: str,
+            label: str,
+            min_value: float | None = None,
+            max_value: float | None = None,
+        ) -> None:
+            super().__init__(id, label)
+            self.min_value = min_value
+            self.max_value = max_value
+
+        def describe(self) -> str:
+            base = super().describe()
+            if self.min_value is None and self.max_value is None:
+                return base
+            lo = "" if self.min_value is None else self.min_value
+            hi = "" if self.max_value is None else self.max_value
+            return f"{base} [{lo}..{hi}]"
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Константи класу замість перевизначення методів"
+  prompt: |
+    Допишіть `Element.render()` і три підкласи так, щоб HTML-тег і "порожність" тегу задавались атрибутами
+    класу, а не окремим `render` у кожному підкласі.
+
+    - `Element.render()` будує тег з `self.tag` і атрибутів зі словника `self.attrs()` у порядку ключів:
+      `<div id="box"></div>`. Якщо `void` істинне, закривального тегу немає: `<input id="email" name="email">`.
+    - `Input`: тег `input`, void; `attrs()` розширює батьківський словник ключем `name` зі значенням `id`.
+    - `Button`: тег `button`.
+    - `SubmitButton(Button)`: нічого не каже про тег, лише розширює `attrs()` парою `type="submit"`.
+
+    У підкласах `render` не перевизначати, `attrs` розширювати через `super()`.
+  starter: |
+    class Element:
+        tag = "div"
+        void = False
+
+        def __init__(self, id: str) -> None:
+            self.id = id
+
+        def attrs(self) -> dict[str, str]:
+            return {"id": self.id}
+
+        def render(self) -> str:
+            ...
+
+
+    class Input(Element):
+        ...
+
+
+    class Button(Element):
+        ...
+
+
+    class SubmitButton(Button):
+        ...
+  harness: |
+    for el in [Element("box"), Input("email"), Button("cancel"), SubmitButton("send")]:
+        print(el.render())
+    print(SubmitButton.tag, "tag" in vars(SubmitButton), "render" in vars(SubmitButton))
+    print(Element.tag, Element.void)
+  expected: |
+    <div id="box"></div>
+    <input id="email" name="email">
+    <button id="cancel"></button>
+    <button id="send" type="submit"></button>
+    button False False
+    div False
+  hints:
+    - "Базовий `render` має читати тег через `self`, а не через ім'я класу: тоді пошук атрибута піде по MRO конкретного екземпляра."
+    - "`\"\".join(f' {k}=\"{v}\"' for k, v in self.attrs().items())` дає рядок атрибутів; у `Input.attrs` почніть з `attrs = super().attrs()`."
+    - "`open_tag = f\"<{self.tag}{attrs}>\"`; `return open_tag if self.void else f\"{open_tag}</{self.tag}>\"`. У підкласах лише `tag = ...`, `void = True` і `attrs` з `{**super().attrs(), \"name\": self.id}`."
+  solution: |
+    class Element:
+        tag = "div"
+        void = False
+
+        def __init__(self, id: str) -> None:
+            self.id = id
+
+        def attrs(self) -> dict[str, str]:
+            return {"id": self.id}
+
+        def render(self) -> str:
+            attrs = "".join(f' {k}="{v}"' for k, v in self.attrs().items())
+            open_tag = f"<{self.tag}{attrs}>"
+            return open_tag if self.void else f"{open_tag}</{self.tag}>"
+
+
+    class Input(Element):
+        tag = "input"
+        void = True
+
+        def attrs(self) -> dict[str, str]:
+            return {**super().attrs(), "name": self.id}
+
+
+    class Button(Element):
+        tag = "button"
+
+
+    class SubmitButton(Button):
+        def attrs(self) -> dict[str, str]:
+            return {**super().attrs(), "type": "submit"}
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Кооперативний __init__ у множинному наслідуванні"
+  prompt: |
+    Корінь ієрархії `Field` уже написаний у кооперативному стилі: бере свій `id` і передає решту
+    keyword-аргументів далі по MRO. Допишіть три класи в тому самому стилі й один клас, що їх поєднує:
+
+    - `Labeled(Field)`: обов'язковий keyword-only `label: str`, зберігає `self.label`;
+    - `Required(Field)`: `required: bool = False`, зберігає `self.required`;
+    - `Placeholder(Field)`: `placeholder: str = ""`, зберігає `self.placeholder`;
+    - `TextInput(Labeled, Required, Placeholder)` без власного тіла.
+
+    Кожен `__init__` викликає `super().__init__(**kwargs)` і не звертається до `Field.__init__` напряму.
+    Невідомий аргумент має дійти до `object.__init__` і впасти там з `TypeError`, нічого ловити не потрібно.
+
+    ```python
+    TextInput(id="email", label="Email", required=True, placeholder="you@example.com")
+    ```
+  starter: |
+    class Field:
+        def __init__(self, *, id: str, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.id = id
+
+
+    class Labeled(Field):
+        ...
+
+
+    class Required(Field):
+        ...
+
+
+    class Placeholder(Field):
+        ...
+
+
+    class TextInput(Labeled, Required, Placeholder):
+        pass
+  harness: |
+    t = TextInput(id="email", label="Email", required=True, placeholder="you@example.com")
+    print([c.__name__ for c in TextInput.__mro__])
+    print(sorted(vars(t).items()))
+    print(sorted(vars(TextInput(id="name", label="Name")).items()))
+    print(sorted(vars(Required(id="agree")).items()))
+    try:
+        TextInput(id="bio", label="Bio", maxlength=200)
+    except TypeError as e:
+        print("TypeError:", e)
+  expected: |
+    ['TextInput', 'Labeled', 'Required', 'Placeholder', 'Field', 'object']
+    [('id', 'email'), ('label', 'Email'), ('placeholder', 'you@example.com'), ('required', True)]
+    [('id', 'name'), ('label', 'Name'), ('placeholder', ''), ('required', False)]
+    [('id', 'agree'), ('required', False)]
+    TypeError: object.__init__() takes exactly one argument (the instance to initialize)
+  hints:
+    - "Кожен клас знає лише свій аргумент. Наступний у MRO для `Labeled` у складі `TextInput` це не `Field`, а `Required`, тому позиційно нічого передавати не можна."
+    - "Сигнатура `def __init__(self, *, label: str, **kwargs) -> None:` забирає `label` з keyword-аргументів, а в `kwargs` лишається все інше."
+    - "Тіло: `super().__init__(**kwargs)` і `self.label = label`. Так само для `required: bool = False` і `placeholder: str = \"\"`."
+  solution: |
+    class Field:
+        def __init__(self, *, id: str, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.id = id
+
+
+    class Labeled(Field):
+        def __init__(self, *, label: str, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.label = label
+
+
+    class Required(Field):
+        def __init__(self, *, required: bool = False, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.required = required
+
+
+    class Placeholder(Field):
+        def __init__(self, *, placeholder: str = "", **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.placeholder = placeholder
+
+
+    class TextInput(Labeled, Required, Placeholder):
+        pass
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "ReprMixin і JsonMixin"
+  prompt: |
+    Напишіть два mixins без `__init__` і клас, що їх використовує.
+
+    - `ReprMixin.__repr__` повертає `ClassName(attr=repr, ...)` для всіх атрибутів екземпляра в порядку
+      їх створення, пропускаючи ті, що починаються з `_`.
+    - `JsonMixin.to_dict()` повертає словник тих самих атрибутів (без `_`-атрибутів), `to_json()` серіалізує
+      його через `json.dumps` без додаткових параметрів.
+    - `Input(...)` наслідує обидва mixins і наданий `Element`. `__init__(self, id, placeholder="")` викликає
+      батьківський `__init__` з `kind="input"` і зберігає `placeholder`. Порядок батьків підберіть так, щоб
+      `repr` брався з `ReprMixin`, а не з `Element`, і щоб у MRO `ReprMixin` стояв перед `JsonMixin`.
+  starter: |
+    import json
+
+
+    class Element:
+        def __init__(self, id: str, kind: str) -> None:
+            self.id = id
+            self.kind = kind
+
+        def __repr__(self) -> str:
+            return f"<{self.kind} {self.id}>"
+
+
+    class ReprMixin:
+        ...
+
+
+    class JsonMixin:
+        ...
+
+
+    class Input:
+        ...
+  harness: |
+    i = Input("email", placeholder="you@example.com")
+    i._cache = "skip me"
+    print(repr(i))
+    print(i.to_json())
+    print([c.__name__ for c in Input.__mro__])
+
+
+    class Note(ReprMixin, Element):
+        pass
+
+
+    print(repr(Note("terms", "text")))
+    print(repr(Element("raw", "text")))
+    print("__init__" in vars(ReprMixin), "__init__" in vars(JsonMixin))
+  expected: |
+    Input(id='email', kind='input', placeholder='you@example.com')
+    {"id": "email", "kind": "input", "placeholder": "you@example.com"}
+    ['Input', 'ReprMixin', 'JsonMixin', 'Element', 'object']
+    Note(id='terms', kind='text')
+    <text raw>
+    False False
+  hints:
+    - "Mixin спирається лише на те, що є в будь-якого екземпляра: `vars(self)` дає словник атрибутів, `type(self).__name__` ім'я конкретного класу."
+    - "Пошук методу йде зліва направо по MRO, тому mixins мають стояти перед `Element` у списку батьків: `class Input(ReprMixin, JsonMixin, Element)`."
+    - "`public = {k: v for k, v in vars(self).items() if not k.startswith(\"_\")}`; у `__repr__` склейте `f\"{k}={v!r}\"` через `\", \"`. У `Input.__init__`: `super().__init__(id, \"input\")`, далі `self.placeholder = placeholder`."
+  solution: |
+    import json
+
+
+    class Element:
+        def __init__(self, id: str, kind: str) -> None:
+            self.id = id
+            self.kind = kind
+
+        def __repr__(self) -> str:
+            return f"<{self.kind} {self.id}>"
+
+
+    def _public(obj: object) -> dict[str, object]:
+        return {k: v for k, v in vars(obj).items() if not k.startswith("_")}
+
+
+    class ReprMixin:
+        def __repr__(self) -> str:
+            fields = ", ".join(f"{k}={v!r}" for k, v in _public(self).items())
+            return f"{type(self).__name__}({fields})"
+
+
+    class JsonMixin:
+        def to_dict(self) -> dict[str, object]:
+            return _public(self)
+
+        def to_json(self) -> str:
+            return json.dumps(self.to_dict())
+
+
+    class Input(ReprMixin, JsonMixin, Element):
+        def __init__(self, id: str, placeholder: str = "") -> None:
+            super().__init__(id, "input")
+            self.placeholder = placeholder
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Відповіді з нормалізованими ключами через UserDict"
+  prompt: |
+    Відповіді на форму приходять з ключами в довільному регістрі й з пробілами: `" Email "`, `"PHONE"`.
+    Напишіть `Answers(UserDict)`, у якому ключ завжди нормалізується через `key.strip().lower()`: при записі,
+    читанні, перевірці `in` і видаленні. Конструктор, `update`, `setdefault` і `get` мають працювати з
+    нормалізацією без окремого перевизначення.
+
+    Перевизначте рівно чотири методи: `__setitem__`, `__getitem__`, `__delitem__`, `__contains__`.
+    Чому не `dict`, пояснено в уроці.
+  starter: |
+    from collections import UserDict
+
+
+    class Answers(UserDict):
+        ...
+  harness: |
+    a = Answers({" Email ": "x@y.z"}, Phone="+380")
+    a.update({"AGE": 30})
+    a.setdefault("Name", "Ann")
+    a["  name"] = "Bob"
+    print(a)
+    print(a["EMAIL"], "PHONE" in a, a.get(" Age "), a.get("missing", "-"))
+    del a["NAME"]
+    print(sorted(a), len(a))
+    print(isinstance(a, dict), type(a.data).__name__)
+    print(sorted(name for name in ("update", "setdefault", "get", "__init__") if name in vars(Answers)))
+  expected: |
+    {'email': 'x@y.z', 'phone': '+380', 'age': 30, 'name': 'Bob'}
+    x@y.z True 30 -
+    ['age', 'email', 'phone'] 3
+    False dict
+    []
+  hints:
+    - "`UserDict` зберігає дані в `self.data`, а `update`, `setdefault` і конструктор реалізовані на Python через ваші `__setitem__`/`__getitem__`."
+    - "Винесіть нормалізацію в одну функцію або `@staticmethod _norm(key)` і в кожному з чотирьох методів викличте `super().<метод>(self._norm(key), ...)`."
+    - "`def __setitem__(self, key, value): super().__setitem__(self._norm(key), value)`; аналогічно `__getitem__(self, key)`, `__delitem__(self, key)` і `__contains__(self, key)`."
+  solution: |
+    from collections import UserDict
+
+
+    class Answers(UserDict):
+        @staticmethod
+        def _norm(key: str) -> str:
+            return key.strip().lower()
+
+        def __setitem__(self, key: str, value: object) -> None:
+            super().__setitem__(self._norm(key), value)
+
+        def __getitem__(self, key: str) -> object:
+            return super().__getitem__(self._norm(key))
+
+        def __delitem__(self, key: str) -> None:
+            super().__delitem__(self._norm(key))
+
+        def __contains__(self, key: object) -> bool:
+            return isinstance(key, str) and super().__contains__(self._norm(key))
+  requires: []
+  runtime: browser
+
+- id: t6
+  type: code
+  title: "Реєстр рендерерів полів: __init_subclass__, mixin і MRO"
+  prompt: |
+    Зберіть усе з уроку в один модуль.
+
+    `FieldRenderer`:
+
+    - атрибут класу `registry: dict[str, type]`, спільний для всієї ієрархії;
+    - `__init_subclass__(cls, /, kind=None, **kwargs)` кооперативно викликає `super().__init_subclass__(**kwargs)`;
+      якщо `kind` передано, кладе підклас у `FieldRenderer.registry[kind]`; якщо такий `kind` уже зайнятий,
+      кидає `ValueError(f"kind {kind!r} already registered")`. Підкласи без `kind` не реєструються;
+    - `render(self, field: dict) -> str` кидає `NotImplementedError(type(self).__name__)`.
+
+    `EscapeMixin(FieldRenderer)`: його `render` передає в `super().render(...)` копію поля, у якій `label`
+    пропущено через `html.escape`. Оригінальний словник не змінюється.
+
+    `render_fields(fields: list[dict]) -> list[str]`: для кожного поля створює екземпляр класу з реєстру за
+    `field["kind"]` і викликає `render`. Для невідомого `kind` у результат іде рядок
+    `<!-- unknown kind 'video' -->` (з `repr` значення).
+
+    Конкретні рендерери пише харнес, не ви.
+  starter: |
+    from html import escape
+
+
+    class FieldRenderer:
+        ...
+
+
+    class EscapeMixin(FieldRenderer):
+        ...
+
+
+    def render_fields(fields: list[dict]) -> list[str]:
+        ...
+  harness: |
+    class InputRenderer(FieldRenderer, kind="input"):
+        def render(self, field: dict) -> str:
+            return f'<input id="{field["id"]}" aria-label="{field["label"]}">'
+
+
+    class SafeInputRenderer(EscapeMixin, InputRenderer, kind="safe-input"):
+        pass
+
+
+    class TextRenderer(FieldRenderer, kind="text"):
+        def render(self, field: dict) -> str:
+            return f"<p>{field['label']}</p>"
+
+
+    class SafeTextRenderer(EscapeMixin, TextRenderer, kind="safe-text"):
+        pass
+
+
+    class DraftRenderer(FieldRenderer):
+        pass
+
+
+    class BrokenRenderer(FieldRenderer, kind="broken"):
+        pass
+
+
+    print(sorted(FieldRenderer.registry))
+    print([c.__name__ for c in SafeInputRenderer.__mro__])
+    fields = [
+        {"kind": "input", "id": "q", "label": "Q & A"},
+        {"kind": "safe-input", "id": "q", "label": "Q & A"},
+        {"kind": "safe-text", "id": "t", "label": "<b>terms</b>"},
+        {"kind": "video", "id": "v", "label": "Video"},
+    ]
+    for line in render_fields(fields):
+        print(line)
+    print(fields[1]["label"])
+    try:
+        render_fields([{"kind": "broken", "id": "b", "label": "B"}])
+    except NotImplementedError as e:
+        print("NotImplementedError:", e)
+    try:
+        class Duplicate(FieldRenderer, kind="input"):
+            pass
+    except ValueError as e:
+        print("ValueError:", e)
+  expected: |
+    ['broken', 'input', 'safe-input', 'safe-text', 'text']
+    ['SafeInputRenderer', 'EscapeMixin', 'InputRenderer', 'FieldRenderer', 'object']
+    <input id="q" aria-label="Q & A">
+    <input id="q" aria-label="Q &amp; A">
+    <p>&lt;b&gt;terms&lt;/b&gt;</p>
+    <!-- unknown kind 'video' -->
+    Q & A
+    NotImplementedError: BrokenRenderer
+    ValueError: kind 'input' already registered
+  hints:
+    - "`__init_subclass__` викликається на базовому класі щоразу, коли інтерпретатор закінчує виконувати `class X(FieldRenderer, kind=...)`, і `cls` у ньому це новий підклас. Пишіть у `FieldRenderer.registry`, а не створюйте словник у кожному підкласі."
+    - "У `EscapeMixin.render` наступний у MRO це конкретний рендерер (`InputRenderer`), тому `super().render({**field, \"label\": escape(field[\"label\"])})` віддає йому вже екрановану копію."
+    - "`cls = FieldRenderer.registry.get(field[\"kind\"])`; якщо `None`, додайте `f\"<!-- unknown kind {field['kind']!r} -->\"`, інакше `cls().render(field)`."
+  solution: |
+    from html import escape
+
+
+    class FieldRenderer:
+        registry: dict[str, type["FieldRenderer"]] = {}
+
+        def __init_subclass__(cls, /, kind: str | None = None, **kwargs) -> None:
+            super().__init_subclass__(**kwargs)
+            if kind is None:
+                return
+            if kind in FieldRenderer.registry:
+                raise ValueError(f"kind {kind!r} already registered")
+            FieldRenderer.registry[kind] = cls
+
+        def render(self, field: dict) -> str:
+            raise NotImplementedError(type(self).__name__)
+
+
+    class EscapeMixin(FieldRenderer):
+        def render(self, field: dict) -> str:
+            return super().render({**field, "label": escape(field["label"])})
+
+
+    def render_fields(fields: list[dict]) -> list[str]:
+        result = []
+        for field in fields:
+            cls = FieldRenderer.registry.get(field["kind"])
+            if cls is None:
+                result.append(f"<!-- unknown kind {field['kind']!r} -->")
+            else:
+                result.append(cls().render(field))
+        return result
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class Base:
+        def hello(self):
+            return ["Base"]
+
+    class A(Base):
+        def hello(self):
+            return ["A"] + super().hello()
+
+    class B(Base):
+        def hello(self):
+            return ["B"] + super().hello()
+
+    class C(A, B):
+        pass
+
+    print(C().hello())
+    ```
+  options: ["['A', 'Base']", "['A', 'B', 'Base']", "['A', 'Base', 'B', 'Base']", "TypeError через неоднозначність методу"]
+  answer: 1
+  explain: |
+    MRO класу `C` це `C, A, B, Base, object`. `super()` у методі `A` означає "наступний після `A` у MRO
+    `type(self)`", а для екземпляра `C` це `B`, хоча `A` про `B` нічого не знає. Тому `['A', 'B', 'Base']`.
+    `['A', 'Base']` це інтуїція "`super` це батько", як `extends` у JS, і вона була б правильною для `A().hello()`.
+    `['A', 'Base', 'B', 'Base']` це обхід у глибину з повтором спільного предка; C3 ставить `Base` один раз і після
+    всіх його нащадків. Неоднозначності немає: MRO однозначно лінеаризує ромб.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class Field:
+        def __init__(self):
+            self.kind = "text"
+
+    class EmailField(Field):
+        def __init__(self):
+            self.kind = "email"
+            super().__init__()
+
+    print(EmailField().kind)
+    ```
+  options: ["email", "text", "RuntimeError: super() must be called before accessing self", "AttributeError"]
+  answer: 1
+  explain: |
+    Екземпляр уже створений до виклику `__init__`, тож писати в `self` до `super().__init__()` можна.
+    Але батьківський `__init__` виконується другим і перезаписує `kind` на `"text"`. Варіант з `RuntimeError`
+    перенесений з JS, де `this` до `super()` дає `ReferenceError`; у Python такого обмеження немає.
+    `"email"` вийшло б, якби `super().__init__()` стояв першим рядком. `AttributeError` можливий, лише якщо
+    батьківський `__init__` взагалі не викликати й читати атрибут, який ставить тільки він.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class Element:
+        classes = []
+
+    class Input(Element):
+        pass
+
+    class Button(Element):
+        pass
+
+    Input.classes.append("form-control")
+    print(Button.classes)
+    ```
+  options: ["[]", "['form-control']", "AttributeError: type object 'Button' has no attribute 'classes'", "None"]
+  answer: 1
+  explain: |
+    `classes` визначений один раз на `Element`. `Input.classes` і `Button.classes` знаходять його пошуком по MRO,
+    тож усі троє бачать один і той самий список, а `append` змінює його на місці. `[]` це очікування, що кожен
+    підклас отримує свою копію, як поле екземпляра. Окремий список у підкласі з'явився б лише після
+    присвоєння `Input.classes = [...]`, а не після мутації. `AttributeError` невірний, бо атрибути класу
+    успадковуються.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class Answers(dict):
+        def __setitem__(self, key, value):
+            super().__setitem__(key.lower(), value)
+
+    a = Answers()
+    a["Email"] = "x"
+    a.update(Phone="y")
+    print(list(a))
+    ```
+  options: ["['email', 'phone']", "['email', 'Phone']", "['Email', 'Phone']", "TypeError"]
+  answer: 1
+  explain: |
+    `a["Email"] = ...` іде через ваш `__setitem__`, тому `email`. А `dict.update` реалізований на C і пише в
+    таблицю напряму, не шукаючи перевизначений `__setitem__`, тому `Phone` лишається як є. `['email', 'phone']`
+    це очікування, що всі шляхи запису проходять через один метод, як у `collections.UserDict`.
+    `['Email', 'Phone']` означав би, що перевизначення не працює взагалі, але для `[]=` воно працює.
+
+- id: p1
+  type: project
+  title: "BaseRenderer з реєстром і TimingMixin у капстоуні"
+  prompt: |
+    У пакеті `src/formbuilder/renderers/` (m2-l07) додайте в `renderers/base.py`, поруч з Protocol `Renderer`,
+    базовий клас `BaseRenderer` і `TimingMixin` за зразком розділу "Для капстоуну":
+
+    - `registry: ClassVar[dict[str, type[BaseRenderer]]]`, заповнюється через
+      `__init_subclass__(cls, /, fmt: str | None = None, **kwargs: object)`; повторний `fmt` дає `ValueError`;
+    - `create(fmt)` як classmethod, що повертає новий екземпляр або кидає `ValueError` зі списком відомих форматів;
+    - `render(element, theme)` кидає `NotImplementedError`, `render_form(elements, theme)` спільний для всіх;
+    - `HtmlRenderer(BaseRenderer, fmt="html")` у `renderers/html.py`, `TextRenderer(BaseRenderer, fmt="text")` у `renderers/text.py`;
+    - `TimingMixin(BaseRenderer)` з методом `now()` і атрибутом `last_render_ms`, що вимірює `render` через
+      `super()`, і `TimedHtmlRenderer(TimingMixin, HtmlRenderer, fmt="html+timing")` у `renderers/html.py`.
+
+    Protocol `Renderer` з m2-l07 лишається типом параметрів і словників у коді, що рендерери використовує.
+    Чекліст m2-l07 про "жодного спільного предка" цим уроком свідомо змінюється: тепер є спільний код.
+    `get_renderer` з m3-l01 лишається публічним входом: він знаходить модуль формату за іменем файлу, а
+    `BaseRenderer.registry` заповнюється, коли цей модуль імпортовано.
+    Тести в `tests/test_renderer_registry.py`.
+  checklist:
+    - "`BaseRenderer.registry` містить `html`, `html+timing` після імпорту `formbuilder.renderers.html` і `text` після імпорту `formbuilder.renderers.text`"
+    - "Тест: оголошення другого класу з `fmt=\"html\"` у тілі тесту дає `ValueError` (`pytest.raises`), і реєстр після цього не змінився"
+    - "Тест: `BaseRenderer.create(\"pdf\")` дає `ValueError`, у повідомленні перелічено відомі формати"
+    - "Тест: підклас без `render` створюється, а `render_form` на ньому дає `NotImplementedError`"
+    - "Тест: `[c.__name__ for c in TimedHtmlRenderer.__mro__]` дорівнює `['TimedHtmlRenderer', 'TimingMixin', 'HtmlRenderer', 'BaseRenderer', 'object']`"
+    - "Тест: підклас `TimedHtmlRenderer` з фейковим `now()` (крок 2.5 мс) дає `last_render_ms == pytest.approx(2.5)`, а HTML збігається з `HtmlRenderer`"
+    - "`HtmlRenderer()` присвоюється змінній типу `Renderer` (Protocol) без помилок mypy"
+    - "`uv run mypy --strict src/formbuilder/renderers` без помилок"
+  verify: "cd capstone && uv run pytest tests/test_renderer_registry.py -q && uv run mypy --strict src/formbuilder/renderers"

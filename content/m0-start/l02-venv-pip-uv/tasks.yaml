@@ -1,0 +1,288 @@
+- id: q1
+  type: quiz
+  question: |
+    У проєкті є `.venv` з установленим pydantic. Ви відкриваєте нову вкладку терміналу в папці проєкту,
+    нічого не активуєте і запускаєте:
+    ```bash
+    .venv/bin/python -c "import pydantic; print('ok')"
+    ```
+    Що відбудеться?
+  options:
+    - "Надрукує `ok`: інтерпретатор знаходить `pyvenv.cfg` поруч із собою і бере `site-packages` з `.venv`"
+    - "`ModuleNotFoundError`: без `activate` не встановлено `VIRTUAL_ENV`, і Python не знає про venv"
+    - "Надрукує `ok`, але pydantic імпортується з `site-packages` базового Python"
+    - "`bad interpreter`: виконувані файли venv працюють лише після активації"
+  answer: 0
+  explain: |
+    Python розпізнає venv сам: при старті він шукає `pyvenv.cfg` поруч зі своїм виконуваним файлом
+    і на рівень вище, і якщо знаходить, `sys.prefix` стає папкою venv, а `site-packages` береться з неї.
+    `activate` лише дописує `.venv/bin` на початок `PATH` і експортує `VIRTUAL_ENV`, щоб слово `python`
+    знаходилось у venv; інтерпретатор цю змінну для пошуку пакетів не використовує. Базовий `site-packages`
+    у venv не видно (`include-system-site-packages = false`), до того ж там pydantic і немає.
+    `bad interpreter` буває після переміщення папки venv, бо в shebang абсолютний шлях, а не через
+    відсутність активації.
+
+- id: q2
+  type: quiz
+  question: |
+    У `pyproject.toml` записано `"pydantic~=2.1"`. Які версії дозволені?
+  options:
+    - "Лише патчі 2.1.x, як `~2.1.0` у npm"
+    - "Від 2.1 до 3.0 не включно, як `^2.1.0` у npm"
+    - "Рівно 2.1"
+    - "Жодні: `~=` це npm-синтаксис, uv відмовиться парсити рядок"
+  answer: 1
+  explain: |
+    `~=` (compatible release, PEP 440) відкидає останній компонент указаної версії і вимагає збігу всього,
+    що лишилось: `~=2.1` означає `>=2.1` і `==2.*`, тобто `>=2.1,<3`. Перший варіант спокусливий через
+    візуальну схожість з npm-ним `~`, але патчі 2.1.x дає `~=2.1.0`: там відкидається `0`, і має збігтися
+    `2.1`. Зміст `~=` залежить від кількості компонентів, а не від символу. `^` у Python справді немає,
+    і uv відкидає саме його, а `~=` це повноцінний оператор стандарту.
+
+- id: q3
+  type: quiz
+  question: |
+    Крок CI має впасти, якщо розробник змінив залежності в `pyproject.toml` руками і забув оновити `uv.lock`.
+    Яку команду поставити?
+  options:
+    - "`uv sync`"
+    - "`uv sync --frozen`"
+    - "`uv sync --locked`"
+    - "`uv lock`"
+  answer: 2
+  explain: |
+    `--locked` перевіряє, що `uv.lock` відповідає `pyproject.toml`, і завершується з помилкою
+    "The lockfile at `uv.lock` needs to be updated, but `--locked` was provided". Це поведінка `npm ci`.
+    `--frozen` спокусливий через звичне зіставлення "`npm ci` = `--frozen`", але він на `pyproject.toml`
+    не дивиться взагалі й ставить старий lock як є: CI пройде, а нової залежності у venv не буде.
+    Голий `uv sync` і `uv lock` мовчки оновлять lock у робочій копії CI, тож розбіжність теж прослизне.
+
+- id: q4
+  type: quiz
+  question: |
+    Команда `pip freeze > requirements.txt` дала файл, де кожен рядок має вигляд `name==version`.
+    Чого цьому файлу бракує, щоб бути lockfile на рівні `uv.lock`?
+  options:
+    - "Транзитивних залежностей: freeze пише лише пакети, встановлені явно"
+    - "Хешів файлів і розділення на прямі й транзитивні залежності"
+    - "Точних версій: freeze пише діапазони на кшталт `>=2`"
+    - "Нічого: коли всі пакети запінені через `==`, це повноцінний lockfile"
+  answer: 1
+  explain: |
+    `freeze` пише все, що лежить у venv, включно з транзитивними, і все з `==`, тому перший і третій
+    варіанти невірні. Але в ньому немає хешів (`pip install --require-hashes -r` на такому файлі падає),
+    тож нічого не гарантує, що завтра під `pydantic==2.14.1` прийде той самий файл. І з нього не видно,
+    які пакети проєкт просив сам: `annotated-types` і `pydantic` стоять поруч на рівних. Звідси пастка
+    міграції через `uv add -r`, коли всі транзитивні стають прямими. Додатково freeze це знімок
+    однієї платформи й версії Python, а `uv.lock` резолвиться для всіх одразу.
+
+- id: t1
+  type: code
+  title: "Що насправді означає ~="
+  prompt: |
+    Напишіть `compatible_bounds(version)`, яка перекладає compatible release `~=<version>` у пару
+    явних меж `(нижня, верхня)` за правилом PEP 440: нижня межа `>=version`, а верхня утворюється так:
+    відкинути останній компонент версії й збільшити на одиницю той, що став останнім.
+
+    Версія з одного компонента для `~=` недопустима: кидайте `ValueError` з текстом
+    `~= needs at least two components: '<version>'`.
+
+    ```python
+    compatible_bounds("2.1")      # ('>=2.1', '<3')
+    compatible_bounds("2.1.3")    # ('>=2.1.3', '<2.2')
+    compatible_bounds("2")        # ValueError
+    ```
+  starter: |
+    def compatible_bounds(version: str) -> tuple[str, str]:
+        ...
+  harness: |
+    print(compatible_bounds("2.1"))
+    print(compatible_bounds("2.1.3"))
+    print(compatible_bounds("0.28"))
+    print(compatible_bounds("1.4.5.2"))
+    try:
+        compatible_bounds("2")
+    except ValueError as e:
+        print("ValueError:", e)
+  expected: |
+    ('>=2.1', '<3')
+    ('>=2.1.3', '<2.2')
+    ('>=0.28', '<1')
+    ('>=1.4.5.2', '<1.4.6')
+    ValueError: ~= needs at least two components: '2'
+  hints:
+    - "Розбийте версію по крапках на числа. Верхня межа це всі компоненти, крім останнього, з інкрементом нового останнього."
+    - "parts = [int(p) for p in version.split('.')]; upper = parts[:-1]; upper[-1] += 1; потім '.'.join(str(p) for p in upper). Повідомлення помилки з !r дасть лапки навколо версії."
+  solution: |
+    def compatible_bounds(version: str) -> tuple[str, str]:
+        parts = [int(p) for p in version.split(".")]
+        if len(parts) < 2:
+            raise ValueError(f"~= needs at least two components: {version!r}")
+        upper = parts[:-1]
+        upper[-1] += 1
+        return f">={version}", "<" + ".".join(str(p) for p in upper)
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Переклад npm-ного ^ у специфікатор PEP 440"
+  prompt: |
+    Ви переносите залежності з `package.json`-звички у `pyproject.toml`. Напишіть `caret_to_pep440(caret)`,
+    яка приймає npm-діапазон виду `^MAJOR.MINOR.PATCH` і повертає еквівалентний специфікатор PEP 440
+    у формі `>=нижня,<верхня`.
+
+    Правила `^` у npm: верхня межа це наступна версія, що змінює перший ненульовий компонент.
+    `^2.11.3` дозволяє все до `3.0.0`, `^0.28.1` лише до `0.29.0`, `^0.0.3` лише до `0.0.4`.
+    Версія у вхідному рядку завжди з трьох компонентів.
+
+    ```python
+    caret_to_pep440("^2.11.3")   # '>=2.11.3,<3.0.0'
+    caret_to_pep440("^0.28.1")   # '>=0.28.1,<0.29.0'
+    ```
+  starter: |
+    def caret_to_pep440(caret: str) -> str:
+        ...
+  harness: |
+    print(caret_to_pep440("^2.11.3"))
+    print(caret_to_pep440("^0.28.1"))
+    print(caret_to_pep440("^0.0.3"))
+    print(caret_to_pep440("^1.0.0"))
+  expected: |
+    >=2.11.3,<3.0.0
+    >=0.28.1,<0.29.0
+    >=0.0.3,<0.0.4
+    >=1.0.0,<2.0.0
+  hints:
+    - "Зріжте `^`, розберіть три числа й розгляньте три випадки: major > 0, major == 0 і minor > 0, обидва нулі."
+    - "major, minor, patch = (int(p) for p in caret.removeprefix('^').split('.')); далі if/elif/else, що будує верхню межу f'{major + 1}.0.0', f'0.{minor + 1}.0' або f'0.0.{patch + 1}'."
+  solution: |
+    def caret_to_pep440(caret: str) -> str:
+        major, minor, patch = (int(p) for p in caret.removeprefix("^").split("."))
+        if major > 0:
+            upper = f"{major + 1}.0.0"
+        elif minor > 0:
+            upper = f"0.{minor + 1}.0"
+        else:
+            upper = f"0.0.{patch + 1}"
+        return f">={major}.{minor}.{patch},<{upper}"
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Імена залежностей з pyproject.toml через tomllib"
+  prompt: |
+    Напишіть `dependency_names(pyproject_text)`, яка читає вміст `pyproject.toml` через `tomllib`
+    і повертає словник: ключ `"project"` для `[project] dependencies`, далі по ключу на кожну групу
+    з `[dependency-groups]` у порядку з файлу. Значення це відсортований список імен пакетів без
+    специфікаторів версій, extras і маркерів, у нижньому регістрі.
+
+    Ім'я закінчується на першому з символів `[`, `<`, `>`, `=`, `!`, `~`, `;` або пробілі.
+    Якщо `dependencies` чи `[dependency-groups]` у файлі немає, `"project"` має бути порожнім списком,
+    а груп просто немає.
+
+    ```python
+    dependency_names('[project]\ndependencies = ["PyYAML==6.0.*", "pydantic[email]>=2.11"]\n')
+    # {'project': ['pydantic', 'pyyaml']}
+    ```
+  starter: |
+    import tomllib
+
+
+    def dependency_names(pyproject_text: str) -> dict[str, list[str]]:
+        ...
+  harness: |
+    PYPROJECT = '''
+    [project]
+    name = "forms-api"
+    version = "0.1.0"
+    requires-python = ">=3.12"
+    dependencies = [
+        "pydantic[email]>=2.11,<3",
+        "httpx~=0.28.1",
+        "PyYAML==6.0.*",
+    ]
+
+    [dependency-groups]
+    dev = ["ruff>=0.17", "pytest>=9.1.1", "mypy"]
+    docs = ["mkdocs ; python_version >= '3.12'"]
+
+    [tool.ruff]
+    line-length = 100
+    '''
+
+    print(dependency_names(PYPROJECT))
+    print(dependency_names('[project]\nname = "x"\nversion = "0"\n'))
+  expected: |
+    {'project': ['httpx', 'pydantic', 'pyyaml'], 'dev': ['mypy', 'pytest', 'ruff'], 'docs': ['mkdocs']}
+    {'project': []}
+  hints:
+    - "tomllib.loads дає звичайний словник; відсутні таблиці обробляйте через .get з порожнім значенням за замовчуванням."
+    - "Ім'я відрізається через re.split(r'[\\[<>=!~;\\s]', spec, maxsplit=1)[0]. Групи можна додати до словника з project оператором |=."
+  solution: |
+    import re
+    import tomllib
+
+
+    def dependency_names(pyproject_text: str) -> dict[str, list[str]]:
+        data = tomllib.loads(pyproject_text)
+        groups = {"project": data.get("project", {}).get("dependencies", [])}
+        groups |= data.get("dependency-groups", {})
+        return {
+            group: sorted(re.split(r"[\[<>=!~;\s]", spec, maxsplit=1)[0].lower() for spec in specs)
+            for group, specs in groups.items()
+        }
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "Від pip і requirements.txt до uv"
+  prompt: |
+    Відтворіть міграцію старого проєкту на uv у новій порожній папці `practice/m0-l02/pip-to-uv/`
+    у корені курсу. Усі команди нижче виконуються з цієї папки.
+
+    1. Створіть venv стандартним модулем: `python3.12 -m venv .venv`.
+    2. Поставте в нього `"pydantic>=2,<3"` через `.venv/bin/python -m pip install` і збережіть
+       `pip freeze` у `requirements.txt`. Подивіться, скільки рядків у файлі і які з них ви не просили.
+    3. Видаліть `.venv`, ініціалізуйте uv-проєкт (`uv init --bare --python 3.12`, `uv python pin 3.12`)
+       і перенесіть залежності так, щоб у `[project] dependencies` був лише один рядок з pydantic
+       і діапазоном, а точні версії транзитивних пакетів жили тільки в `uv.lock`.
+    4. `requirements.txt` залиште в папці для порівняння.
+
+    Завдання про uv, тому `verify` переходить у папку проєкту (`cd practice/m0-l02/pip-to-uv`) і запускає
+    `uv sync` та `uv run`: перевіряється оточення цього проєкту, а не `.venv` курсу.
+  checklist:
+    - "`requirements.txt` з `pip freeze` лежить у папці й містить п'ять рядків з `==`"
+    - "У `pyproject.toml` в `dependencies` рівно один рядок, і це pydantic з діапазоном, а не `==`"
+    - "Є `uv.lock` і `.python-version` з `3.12`; `uv tree` показує pydantic з чотирма залежностями"
+    - "`.venv` створений через `uv sync`, у ньому немає `bin/pip`"
+  verify: "cd practice/m0-l02/pip-to-uv && uv sync --locked && uv run python -c \"import tomllib; deps = tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']; assert len(deps) == 1 and deps[0].startswith('pydantic'), deps; import pydantic; print('ok', pydantic.VERSION)\""
+
+- id: p2
+  type: project
+  title: "pyproject.toml для капстоуну formbuilder"
+  prompt: |
+    Підготуйте `pyproject.toml` майбутнього капстоуну в окремій папці `practice/m0-l02/formbuilder-draft/`
+    у корені курсу. У m0-l06 ці файли (`pyproject.toml`, `.python-version`, `uv.lock`) переїдуть у `capstone/`
+    у корені курсу, де до них додадуться `src/formbuilder/`, `tests/` і `[build-system]`.
+
+    Вимоги до файлу:
+    - `[project]`: `name = "formbuilder"`, `version = "0.1.0"`, змістовний `description`,
+      `requires-python = ">=3.12"`, порожні `dependencies` (pydantic з'явиться в модулі 2).
+    - `[dependency-groups] dev` з pytest, ruff і mypy, додані через `uv add --dev`, а не вписані руками.
+    - `[tool.ruff]` з `line-length = 88` і `target-version = "py312"` (набір правил додасть m0-l04).
+    - `[tool.pytest.ini_options]` з `testpaths = ["tests"]` і `addopts = "-q"`.
+    - `[tool.mypy]` з `python_version = "3.12"` і `strict = true`.
+    - `.python-version` з `3.12`, закомічений разом з `uv.lock`, якщо ви ведете чернетку в git.
+
+    `verify` переходить у папку чернетки (`cd practice/m0-l02/formbuilder-draft`) і працює через `uv`.
+    У m0-l04 ця сама чернетка отримає конфіг ruff.
+  checklist:
+    - "`uv init --bare --name formbuilder --python 3.12` і `uv python pin 3.12` виконано, у папці є `pyproject.toml`, `.python-version`, `uv.lock`"
+    - "dev-група містить pytest, ruff, mypy; робочих залежностей немає"
+    - "Таблиці `[tool.ruff]`, `[tool.pytest.ini_options]`, `[tool.mypy]` заповнені за вимогами"
+    - "`uv sync --locked` проходить без змін lock, `uv run pytest --version` друкує версію pytest"
+    - "`.venv` не в git, якщо чернетка під git"
+  verify: "cd practice/m0-l02/formbuilder-draft && uv sync --locked && uv run pytest --version && uv run python -c \"import re, tomllib; p = tomllib.load(open('pyproject.toml', 'rb')); dev = {re.split(r'[<>=~!\\[; ]', d)[0] for d in p['dependency-groups']['dev']}; assert p['project']['name'] == 'formbuilder', 'name'; assert p['project']['requires-python'] == '>=3.12', 'requires-python'; assert {'pytest', 'ruff', 'mypy'} <= dev, dev; assert p['tool']['mypy']['strict'] is True, 'mypy strict'; print('pyproject ok')\""

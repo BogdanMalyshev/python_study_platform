@@ -1,0 +1,383 @@
+- id: q1
+  type: quiz
+  question: |
+    Клієнт шле `POST /forms/signup/build` з JSON-тілом `{"renderer": "jinja"}`. Що поверне обробник?
+    ```python
+    class BuildOptions(BaseModel):
+        publish: bool = True
+
+    @app.post("/forms/{form_id}/build")
+    def build(form_id: str, renderer: str = "html", options: BuildOptions | None = None) -> dict:
+        return {"renderer": renderer, "options": options}
+    ```
+  options:
+    - "`{'renderer': 'html', 'options': {'publish': True}}`"
+    - "`{'renderer': 'jinja', 'options': None}`"
+    - "`{'renderer': 'jinja', 'options': {'publish': True}}`"
+    - "422: `renderer` очікується в query"
+  answer: 0
+  explain: |
+    Скаляр `renderer` зі значенням за замовчуванням це query-параметр, а тіло належить єдиному параметру-моделі `options`. JSON `{"renderer": "jinja"}` валідується як `BuildOptions`: ключ `renderer` там зайвий і за замовчуванням (`extra="ignore"`) мовчки відкидається, `publish` бере default. `renderer` з query не прийшов, тож `"html"`.
+    `'jinja'` це інтуїція Express, де `req.body.renderer` і параметр функції одне й те саме; у FastAPI ім'я параметра не шукається в тілі, якщо параметр не модель і не `Body()`.
+    422 не буде: `renderer` має default, тож він необов'язковий. Щоб `renderer` читався з тіла, його треба оголосити полем `BuildOptions`, а з `extra="forbid"` помилка в імені ключа дала б 422 замість тиші.
+
+- id: t1
+  type: code
+  title: "Модель тіла BuildRequest"
+  prompt: |
+    Фронтенд FormBuilder запускає збірку з тілом у camelCase. Напишіть Pydantic-модель `BuildRequest`,
+    яку в капстоуні оголосять параметром обробника `def build_form(form_id: str, req: BuildRequest)`.
+
+    - `renderer`: `"html"` або `"jinja"`, за замовчуванням `"html"`;
+    - `publish: bool = True`;
+    - `base_url`: рядок або `None` (default `None`); рядок мусить починатися з `http://` або `https://`;
+    - `priority`: ціле від 0 до 10 включно, default `0`;
+    - ззовні ключі приходять у camelCase (`baseUrl`), з Python-коду модель має приймати й snake_case;
+    - будь-який невідомий ключ це помилка, а не тиша.
+
+    ```python
+    BuildRequest.model_validate({"baseUrl": "https://x.dev", "priority": "3"}).priority  # 3
+    BuildRequest.model_validate({"dryRun": True})  # ValidationError: extra_forbidden
+    ```
+  starter: |
+    from typing import Literal
+
+    from pydantic import BaseModel, ConfigDict, Field
+    from pydantic.alias_generators import to_camel
+
+
+    class BuildRequest(BaseModel):
+        ...
+  harness: |
+    from pydantic import ValidationError
+
+    print(BuildRequest.model_validate({}).model_dump())
+    req = BuildRequest.model_validate(
+        {"renderer": "jinja", "baseUrl": "https://forms.example.com", "priority": "3"}
+    )
+    print(req.base_url, req.priority, type(req.priority).__name__)
+    print(BuildRequest(base_url="http://localhost:8000").model_dump(by_alias=True))
+
+    for payload in [
+        {"renderer": "pdf"},
+        {"priority": 11, "baseUrl": "ftp://x"},
+        {"base_url": "https://ok.example", "dryRun": True},
+    ]:
+        try:
+            BuildRequest.model_validate(payload)
+        except ValidationError as e:
+            for err in e.errors():
+                print(err["loc"], err["type"])
+  expected: |
+    {'renderer': 'html', 'publish': True, 'base_url': None, 'priority': 0}
+    https://forms.example.com 3 int
+    {'renderer': 'html', 'publish': True, 'baseUrl': 'http://localhost:8000', 'priority': 0}
+    ('renderer',) literal_error
+    ('baseUrl',) string_pattern_mismatch
+    ('priority',) less_than_equal
+    ('dryRun',) extra_forbidden
+  hints:
+    - "Усе, що стосується моделі загалом (аліаси, прийом за іменем, зайві ключі), живе в `model_config = ConfigDict(...)`; обмеження окремих полів задаються через `Field`."
+    - "`ConfigDict(alias_generator=to_camel, validate_by_name=True, extra=\"forbid\")`; для URL `Field(default=None, pattern=r\"^https?://\")`, для пріоритету `Field(default=0, ge=0, le=10)`."
+    - "Поля: `renderer: Literal[\"html\", \"jinja\"] = \"html\"`, `publish: bool = True`, `base_url: str | None = Field(...)`, `priority: int = Field(...)`."
+  solution: |
+    from typing import Literal
+
+    from pydantic import BaseModel, ConfigDict, Field
+    from pydantic.alias_generators import to_camel
+
+
+    class BuildRequest(BaseModel):
+        model_config = ConfigDict(
+            alias_generator=to_camel, validate_by_name=True, extra="forbid"
+        )
+
+        renderer: Literal["html", "jinja"] = "html"
+        publish: bool = True
+        base_url: str | None = Field(default=None, pattern=r"^https?://")
+        priority: int = Field(default=0, ge=0, le=10)
+  requires: [pydantic]
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "422 руками: як FastAPI будує detail для тіла"
+  prompt: |
+    Повторіть на чистому Pydantic те, що FastAPI робить із тілом запиту. Напишіть
+    `body_errors(model, payload) -> list[dict]`:
+
+    - якщо `payload` валідний для `model`, повертає `[]`;
+    - інакше список словників з ключами `type`, `loc`, `msg` у порядку помилок Pydantic,
+      де `loc` це **список**, що починається з `"body"`, а далі йде `loc` помилки Pydantic.
+
+    FastAPI валідує вхід з `from_attributes=True`; зробіть так само, тоді на тілі, яке не є
+    об'єктом, тип помилки збіжеться з реальним FastAPI (`model_attributes_type`, а не `model_type`).
+
+    ```python
+    body_errors(FormIn, {"title": "Sign up"})  # []
+    body_errors(FormIn, {})  # [{'type': 'missing', 'loc': ['body', 'title'], 'msg': 'Field required'}]
+    ```
+  starter: |
+    from pydantic import BaseModel, ValidationError
+
+
+    def body_errors(model: type[BaseModel], payload: object) -> list[dict]:
+        ...
+  harness: |
+    from typing import Literal
+
+    from pydantic import Field
+
+
+    class InputElement(BaseModel):
+        id: str
+        type: Literal["input"]
+        name: str = Field(min_length=1)
+
+
+    class FormIn(BaseModel):
+        title: str = Field(min_length=1, max_length=120)
+        elements: list[InputElement] = []
+
+
+    print(body_errors(FormIn, {"title": "Sign up"}))
+    for err in body_errors(FormIn, {"elements": [{"id": "i1", "type": "input", "name": ""}]}):
+        print(err)
+    for err in body_errors(FormIn, ["not", "an", "object"]):
+        print(err)
+  expected: |
+    []
+    {'type': 'missing', 'loc': ['body', 'title'], 'msg': 'Field required'}
+    {'type': 'string_too_short', 'loc': ['body', 'elements', 0, 'name'], 'msg': 'String should have at least 1 character'}
+    {'type': 'model_attributes_type', 'loc': ['body'], 'msg': 'Input should be a valid dictionary or object to extract fields from'}
+  hints:
+    - "Схема safeParse з m2-l09: `try` навколо `model_validate`, у `except ValidationError` перетворити `e.errors()`."
+    - "`loc` у Pydantic це кортеж; новий список з префіксом це `[\"body\", *err[\"loc\"]]`. Не забудьте `from_attributes=True` у `model_validate`."
+    - "`return [{\"type\": err[\"type\"], \"loc\": [\"body\", *err[\"loc\"]], \"msg\": err[\"msg\"]} for err in e.errors()]`, а після `try/except` `return []`."
+  solution: |
+    from pydantic import BaseModel, ValidationError
+
+
+    def body_errors(model: type[BaseModel], payload: object) -> list[dict]:
+        try:
+            model.model_validate(payload, from_attributes=True)
+        except ValidationError as e:
+            return [
+                {"type": err["type"], "loc": ["body", *err["loc"]], "msg": err["msg"]}
+                for err in e.errors()
+            ]
+        return []
+  requires: [pydantic]
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "response_model руками: фільтрація без витоків"
+  prompt: |
+    Напишіть `serialize_response(response_type, value)`, яка робить із поверненим значенням те саме,
+    що FastAPI робить з моделлю відповіді:
+
+    - `response_type` це модель (`JobOut`) або тип на кшталт `list[JobOut]`;
+    - `value` це dict, dataclass зі сховища, екземпляр моделі або підкласу моделі, або список таких;
+    - результат: JSON-сумісні дані (`datetime` як ISO-рядок) з ключами-аліасами (camelCase);
+    - зайві поля відкидаються, **зокрема поля підкласу**: `JobWithSecrets` не має віддати `workerToken`;
+    - невідповідне значення дає `ValidationError`.
+
+    Наївне `response_type.model_validate(value).model_dump(...)` не підходить двічі:
+    `list[JobOut]` не має `model_validate`, а екземпляр підкласу проходить валідацію як є і віддає секрет.
+  starter: |
+    from typing import Any
+
+    from pydantic import TypeAdapter
+
+
+    def serialize_response(response_type: Any, value: object) -> Any:
+        ...
+  harness: |
+    from dataclasses import dataclass
+    from datetime import UTC, datetime
+
+    from pydantic import BaseModel, ConfigDict, ValidationError
+    from pydantic.alias_generators import to_camel
+
+
+    class CamelModel(BaseModel):
+        model_config = ConfigDict(alias_generator=to_camel, validate_by_name=True)
+
+
+    class JobOut(CamelModel):
+        id: str
+        form_id: str
+        status: str
+        finished_at: datetime | None
+
+
+    class JobWithSecrets(JobOut):
+        worker_token: str
+
+
+    @dataclass
+    class JobRecord:
+        id: str
+        form_id: str
+        status: str
+        attempts: int
+        finished_at: datetime | None
+
+
+    done = datetime(2026, 10, 18, 12, 30, tzinfo=UTC)
+    print(serialize_response(JobOut, JobRecord("j1", "signup", "done", 1, done)))
+    print(serialize_response(JobOut, {"id": "j2", "form_id": "signup", "status": "queued",
+                                      "finished_at": None, "worker_token": "t-1"}))
+    print(serialize_response(JobOut, JobWithSecrets(id="j3", form_id="contact", status="running",
+                                                    finished_at=None, worker_token="t-2")))
+    print(serialize_response(list[JobOut], [
+        JobRecord("j4", "signup", "failed", 3, done),
+        {"id": "j5", "formId": "signup", "status": "queued", "finishedAt": None},
+    ]))
+    try:
+        serialize_response(JobOut, {"id": "j6", "status": "queued"})
+    except ValidationError as e:
+        print([(err["type"], err["loc"]) for err in e.errors()])
+  expected: |
+    {'id': 'j1', 'formId': 'signup', 'status': 'done', 'finishedAt': '2026-10-18T12:30:00Z'}
+    {'id': 'j2', 'formId': 'signup', 'status': 'queued', 'finishedAt': None}
+    {'id': 'j3', 'formId': 'contact', 'status': 'running', 'finishedAt': None}
+    [{'id': 'j4', 'formId': 'signup', 'status': 'failed', 'finishedAt': '2026-10-18T12:30:00Z'}, {'id': 'j5', 'formId': 'signup', 'status': 'queued', 'finishedAt': None}]
+    [('missing', ('formId',)), ('missing', ('finishedAt',))]
+  hints:
+    - "Механізм описаний у callout \"Під капотом\" розділу про моделі відповіді: адаптер для типу, два кроки, валідація і серіалізація, обидва через той самий адаптер."
+    - "`adapter = TypeAdapter(response_type)`; dataclass без `from_attributes=True` не пройде валідацію моделі; серіалізація з `mode=\"json\", by_alias=True`."
+    - "`validated = adapter.validate_python(value, from_attributes=True)`, потім `return adapter.dump_python(validated, mode=\"json\", by_alias=True)`."
+  solution: |
+    from typing import Any
+
+    from pydantic import TypeAdapter
+
+
+    def serialize_response(response_type: Any, value: object) -> Any:
+        adapter = TypeAdapter(response_type)
+        validated = adapter.validate_python(value, from_attributes=True)
+        return adapter.dump_python(validated, mode="json", by_alias=True)
+  requires: [pydantic]
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує один запит `GET /forms`?
+    ```python
+    def get_db() -> Iterator[str]:
+        print("open")
+        yield "db"
+        print("close")
+
+    def get_store(db: Annotated[str, Depends(get_db)]) -> str:
+        return f"store({db})"
+
+    @app.get("/forms")
+    def list_forms(
+        store: Annotated[str, Depends(get_store)],
+        db: Annotated[str, Depends(get_db)],
+    ) -> list[str]:
+        return [store, db]
+    ```
+  options:
+    - "`open`, `open`, `close`, `close`"
+    - "`open`, `close`"
+    - "`open` і жодного `close`: генератор не дочитаний до кінця"
+    - "`open`, `open`, `close`: другий генератор перезаписав перший"
+  answer: 1
+  explain: |
+    У межах одного запиту FastAPI кешує результат кожної залежності: `get_db` потрібна і `get_store`, і обробнику, але викликається один раз, і обидва отримують те саме `"db"`. Прибирання після `yield` теж одне, після обробника.
+    Два `open` було б з `Depends(get_db, use_cache=False)` в одному з місць, або в NestJS-світі з `Scope.TRANSIENT`.
+    "Генератор не дочитаний" це інтуїція звичайного Python-генератора; залежність з `yield` FastAPI веде сам, як `@contextmanager`, і код після `yield` гарантовано виконується.
+
+- id: q3
+  type: quiz
+  question: |
+    Три клієнти одночасно викликають цей ендпоінт на одному процесі uvicorn. Через скільки приблизно отримає відповідь останній?
+    ```python
+    @app.get("/render")
+    async def render() -> dict[str, str]:
+        time.sleep(1)  # синхронний рендер
+        return {"status": "done"}
+    ```
+  options:
+    - "Приблизно через 1 секунду: FastAPI запускає обробники в пулі потоків"
+    - "Приблизно через 1 секунду: `async def` робить функцію неблокуючою"
+    - "Приблизно через 3 секунди"
+    - "Одразу 500: `time.sleep` заборонений в `async def`"
+  answer: 2
+  explain: |
+    `async def` виконується прямо в event loop, а `time.sleep` блокує цикл на секунду; три запити обслуговуються по черзі, і весь цей час сервер не відповідає навіть на `/health`. У прогоні з уроку це `3.0s`.
+    У пул потоків FastAPI відправляє лише звичайний `def`: з `def render()` відповідь була б через секунду.
+    `async def` сам нічого неблокуючим не робить, це лише дозвіл на `await` усередині, як і `async function` у JS не переносить синхронний цикл в інший потік.
+    Заборони немає: ні Python, ні FastAPI не перевіряють, що всередині корутини, і помилки не буде.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує тест?
+    ```python
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.store = {"signup": 1}
+        yield
+
+    app = FastAPI(lifespan=lifespan)
+
+    @app.get("/forms/{form_id}")
+    def read_form(form_id: str, request: Request) -> dict[str, int]:
+        return {"version": request.app.state.store[form_id]}
+
+    client = TestClient(app)
+    try:
+        print(client.get("/forms/signup").json())
+    except Exception as e:
+        print(type(e).__name__, e)
+    ```
+  options:
+    - "`{'version': 1}`: lifespan запускається ліниво на першому запиті"
+    - "`AttributeError 'State' object has no attribute 'store'`"
+    - "`KeyError 'signup'`: `app.state` порожній словник"
+    - "`RuntimeError Lifespan has not started`"
+  answer: 1
+  explain: |
+    `TestClient` запускає lifespan лише як контекстний менеджер: `with TestClient(app) as client:`. Без `with` код до `yield` не виконався, `app.state` не має атрибута `store`, і виняток з обробника `TestClient` за замовчуванням перекидає в тест.
+    Лінивого старту немає ні в `TestClient`, ні в uvicorn: uvicorn виконує lifespan до того, як почне приймати з'єднання.
+    `app.state` це об'єкт з атрибутами, а не dict, тож помилка `AttributeError`, а не `KeyError`.
+    Окремої перевірки "lifespan не стартував" FastAPI не робить, падає саме звернення до відсутнього атрибута.
+
+- id: p1
+  type: project
+  title: "API капстоуну: forms і jobs"
+  prompt: |
+    Додайте в капстоун HTTP-шар з розділу "Для капстоуну". FastAPI і uvicorn уже в основних залежностях
+    з m3-l02, pydantic-settings з m6-l06. Для тестів: `cd capstone && uv add --dev httpx2` (з ним `TestClient`
+    Starlette 1.x не друкує попередження; повний вибір інструментів для тестів API, плагін anyio і
+    `asgi-lifespan`, у m7-l05).
+
+    1. У `src/formbuilder/store.py` допишіть у Protocol `JobStore` з m6-l08 два методи, `latest_config(config_id)
+       -> ConfigRecord | None` і `get_job(job_id) -> Job | None`, і реалізуйте їх у `SqliteJobStore` і
+       `MemoryJobStore`. Решта імен лишається як у m6-l08: окремого протоколу для API немає. `ConfigRecord` це
+       frozen dataclass `config_id`, `version`, `json`, `created_at`. Контрактні тести з m6-l08 доповніть обома методами.
+    2. Пакет `src/formbuilder/api/`: порожній `__init__.py`; `app.py` з `create_app(settings: Settings | None = None)`
+       і модульним `app = create_app()`; lifespan створює `out_dir` і виконує `migrate` на `settings.db_path`,
+       кладе налаштування в `app.state` (поле `workers` з m6-l06 поки не читається, воркери з'являться в m7-l03);
+       `deps.py` з `SettingsDep` і `get_store` (залежність з `yield` над `connect(settings.db_path)` з m6-l08,
+       закриття у `finally`) та `StoreDep`; `schemas.py` з `FormCreated`, `FormOut`, `JobOut` у camelCase; роутери
+       `forms.py` (`POST /forms` 201, `GET /forms/{form_id}`, `POST /forms/{form_id}/build` 202) і `jobs.py`
+       (`GET /jobs/{job_id}`).
+    3. `tests/test_api.py` з фікстурою `client`: `create_app(Settings(db_path=tmp_path / "test.db", out_dir=tmp_path / "out"))`,
+       `dependency_overrides[get_store]` на один `MemoryJobStore(clock=StepClock(...))` на тест, `with TestClient(app) as client`.
+  checklist:
+    - "`uv run uvicorn formbuilder.api.app:app --reload` стартує, `/docs` показує групи `forms` і `jobs` з чотирма маршрутами"
+    - "`POST /forms` з camelCase-конфігом відповідає 201 і `{\"id\": ..., \"version\": 1}`; повторний POST того самого `id` дає `version: 2`"
+    - "`GET /forms/{id}` віддає `createdAt` і вкладений `config` у camelCase (`inputType`, `primaryColor`)"
+    - "Невалідний конфіг (порожній `title`, `visibleIf` на неіснуюче поле) дає 422, і тест перевіряє `loc` першої помилки"
+    - "`POST /forms/{id}/build` дає 202 і задачу зі `status: \"queued\"`, цілим `id`, `configId` і `configVersion`; `GET /jobs/{id}` віддає ту саму задачу"
+    - "Невідомі `form_id` і `job_id` дають 404 на всіх трьох маршрутах, що їх приймають"
+    - "Жоден роутер не імпортує `app`; обробники зі сховищем оголошені через `def`, а не `async def`"
+    - "`uv run mypy src` і `uv run ruff check` без помилок; `SqliteJobStore` і `MemoryJobStore` проходять як `JobStore` без `cast` і `type: ignore`"
+  verify: "cd capstone && uv run pytest tests/test_api.py -q"

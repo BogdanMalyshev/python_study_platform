@@ -1,0 +1,421 @@
+- id: t1
+  type: code
+  title: "Приклад, що бреше про лапки"
+  prompt: |
+    Функція `field_label` працює правильно, а її docstring ні: усі три приклади падають. Виправте лише
+    очікуваний вивід у docstring, тіло функції не чіпайте і приклади не видаляйте.
+
+    Харнес проганяє приклади через `doctest` і друкує, скільки їх виконано й скільки впало. Поки є
+    падіння, над підсумком ви побачите звіт doctest з `Expected:` і `Got:`.
+  starter: |
+    def field_label(name: str) -> str:
+        """Turn a snake_case field name into a label.
+
+        >>> field_label("first_name")
+        First name
+        >>> field_label("email")
+        Email
+        >>> print(field_label("zip_code"))
+        'Zip code'
+        """
+        return name.replace("_", " ").capitalize()
+  harness: |
+    import doctest
+
+    runner = doctest.DocTestRunner()
+    for test in doctest.DocTestFinder().find(field_label, "field_label", globs=dict(globals())):
+        runner.run(test)
+    print("examples:", runner.tries)
+    print("failed:", runner.failures)
+    print(field_label("last_name"))
+  expected: |
+    examples: 3
+    failed: 0
+    Last name
+  hints:
+    - "Під виразом doctest очікує те, що надрукував би REPL, а не `print`. Для рядка це `repr`."
+    - "Перші два приклади потребують лапок: `'First name'`, `'Email'`. Під `print(...)` лапок навпаки немає: `Zip code`."
+  solution: |
+    def field_label(name: str) -> str:
+        """Turn a snake_case field name into a label.
+
+        >>> field_label("first_name")
+        'First name'
+        >>> field_label("email")
+        'Email'
+        >>> print(field_label("zip_code"))
+        Zip code
+        """
+        return name.replace("_", " ").capitalize()
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Функція і її приклади, включно з винятком"
+  prompt: |
+    Посилання на поле в умовах FormBuilder має вигляд `"page.field"`. Напишіть `parse_ref(ref)`, яка
+    повертає кортеж `(page, field)`. Якщо крапки немає, крапок більше однієї або одна з частин порожня,
+    функція кидає `ValueError` з повідомленням `bad reference '<ref>': expected 'page.field'`.
+
+    Docstring функції має містити щонайменше два приклади `>>>`: успішний розбір і очікуваний виняток
+    у форматі traceback. Харнес проганяє ці приклади й окремо перевіряє саму функцію.
+
+    ```python
+    parse_ref("contact.email")   # ('contact', 'email')
+    parse_ref("email")           # ValueError: bad reference 'email': expected 'page.field'
+    ```
+  starter: |
+    def parse_ref(ref: str) -> tuple[str, str]:
+        """Split a 'page.field' reference into its parts."""
+        ...
+  harness: |
+    import doctest
+
+    runner = doctest.DocTestRunner()
+    tests = doctest.DocTestFinder().find(parse_ref, "parse_ref", globs=dict(globals()))
+    for test in tests:
+        runner.run(test)
+    examples = [ex for test in tests for ex in test.examples]
+    print("failed:", runner.failures)
+    print("at least 2 examples:", len(examples) >= 2)
+    print("exception example:", any(ex.exc_msg is not None for ex in examples))
+    print(parse_ref("contact.email"))
+    for bad in ["email", "a.b.c", ".email", "contact."]:
+        try:
+            parse_ref(bad)
+        except ValueError as e:
+            print("ValueError:", e)
+  expected: |
+    failed: 0
+    at least 2 examples: True
+    exception example: True
+    ('contact', 'email')
+    ValueError: bad reference 'email': expected 'page.field'
+    ValueError: bad reference 'a.b.c': expected 'page.field'
+    ValueError: bad reference '.email': expected 'page.field'
+    ValueError: bad reference 'contact.': expected 'page.field'
+  hints:
+    - "Очікуваний виняток у doctest: рядок `Traceback (most recent call last):`, під ним `...` з відступом, потім останній рядок рівно так, як його надрукує Python."
+    - "`ref.partition(\".\")` дає `(page, sep, field)`; помилка, якщо `sep` порожній, одна з частин порожня або в `field` лишилась крапка."
+    - "Приклад винятку:\n```\n>>> parse_ref(\"email\")\nTraceback (most recent call last):\n    ...\nValueError: bad reference 'email': expected 'page.field'\n```"
+  solution: |
+    def parse_ref(ref: str) -> tuple[str, str]:
+        """Split a 'page.field' reference into its parts.
+
+        >>> parse_ref("contact.email")
+        ('contact', 'email')
+        >>> parse_ref("email")
+        Traceback (most recent call last):
+            ...
+        ValueError: bad reference 'email': expected 'page.field'
+        """
+        page, sep, field = ref.partition(".")
+        if not sep or not page or not field or "." in field:
+            raise ValueError(f"bad reference {ref!r}: expected 'page.field'")
+        return page, field
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Приклади, що падають через раз"
+  prompt: |
+    У трьох функцій нижче приклади або падають завжди, або проходять лише за щасливого запуску:
+
+    - `build_registry`: у виводі адреса об'єкта, яка змінюється між запусками, і список, перенесений
+      на два рядки;
+    - `field_types`: множина рядків, порядок якої залежить від `PYTHONHASHSEED`;
+    - `render_summary`: порожній рядок у виводі обриває очікуваний результат.
+
+    Виправте лише docstring: директиви `# doctest: +ELLIPSIS` і `+NORMALIZE_WHITESPACE`, `sorted(...)` у
+    прикладі, `<BLANKLINE>`. Тіла функцій не змінюйте, кількість прикладів у кожній функції лишіть тією
+    самою (3, 1 і 1). Ім'я модуля в `repr` об'єкта на платформі може бути не `__main__`, тож закрийте
+    його `...` так само, як адресу.
+  starter: |
+    class Registry:
+        def __init__(self, names: list[str]) -> None:
+            self.names = names
+
+
+    def build_registry(fields: list[dict]) -> Registry:
+        """Collect input names into a Registry.
+
+        >>> build_registry([{"name": "email"}])
+        <__main__.Registry object at 0x10a3f2e40>
+        >>> build_registry([{"name": n} for n in ["email", "phone", "company", "country"]]).names
+        ['email', 'phone',
+         'company', 'country']
+        >>> build_registry([]).names
+        []
+        """
+        return Registry([f["name"] for f in fields])
+
+
+    def field_types(fields: list[dict]) -> set[str]:
+        """Collect distinct field types.
+
+        >>> field_types([{"type": "text"}, {"type": "email"}, {"type": "text"}])
+        {'email', 'text'}
+        """
+        return {f["type"] for f in fields}
+
+
+    def render_summary(fields: list[dict]) -> str:
+        """Render a header, an empty line and one name per line.
+
+        >>> print(render_summary([{"name": "email"}, {"name": "phone"}]))
+        Fields: 2
+
+        email
+        phone
+        """
+        names = [f["name"] for f in fields]
+        return "\n".join([f"Fields: {len(names)}", "", *names])
+  harness: |
+    import doctest
+
+    for func in [build_registry, field_types, render_summary]:
+        runner = doctest.DocTestRunner()
+        for test in doctest.DocTestFinder().find(func, func.__name__, globs=dict(globals())):
+            runner.run(test)
+        print(f"{func.__name__}: examples={runner.tries} failed={runner.failures}")
+  expected: |
+    build_registry: examples=3 failed=0
+    field_types: examples=1 failed=0
+    render_summary: examples=1 failed=0
+  hints:
+    - "Кожна з трьох проблем має свій інструмент: адреса й ім'я модуля це `+ELLIPSIS`, перенесений список це `+NORMALIZE_WHITESPACE`, множина це `sorted`, порожній рядок це `<BLANKLINE>`."
+    - "Директива пишеться в кінці рядка з `>>>`: `>>> build_registry([...])  # doctest: +ELLIPSIS`, а очікуване `<...Registry object at 0x...>`."
+    - "Для множини змініть сам приклад: `>>> sorted(field_types([...]))` і під ним `['email', 'text']`."
+  solution: |
+    class Registry:
+        def __init__(self, names: list[str]) -> None:
+            self.names = names
+
+
+    def build_registry(fields: list[dict]) -> Registry:
+        """Collect input names into a Registry.
+
+        >>> build_registry([{"name": "email"}])  # doctest: +ELLIPSIS
+        <...Registry object at 0x...>
+        >>> build_registry([{"name": n} for n in ["email", "phone", "company", "country"]]).names
+        ... # doctest: +NORMALIZE_WHITESPACE
+        ['email', 'phone',
+         'company', 'country']
+        >>> build_registry([]).names
+        []
+        """
+        return Registry([f["name"] for f in fields])
+
+
+    def field_types(fields: list[dict]) -> set[str]:
+        """Collect distinct field types.
+
+        >>> sorted(field_types([{"type": "text"}, {"type": "email"}, {"type": "text"}]))
+        ['email', 'text']
+        """
+        return {f["type"] for f in fields}
+
+
+    def render_summary(fields: list[dict]) -> str:
+        """Render a header, an empty line and one name per line.
+
+        >>> print(render_summary([{"name": "email"}, {"name": "phone"}]))
+        Fields: 2
+        <BLANKLINE>
+        email
+        phone
+        """
+        names = [f["name"] for f in fields]
+        return "\n".join([f"Fields: {len(names)}", "", *names])
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Google-style docstring для пошуку в дереві"
+  prompt: |
+    Елементи форми приходять як вкладені словники: у полів є ключ `"name"`, у блоків список `"children"`.
+    Напишіть `find_field(elements, name)`, яка обходить дерево в глибину (елемент, потім його діти,
+    потім наступний елемент) і повертає перший словник з таким `"name"` або `None`.
+
+    Docstring у Google style: однорядкове резюме, секції `Args:`, `Returns:` і `Examples:`. Типів у
+    тексті секцій не дублюйте, вони вже в анотаціях. У `Examples:` щонайменше два приклади: знайдене
+    вкладене поле і відсутнє поле. Пам'ятайте, як doctest показує `None`.
+
+    ```python
+    tree = [{"name": "email"}, {"children": [{"name": "zip"}]}]
+    find_field(tree, "zip")    # {'name': 'zip'}
+    find_field(tree, "fax")    # None
+    ```
+  starter: |
+    def find_field(elements: list[dict], name: str) -> dict | None:
+        ...
+  harness: |
+    import doctest
+
+    runner = doctest.DocTestRunner()
+    for test in doctest.DocTestFinder().find(find_field, "find_field", globs=dict(globals())):
+        runner.run(test)
+    doc = find_field.__doc__ or ""
+    print("failed:", runner.failures)
+    print("at least 2 examples:", runner.tries >= 2)
+    print("sections:", all(s in doc for s in ("Args:", "Returns:", "Examples:")))
+    print("no JSDoc tags:", "@param" not in doc and "@returns" not in doc)
+
+    tree = [
+        {"type": "input", "name": "email"},
+        {"type": "block", "children": [
+            {"type": "text"},
+            {"type": "block", "children": [{"type": "input", "name": "zip"}]},
+        ]},
+        {"type": "input", "name": "zip", "label": "second"},
+    ]
+    print(find_field(tree, "zip"))
+    print(find_field(tree, "email"))
+    print(find_field(tree, "fax"))
+    print(find_field([], "email"))
+  expected: |
+    failed: 0
+    at least 2 examples: True
+    sections: True
+    no JSDoc tags: True
+    {'type': 'input', 'name': 'zip'}
+    {'type': 'input', 'name': 'email'}
+    None
+    None
+  hints:
+    - "Рекурсія: для кожного елемента спершу порівняти його `name`, потім шукати в `children` (за замовчуванням порожній список); якщо в дітях знайшлось, одразу повернути."
+    - "`el.get(\"name\") == name` і `find_field(el.get(\"children\", []), name)`; результат рекурсії перевіряйте через `is not None`: так читається намір \"знайшли чи ні\", а не truthiness словника."
+    - "Відсутнє поле в прикладі: `>>> print(find_field(tree, \"fax\"))` і під ним `None`. Голий виклик, що повертає `None`, doctest не надрукує."
+  solution: |
+    def find_field(elements: list[dict], name: str) -> dict | None:
+        """Find a field by name in a nested element tree.
+
+        Args:
+            elements: Elements of a form; blocks keep theirs under "children".
+            name: Field name to look for.
+
+        Returns:
+            The first element with this name in depth-first order, or None.
+
+        Examples:
+            >>> tree = [{"name": "email"}, {"children": [{"name": "zip"}]}]
+            >>> find_field(tree, "zip")
+            {'name': 'zip'}
+            >>> print(find_field(tree, "fax"))
+            None
+        """
+        for el in elements:
+            if el.get("name") == name:
+                return el
+            found = find_field(el.get("children", []), name)
+            if found is not None:
+                return found
+        return None
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що скаже doctest про цей приклад?
+    ```python
+    def lookup(answers: dict[str, str], name: str) -> str | None:
+        """
+        >>> lookup({"email": "a@b.c"}, "fax")
+        None
+        """
+        return answers.get(name)
+    ```
+  options:
+    - "Приклад проходить: функція повертає `None`, і записано `None`"
+    - "Приклад падає: `Expected: None`, `Got nothing`"
+    - "Приклад падає з `KeyError: 'fax'`"
+    - "Приклад проходить лише з директивою `+ELLIPSIS`"
+  answer: 1
+  explain: |
+    doctest виконує приклад як REPL: значення виразу йде в `sys.displayhook`, а той для `None` нічого
+    не друкує. Порожній реальний вивід порівнюється з текстом `None` і не збігається, звідси `Got nothing`.
+    Інтуїція "повертає None, записано None" це порівняння значень, як у `assert`; doctest порівнює текст.
+    `KeyError` був би від `answers["fax"]`, а `.get` повертає `None`. `+ELLIPSIS` стосується `...` в
+    очікуваному виводі й тут нічого не змінює. Правильно: `print(lookup(...))` або `lookup(...) is None`.
+
+- id: q2
+  type: quiz
+  question: |
+    У капстоуні `pyproject.toml` містить лише
+    ```toml
+    [tool.pytest.ini_options]
+    testpaths = ["tests"]
+    addopts = ["--import-mode=importlib"]
+    ```
+    а в `src/formbuilder/domain.py` чотири docstring з прикладами `>>>`. Скільки doctest-ів виконає
+    `uv run pytest -q --doctest-modules` без аргументів-шляхів?
+  options:
+    - "Чотири: `--doctest-modules` знаходить усі модулі пакета"
+    - "Нуль: збираються лише шляхи з `testpaths`, а в `tests/` docstring з прикладами немає"
+    - "Стільки, скільки прикладів `>>>` у файлі, бо кожен приклад окремий тест"
+    - "Лише ті, чиї модулі імпортують тести в `tests/`"
+  answer: 1
+  explain: |
+    `--doctest-modules` не розширює область пошуку: він каже "у тих `.py`, які pytest і так обходить,
+    збирай ще й docstring". Без аргументів pytest обходить `testpaths`, тобто лише `tests/`. Тому
+    потрібно або `pytest --doctest-modules src`, або `testpaths = ["tests", "src"]`. Імпорт модуля тестом
+    нічого не додає: doctest-и збираються з файлів у шляхах обходу, а не з імпортованих модулів. І навіть
+    коли `src` у шляхах, один docstring дає один тест pytest, а не один на кожен `>>>`.
+
+- id: q3
+  type: quiz
+  question: |
+    Як поводиться цей приклад при повторних запусках `python -m doctest field_types.py` без змін у коді?
+    ```python
+    def field_types(fields: list[dict]) -> set[str]:
+        """
+        >>> field_types([{"type": "text"}, {"type": "email"}])
+        {'email', 'text'}
+        """
+        return {f["type"] for f in fields}
+    ```
+  options:
+    - "Завжди проходить: множина друкується відсортованою"
+    - "Завжди падає: doctest не вміє порівнювати множини"
+    - "Проходить або падає залежно від запуску"
+    - "Проходить завжди, бо doctest порівнює множини як множини, без порядку"
+  answer: 2
+  explain: |
+    `repr` множини друкує елементи в порядку обходу хеш-таблиці, а хеш рядків солиться випадковим числом
+    при кожному старті інтерпретатора (hash randomization). З `PYTHONHASHSEED=1` порядок один, з `3`
+    інший, тож тест моргає. "Відсортованою" множина лише здається на малих цілих числах, бо їхній хеш це
+    саме число; для рядків це не так. Звичка з JS теж не допомагає: `Set` у JS зберігає порядок вставки,
+    а `set` у Python ні. doctest не порівнює значення взагалі, лише текст, тому "як множини" не буває.
+    Правильно: `sorted(field_types(...))` з очікуваним списком.
+
+- id: p1
+  type: project
+  title: "Doctest-приклади для formbuilder.domain"
+  prompt: |
+    У капстоуні (`capstone/`) модуль `src/formbuilder/domain.py` з m2-l05 містить frozen dataclass дерева
+    форми і чисті функції `walk`, `field_names`, `rename_field`. Перетворіть їхні docstring на документацію,
+    що виконується:
+
+    - додайте функцію `find_by_name(form, name) -> Element | None`: перший `input` з таким `name` у порядку
+      обходу `walk`, або `None`;
+    - напишіть Google-style docstring з секцією `Examples:` для `walk`, `field_names` і `find_by_name`;
+      кожен docstring будує власне маленьке дерево (між docstring імена не переходять);
+    - у docstring класу `Element` покажіть очікуваний `ValueError` з `__post_init__` у форматі traceback;
+    - коротким docstring модуля опишіть, що в ньому живе;
+    - у `[tool.pytest.ini_options]` додайте `src` у `testpaths` і `--doctest-modules` в `addopts`, щоб
+      звичайний `uv run pytest -q` проганяв і тести, і приклади.
+
+    Зразок двох функцій є в розділі "Для капстоуну" цього уроку.
+  checklist:
+    - "`find_by_name` повертає перший збіг у порядку `walk` або `None`; приклад з відсутнім полем написаний через `print(...)` або `is None`"
+    - "`walk`, `field_names`, `find_by_name` мають секції `Args:` / `Returns:` / `Examples:` без типів у тексті"
+    - "`repr` dataclass у прикладах або повний, або обрізаний `# doctest: +ELLIPSIS`; адрес і множин у виводі немає"
+    - "Docstring `Element` містить приклад `Traceback (most recent call last):` з `ValueError`"
+    - "`uv run pytest --doctest-modules src -q` показує щонайменше 4 тести і жодного падіння"
+    - "`uv run pytest -q` без аргументів збирає і `tests/`, і doctest-и з `src/`"
+    - "`uv run ruff check` і `uv run mypy src` проходять без зауважень"
+  verify: "cd capstone && uv run pytest --doctest-modules src -q"

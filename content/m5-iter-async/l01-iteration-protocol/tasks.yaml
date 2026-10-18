@@ -1,0 +1,527 @@
+- id: t1
+  type: code
+  title: "take: перші n елементів через iter і next"
+  prompt: |
+    Напишіть `take(iterable, n)`, яка повертає список з перших `n` елементів будь-якого iterable.
+    Якщо елементів менше, повертає скільки є. Без зрізів і без `itertools.islice`: лише `iter()` і `next()`.
+
+    Дві вимоги, які перевіряє харнес:
+
+    - функція працює з нескінченним ітератором, наприклад `itertools.count()`;
+    - функція не споживає зайвого. Якщо передати їй ітератор, наступний виклик продовжить рівно з того
+      елемента, на якому зупинився попередній. `take(it, 0)` не забирає з `it` нічого.
+
+    ```python
+    take([1, 2, 3], 2)          # [1, 2]
+    take("ab", 5)               # ['a', 'b']
+    it = iter("abcde")
+    take(it, 2), take(it, 2)    # (['a', 'b'], ['c', 'd'])
+    ```
+  starter: |
+    from collections.abc import Iterable
+
+
+    def take(iterable: Iterable, n: int) -> list:
+        ...
+  harness: |
+    from itertools import count
+
+    print(take([1, 2, 3], 2))
+    print(take("ab", 5))
+    print(take([], 3))
+    print(take(count(10), 3))
+    it = iter(["a", "b", "c", "d", "e"])
+    print(take(it, 2), take(it, 2), take(it, 2), take(it, 2))
+    it = iter([1, 2])
+    print(take(it, 0), next(it))
+  expected: |
+    [1, 2]
+    ['a', 'b']
+    []
+    [10, 11, 12]
+    ['a', 'b'] ['c', 'd'] ['e'] []
+    [] 1
+  hints:
+    - "iter() від ітератора повертає той самий ітератор, тож спільний курсор між викликами вийде сам. Головне не викликати next() зайвий раз: спершу перевірте, чи ще потрібні елементи, і лише потім беріть наступний."
+    - "Цикл while len(result) < n, усередині next(it) у try, а except StopIteration: break."
+    - |
+      it = iter(iterable)
+      result = []
+      while len(result) < n:
+          try:
+              result.append(next(it))
+          except StopIteration:
+              break
+      return result
+  solution: |
+    from collections.abc import Iterable
+
+
+    def take(iterable: Iterable, n: int) -> list:
+        it = iter(iterable)
+        result = []
+        while len(result) < n:
+            try:
+                result.append(next(it))
+            except StopIteration:
+                break
+        return result
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Batches: клас-ітератор порціями"
+  prompt: |
+    Напишіть клас-ітератор `Batches(iterable, size)`, який віддає елементи джерела списками по `size`.
+    Остання порція може бути коротшою, порожніх порцій не буває. Джерело будь-яке iterable,
+    у тому числі нескінченний ітератор, тож довжину джерела не рахувати й у список його не перетворювати.
+
+    Вимоги протоколу:
+
+    - `iter(b) is b`: `Batches` сам є ітератором;
+    - після першого `StopIteration` кожен наступний `next(b)` теж кидає `StopIteration`.
+
+    Генератор (`yield`) тут не використовувати: мета вправи написати `__iter__` і `__next__` руками.
+
+    ```python
+    list(Batches([1, 2, 3, 4, 5], 2))   # [[1, 2], [3, 4], [5]]
+    b = Batches(count(1), 3)
+    next(b), next(b)                     # ([1, 2, 3], [4, 5, 6])
+    ```
+  starter: |
+    from collections.abc import Iterable
+    from typing import Self
+
+
+    class Batches:
+        def __init__(self, iterable: Iterable, size: int) -> None:
+            ...
+
+        def __iter__(self) -> Self:
+            ...
+
+        def __next__(self) -> list:
+            ...
+  harness: |
+    from itertools import count
+
+    print(list(Batches([1, 2, 3, 4, 5], 2)))
+    b = Batches(["a", "b", "c"], 2)
+    print(iter(b) is b)
+    print(next(b))
+    print(list(b), list(b))
+    try:
+        next(b)
+    except StopIteration:
+        print("still exhausted")
+    print(list(Batches([], 3)))
+    print(list(Batches(map(str.upper, "abcd"), 2)))
+    inf = Batches(count(1), 3)
+    print(next(inf), next(inf))
+  expected: |
+    [[1, 2], [3, 4], [5]]
+    True
+    ['a', 'b']
+    [['c']] []
+    still exhausted
+    []
+    [['A', 'B'], ['C', 'D']]
+    [1, 2, 3] [4, 5, 6]
+  hints:
+    - "У __init__ збережіть не саме джерело, а ітератор від нього: iter(iterable). Тоді кожен __next__ просто бере з нього до size елементів, і нескінченне джерело не проблема."
+    - "У __next__ збирайте порцію в список через next(self._it) у try/except StopIteration. Якщо після цього порція порожня, елементів більше немає, і треба кинути StopIteration самому."
+    - |
+      def __next__(self) -> list:
+          batch = []
+          while len(batch) < self._size:
+              try:
+                  batch.append(next(self._it))
+              except StopIteration:
+                  break
+          if not batch:
+              raise StopIteration
+          return batch
+  solution: |
+    from collections.abc import Iterable
+    from typing import Self
+
+
+    class Batches:
+        def __init__(self, iterable: Iterable, size: int) -> None:
+            self._it = iter(iterable)
+            self._size = size
+
+        def __iter__(self) -> Self:
+            return self
+
+        def __next__(self) -> list:
+            batch = []
+            while len(batch) < self._size:
+                try:
+                    batch.append(next(self._it))
+                except StopIteration:
+                    break
+            if not batch:
+                raise StopIteration
+            return batch
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Перша помилка валідації без зайвих перевірок"
+  prompt: |
+    Напишіть `first_error(fields, validate)`. `validate(field)` повертає рядок з помилкою або `None`.
+    Функція повертає першу помилку з `fields` у їхньому порядку, або `None`, якщо помилок немає.
+
+    `validate` дорога, тож викликати її можна лише до першої помилки включно: харнес записує, для яких полів
+    її викликали. `fields` може бути будь-яким iterable, у тому числі ітератором.
+    Задача розв'язується одним виразом з `map` або генераторним виразом і `next(..., None)`.
+
+    ```python
+    first_error([{"id": "a"}, {"id": "b", "required": True}], validate)   # 'b: required'
+    ```
+  starter: |
+    from collections.abc import Callable, Iterable
+
+
+    def first_error(fields: Iterable[dict], validate: Callable[[dict], str | None]) -> str | None:
+        ...
+  harness: |
+    calls = []
+
+    def validate(field):
+        calls.append(field["id"])
+        if field.get("required") and not field.get("value"):
+            return f"{field['id']}: required"
+        return None
+
+    fields = [
+        {"id": "name", "required": True, "value": "Ann"},
+        {"id": "email", "required": True, "value": ""},
+        {"id": "phone", "required": True},
+        {"id": "age"},
+    ]
+    print(first_error(fields, validate), calls)
+    calls.clear()
+    print(first_error(fields[:1] + fields[3:], validate), calls)
+    calls.clear()
+    print(first_error(iter(fields[2:]), validate), calls)
+    calls.clear()
+    print(first_error([], validate), calls)
+  expected: |
+    email: required ['name', 'email']
+    None ['name', 'age']
+    phone: required ['phone']
+    None []
+  hints:
+    - "map(validate, fields) нічого не викликає при створенні: validate спрацює лише тоді, коли хтось попросить наступний елемент. Лишається попросити рівно стільки, скільки потрібно."
+    - "Потрібен перший результат, який не None. next від генераторного виразу з умовою, з default None."
+    - "return next((error for error in map(validate, fields) if error is not None), None)"
+  solution: |
+    from collections.abc import Callable, Iterable
+
+
+    def first_error(fields: Iterable[dict], validate: Callable[[dict], str | None]) -> str | None:
+        return next((error for error in map(validate, fields) if error is not None), None)
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "History: колекція з повторним і зворотним обходом"
+  prompt: |
+    Напишіть клас `History(limit)` для історії змін у конструкторі форм. `push(item)` додає запис;
+    зберігаються лише останні `limit` записів, старіші витісняються.
+
+    Протокол:
+
+    - `len(h)` кількість записів;
+    - `for item in h` від найстарішого до найновішого;
+    - `reversed(h)` від найновішого до найстарішого, без копіювання записів у новий список;
+    - `History` це iterable, а не ітератор: `__next__` у ньому немає, кожен `iter(h)` дає новий ітератор,
+      тож вкладені цикли по одній історії працюють.
+
+    ```python
+    h = History(2)
+    h.push("add email"); h.push("add phone"); h.push("rename phone")
+    list(h)             # ['add phone', 'rename phone']
+    list(reversed(h))   # ['rename phone', 'add phone']
+    ```
+  starter: |
+    from collections.abc import Iterator
+
+
+    class History:
+        def __init__(self, limit: int) -> None:
+            ...
+
+        def push(self, item: str) -> None:
+            ...
+
+        def __len__(self) -> int:
+            ...
+
+        def __iter__(self) -> Iterator[str]:
+            ...
+
+        def __reversed__(self) -> Iterator[str]:
+            ...
+  harness: |
+    from collections.abc import Iterable, Iterator
+
+    h = History(3)
+    for change in ["add email", "add phone", "rename phone", "delete email"]:
+        h.push(change)
+    print(len(h), list(h))
+    print(list(reversed(h)), list(h))
+    print(sum(1 for a in h for b in h))
+    print(iter(h) is iter(h), isinstance(h, Iterable), isinstance(h, Iterator))
+    rev = reversed(h)
+    print(next(rev), isinstance(rev, Iterator), type(rev).__name__ != "list_iterator")
+    print(len(History(5)), list(reversed(History(5))))
+  expected: |
+    3 ['add phone', 'rename phone', 'delete email']
+    ['delete email', 'rename phone', 'add phone'] ['add phone', 'rename phone', 'delete email']
+    9
+    False True False
+    delete email True True
+    0 []
+  hints:
+    - "Витіснення старих записів уже вміє collections.deque з параметром maxlen (m2-l04). Колекція тримає дані, а курсор хай дає вбудований ітератор."
+    - "__iter__ повертає iter(self._items), __reversed__ повертає reversed(self._items): обидва створюють новий лінивий ітератор на кожен виклик."
+    - |
+      def __init__(self, limit: int) -> None:
+          self._items: deque[str] = deque(maxlen=limit)
+
+      def __reversed__(self) -> Iterator[str]:
+          return reversed(self._items)
+  solution: |
+    from collections import deque
+    from collections.abc import Iterator
+
+
+    class History:
+        def __init__(self, limit: int) -> None:
+            self._items: deque[str] = deque(maxlen=limit)
+
+        def push(self, item: str) -> None:
+            self._items.append(item)
+
+        def __len__(self) -> int:
+            return len(self._items)
+
+        def __iter__(self) -> Iterator[str]:
+            return iter(self._items)
+
+        def __reversed__(self) -> Iterator[str]:
+            return reversed(self._items)
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Шляхи до полів у дереві конфігу"
+  prompt: |
+    Конфіг FormBuilder це дерево словників: у кожного елемента є `"id"`, у контейнерів (форма, сторінка,
+    група) є ключ `"children"` зі списком. Листок це елемент без ключа `"children"`.
+    Контейнер з порожнім `"children"` листком не є.
+
+    1. Напишіть iterable `LeafPaths(root)`. Кожен його обхід віддає шляхи до листків у порядку читання
+       (у глибину, діти зліва направо). Шлях це `id` елементів від дитини кореня до листка через `/`;
+       `id` самого кореня в шлях не входить, і сам корінь ніколи не віддається.
+    2. Обхід лінивий: ітератор не збирає всі шляхи заздалегідь, а тримає явний стек і на кожен `next`
+       просувається лише до наступного листка. Ітератор окремий клас з `__iter__` і `__next__`,
+       генератор (`yield`) не використовувати. `LeafPaths` сам ітератором не є.
+    3. Напишіть `find_path(root, field_id)`: перший шлях, чий останній сегмент дорівнює `field_id`,
+       або `None`. Обхід має зупинитися на першому збігу.
+
+    ```python
+    form = {"id": "form", "children": [
+        {"id": "contact", "children": [{"id": "email"}]},
+        {"id": "age"},
+    ]}
+    list(LeafPaths(form))        # ['contact/email', 'age']
+    find_path(form, "email")     # 'contact/email'
+    ```
+  starter: |
+    from collections.abc import Iterator
+    from typing import Any, Self
+
+    Element = dict[str, Any]
+
+
+    class _LeafPathIterator:
+        def __init__(self, root: Element) -> None:
+            ...
+
+        def __iter__(self) -> Self:
+            ...
+
+        def __next__(self) -> str:
+            ...
+
+
+    class LeafPaths:
+        def __init__(self, root: Element) -> None:
+            ...
+
+        def __iter__(self) -> Iterator[str]:
+            ...
+
+
+    def find_path(root: Element, field_id: str) -> str | None:
+        ...
+  harness: |
+    from collections.abc import Iterator
+
+    form = {"id": "form", "children": [
+        {"id": "contact", "children": [
+            {"id": "name", "children": [{"id": "first_name"}, {"id": "last_name"}]},
+            {"id": "email"},
+        ]},
+        {"id": "details", "children": [
+            {"id": "extras", "children": []},
+            {"id": "address", "children": [{"id": "city"}]},
+            {"id": "age"},
+        ]},
+    ]}
+
+    paths = LeafPaths(form)
+    print(list(paths))
+    print(list(paths) == list(paths))
+    it = iter(paths)
+    print(next(it), next(it))
+    print(next(it), list(it))
+    print(iter(it) is it, iter(paths) is iter(paths), isinstance(paths, Iterator))
+    print(type(iter(paths)).__name__ not in ("list_iterator", "generator"))
+    print(find_path(form, "city"), find_path(form, "email"), find_path(form, "fax"))
+    print(find_path(form, "details"))
+    print(list(LeafPaths({"id": "empty", "children": []})), list(LeafPaths({"id": "solo"})))
+  expected: |
+    ['contact/name/first_name', 'contact/name/last_name', 'contact/email', 'details/address/city', 'details/age']
+    True
+    contact/name/first_name contact/name/last_name
+    contact/email ['details/address/city', 'details/age']
+    True False False
+    True
+    details/address/city contact/email None
+    None
+    [] []
+  hints:
+    - "Стек з пар (префікс, елемент). На старті в ньому діти кореня з порожнім префіксом. Щоб першою знімалась перша дитина, кладіть дітей у зворотному порядку."
+    - "__next__ крутить while по стеку: зняв пару; якщо в елемента є children, поклав їх з префіксом path + '/' і пішов на наступну ітерацію; якщо немає, повернув path. Порожній стек означає raise StopIteration. find_path це next(генераторний вираз по LeafPaths(root), None)."
+    - |
+      def __next__(self) -> str:
+          while self._stack:
+              prefix, node = self._stack.pop()
+              path = prefix + node["id"]
+              if "children" in node:
+                  self._stack.extend((path + "/", child) for child in reversed(node["children"]))
+                  continue
+              return path
+          raise StopIteration
+  solution: |
+    from collections.abc import Iterator
+    from typing import Any, Self
+
+    Element = dict[str, Any]
+
+
+    class _LeafPathIterator:
+        def __init__(self, root: Element) -> None:
+            self._stack: list[tuple[str, Element]] = [
+                ("", child) for child in reversed(root.get("children", []))
+            ]
+
+        def __iter__(self) -> Self:
+            return self
+
+        def __next__(self) -> str:
+            while self._stack:
+                prefix, node = self._stack.pop()
+                path = prefix + node["id"]
+                if "children" in node:
+                    self._stack.extend((path + "/", child) for child in reversed(node["children"]))
+                    continue
+                return path
+            raise StopIteration
+
+
+    class LeafPaths:
+        def __init__(self, root: Element) -> None:
+            self._root = root
+
+        def __iter__(self) -> Iterator[str]:
+            return _LeafPathIterator(self._root)
+
+
+    def find_path(root: Element, field_id: str) -> str | None:
+        return next((p for p in LeafPaths(root) if p.rsplit("/", 1)[-1] == field_id), None)
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    pairs = zip("ab", [1, 2])
+    d = dict(pairs)
+    print(len(d), list(pairs))
+    ```
+  options:
+    - "2 [('a', 1), ('b', 2)]"
+    - "2 []"
+    - "TypeError: 'zip' object is not reusable"
+    - "0 []"
+  answer: 1
+  explain: |
+    `zip` повертає ітератор, а не список пар. `dict(pairs)` пройшов його до кінця, і другий прохід `list(pairs)`
+    порожній. Помилки немає: вичерпаний ітератор просто одразу кидає `StopIteration`, і `list` сприймає це як
+    кінець. Перший варіант спокусливий з інтуїції "результат функції це масив", як у `arr.map()` в JS.
+    Варіант з `TypeError` вигаданий: Python ніколи не попереджає про повторне використання ітератора.
+    `0 []` плутає порядок: словник встиг забрати обидві пари.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    it = iter([1, 2, 3, 4, 5, 6])
+    print(list(zip(it, it)))
+    ```
+  options:
+    - "[(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)]"
+    - "[(1, 2), (3, 4), (5, 6)]"
+    - "[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]"
+    - "[]"
+  answer: 1
+  explain: |
+    `zip` викликає `iter()` на кожному аргументі, а `iter()` від ітератора повертає той самий об'єкт. Обидва
+    "входи" `zip` це один курсор, тож кожна пара бере два послідовні елементи: `(1, 2)`, `(3, 4)`, `(5, 6)`.
+    Це відома ідіома групування по n. Перший варіант правильний, якби передали список: `zip(lst, lst)` бере з
+    двох незалежних ітераторів. Третій це ковзне вікно, для нього потрібні два різні ітератори зі зсувом
+    (`itertools.pairwise`). Порожній список вийшов би, якби `it` вичерпали до виклику `zip`.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    empty = iter([])
+    print(list(map(lambda x: next(empty), [1, 2, 3])))
+    ```
+  options:
+    - "[]"
+    - "RuntimeError: generator raised StopIteration"
+    - "StopIteration"
+    - "[None, None, None]"
+  answer: 0
+  explain: |
+    Лямбда при першому ж виклику кидає `StopIteration` з `next(empty)`. Виняток вилітає з `map.__next__`, і `list()`
+    не може відрізнити його від законного кінця `map`: результат мовчки порожній. `RuntimeError` це захист
+    PEP 479, але він діє лише для генераторів, а `map` це ітератор на C. Голий `StopIteration` побачили б,
+    якби викликали `next(empty)` поза будь-яким споживачем ітератора. `[None, None, None]` очікують з інтуїції
+    JS, де `it.next()` у кінці повертає `{ value: undefined, done: true }`, а не кидає.

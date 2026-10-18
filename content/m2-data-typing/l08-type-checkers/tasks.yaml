@@ -1,0 +1,366 @@
+- id: t1
+  type: code
+  title: "Підказка поля через narrowing str | None"
+  prompt: |
+    Напишіть `field_hint(placeholder, label)`, яка повертає текст підказки для поля форми.
+
+    - Якщо `placeholder` це непорожній рядок після `strip()`, повернути його обрізаним.
+    - Якщо `placeholder` дорівнює `None`, порожній або складається з пробілів, повернути `"Enter <label у нижньому регістрі>"`.
+
+    Анотації вже в сигнатурі. Пишіть так, щоб рішення проходило `mypy --strict`: до `placeholder.strip()`
+    тип має бути звужений до `str`. У браузері mypy не запускається, але локально можна перевірити
+    `.venv/bin/mypy --strict файл.py`.
+
+    ```python
+    field_hint("  you@example.com ", "Email")   # 'you@example.com'
+    field_hint(None, "Email")                   # 'Enter email'
+    field_hint("   ", "Age")                    # 'Enter age'
+    ```
+  starter: |
+    def field_hint(placeholder: str | None, label: str) -> str:
+        ...
+  harness: |
+    print(field_hint("you@example.com", "Email"))
+    print(field_hint("  +380 ...  ", "Phone"))
+    print(field_hint(None, "Email"))
+    print(field_hint("   ", "Age"))
+    print(field_hint("", "Company Name"))
+  expected: |
+    you@example.com
+    +380 ...
+    Enter email
+    Enter age
+    Enter company name
+  hints:
+    - "Спершу обробіть None раннім return; після нього mypy вважає placeholder рядком."
+    - "if placeholder is None: return ...; text = placeholder.strip(); if not text: return ...; return text"
+  solution: |
+    def field_hint(placeholder: str | None, label: str) -> str:
+        if placeholder is None:
+            return f"Enter {label.lower()}"
+        text = placeholder.strip()
+        if not text:
+            return f"Enter {label.lower()}"
+        return text
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Перевірка повноти через match і assert_never"
+  prompt: |
+    Тип елемента форми це `Kind = Literal["input", "textarea", "button"]`. Напишіть `tag_for(kind, field_id)`,
+    яка повертає HTML-тег для елемента:
+
+    - `"input"` → `<input id="...">`
+    - `"textarea"` → `<textarea id="..."></textarea>`
+    - `"button"` → `<button id="..."></button>`
+
+    Використайте `match` і в останній гілці `case _:` викличте `assert_never(kind)`. Тоді mypy впаде,
+    якщо в `Kind` з'явиться новий літерал без гілки, а в рантаймі значення поза `Kind` (наприклад,
+    з JSON) дасть `AssertionError` з цим значенням у тексті, а не мовчазний `None`.
+    Харнес навмисно передає неправильні значення з `# type: ignore[arg-type]`, щоб перевірити саме рантайм.
+
+    ```python
+    tag_for("input", "email")    # '<input id="email">'
+    tag_for("checkbox", "x")     # AssertionError: Expected code to be unreachable, but got: 'checkbox'
+    ```
+  starter: |
+    from typing import Literal, assert_never
+
+    Kind = Literal["input", "textarea", "button"]
+
+
+    def tag_for(kind: Kind, field_id: str) -> str:
+        ...
+  harness: |
+    print(tag_for("input", "email"))
+    print(tag_for("textarea", "note"))
+    print(tag_for("button", "submit"))
+    for raw in ["checkbox", "Input"]:
+        try:
+            tag_for(raw, "x")  # type: ignore[arg-type]
+        except AssertionError as e:
+            print("AssertionError:", e)
+  expected: |
+    <input id="email">
+    <textarea id="note"></textarea>
+    <button id="submit"></button>
+    AssertionError: Expected code to be unreachable, but got: 'checkbox'
+    AssertionError: Expected code to be unreachable, but got: 'Input'
+  hints:
+    - "Три гілки case з рядковими літералами і четверта case _:, у якій нічого, крім assert_never(kind)."
+    - "case \"input\": return f'<input id=\"{field_id}\">' ... case _: assert_never(kind)"
+  solution: |
+    from typing import Literal, assert_never
+
+    Kind = Literal["input", "textarea", "button"]
+
+
+    def tag_for(kind: Kind, field_id: str) -> str:
+        match kind:
+            case "input":
+                return f'<input id="{field_id}">'
+            case "textarea":
+                return f'<textarea id="{field_id}"></textarea>'
+            case "button":
+                return f'<button id="{field_id}"></button>'
+            case _:
+                assert_never(kind)
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Розбір поля з JSON без cast"
+  prompt: |
+    `json.loads` повертає `Any`, і найпростіше "задовольнити" mypy через `cast`:
+
+    ```python
+    d = cast(dict[str, object], data)
+    return Field(cast(str, d["id"]), cast(str, d["label"]), ...)
+    ```
+
+    Така версія проходить `mypy --strict`, але на `{"label": "Email"}` падає з `KeyError`, а на
+    `{"id": "age", "label": 42}` мовчки створює `Field` з числом у `label`. Напишіть `parse_field(data: object) -> Field`,
+    яка звужує типи справжніми перевірками і кидає `TypeError` з повідомленням `"<ключ>: expected <тип>, got <ім'я типу>"`:
+
+    - `data` не `dict` → `"field: expected object, got <тип>"`
+    - `id` і `label` обов'язкові рядки; відсутній ключ дає `got NoneType`
+    - `required` необов'язковий `bool`, за замовчуванням `False`
+    - `placeholder` необов'язковий рядок або `None` → `"placeholder: expected str or None, got <тип>"`
+
+    Ім'я типу це `type(value).__name__`. Без `cast` і без `# type: ignore`; рішення має проходити `mypy --strict`.
+  starter: |
+    from dataclasses import dataclass
+
+
+    @dataclass
+    class Field:
+        id: str
+        label: str
+        required: bool = False
+        placeholder: str | None = None
+
+
+    def parse_field(data: object) -> Field:
+        ...
+  harness: |
+    import json
+
+    print(parse_field(json.loads('{"id": "email", "label": "Email", "required": true}')))
+    print(parse_field({"id": "note", "label": "Note", "placeholder": "Anything else?"}))
+    for raw in [
+        '[1, 2]',
+        '{"label": "Email"}',
+        '{"id": "age", "label": 42}',
+        '{"id": "age", "label": "Age", "required": "yes"}',
+        '{"id": "age", "label": "Age", "placeholder": 18}',
+    ]:
+        try:
+            parse_field(json.loads(raw))
+        except TypeError as e:
+            print("TypeError:", e)
+  expected: |
+    Field(id='email', label='Email', required=True, placeholder=None)
+    Field(id='note', label='Note', required=False, placeholder='Anything else?')
+    TypeError: field: expected object, got list
+    TypeError: id: expected str, got NoneType
+    TypeError: label: expected str, got int
+    TypeError: required: expected bool, got str
+    TypeError: placeholder: expected str or None, got int
+  hints:
+    - "isinstance(data, dict) звужує object до dict; значення з .get() далі мають тип Any, і кожне треба звузити своїм isinstance."
+    - "field_id = data.get(\"id\"); if not isinstance(field_id, str): raise TypeError(f\"id: expected str, got {type(field_id).__name__}\"). Для placeholder умова: placeholder is not None and not isinstance(placeholder, str)."
+  solution: |
+    from dataclasses import dataclass
+
+
+    @dataclass
+    class Field:
+        id: str
+        label: str
+        required: bool = False
+        placeholder: str | None = None
+
+
+    def parse_field(data: object) -> Field:
+        if not isinstance(data, dict):
+            raise TypeError(f"field: expected object, got {type(data).__name__}")
+        field_id = data.get("id")
+        if not isinstance(field_id, str):
+            raise TypeError(f"id: expected str, got {type(field_id).__name__}")
+        label = data.get("label")
+        if not isinstance(label, str):
+            raise TypeError(f"label: expected str, got {type(label).__name__}")
+        required = data.get("required", False)
+        if not isinstance(required, bool):
+            raise TypeError(f"required: expected bool, got {type(required).__name__}")
+        placeholder = data.get("placeholder")
+        if placeholder is not None and not isinstance(placeholder, str):
+            raise TypeError(f"placeholder: expected str or None, got {type(placeholder).__name__}")
+        return Field(field_id, label, required, placeholder)
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Скільки помилок (`error`) покаже `mypy q1.py` без жодних прапорців і без конфігу?
+    ```python
+    def total_width(columns):
+        return "width: " + columns * 8 + "px"
+
+
+    def gap(size: int) -> str:
+        return size + "px"
+    ```
+  options: ["0", "1", "2", "3"]
+  answer: 2
+  explain: |
+    Дві, обидві на рядку 6 у `gap`: `Unsupported operand types for + ("int" and "str")` і
+    `Incompatible return value type (got "int", expected "str")`. `total_width` без анотацій, тому mypy
+    вважає її параметри `Any` і тіло не перевіряє взагалі. `0` це інтуїція "Python ж не перевіряє типи",
+    але `gap` анотована, і її тіло перевіряється. `1` з'являється, якщо чекати лише одну помилку на рядок,
+    а mypy повідомляє і про операцію, і про тип повернення. `3` це результат `mypy --strict`: він додає
+    `Function is missing a type annotation` для `total_width`; помилки в її тілі немає й тоді, бо `columns`
+    має тип `Any`, а з `Any` дозволена будь-яка операція.
+
+- id: q2
+  type: quiz
+  question: |
+    Що скаже `mypy --strict` і що надрукує запуск?
+    ```python
+    from dataclasses import dataclass
+
+
+    @dataclass
+    class Field:
+        placeholder: str | None = None
+
+
+    def reset(field: Field) -> None:
+        field.placeholder = None
+
+
+    def shout(field: Field) -> str:
+        if field.placeholder is not None:
+            reset(field)
+            return field.placeholder.upper()
+        return ""
+
+
+    print(shout(Field("hi")))
+    ```
+  options:
+    - "mypy: union-attr на рядку з upper(); запуск: AttributeError"
+    - "mypy: Success; запуск: AttributeError"
+    - "mypy: Success; запуск: HI"
+    - "mypy: union-attr; запуск: HI"
+  answer: 1
+  explain: |
+    mypy зберігає звуження атрибута `field.placeholder` навіть після виклику `reset(field)`, який цей атрибут
+    обнуляє: це свідомий компроміс (unsound), інакше той самий атрибут довелося б перевіряти після кожного виклику.
+    Тому `Success`, а в рантаймі `reset` уже записав `None`, і `.upper()` падає з `AttributeError`.
+    Перший варіант це очікування повної коректності, якої немає ні в mypy, ні в TS для властивостей об'єктів.
+    `HI` був би лише без виклику `reset`. Ліки: `placeholder = field.placeholder` у локальну змінну до перевірки.
+
+- id: q3
+  type: quiz
+  question: |
+    mypy каже `Item "None" of "Match[str] | None" has no attribute "group"  [union-attr]` на цьому коді.
+    Яке виправлення правильне?
+    ```python
+    import re
+
+
+    def domain(email: str) -> str:
+        match = re.search(r"@(.+)$", email)
+        return match.group(1)
+    ```
+  options:
+    - "`return match.group(1)  # type: ignore[union-attr]`"
+    - "`return cast(re.Match[str], match).group(1)`"
+    - "`if match is None: raise ValueError(...)` перед `return match.group(1)`"
+    - "`match: re.Match[str] = re.search(r\"@(.+)$\", email)`"
+  answer: 2
+  explain: |
+    Лише явна перевірка вирішує, що робити, коли збігу немає, і після неї mypy звужує `match` до `Match[str]`.
+    Варіанти з `type: ignore[union-attr]` і `cast` проходять `mypy --strict`, але на рядку без `@` обидва падають
+    з `AttributeError: 'NoneType' object has no attribute 'group'`: вони глушать чекер, а не прибирають `None`.
+    Анотація змінної `re.Match[str]` взагалі не проходить: `Incompatible types in assignment (expression has type
+    "Match[str] | None", variable has type "Match[str]")`. Анотація в Python не приводить тип, як і в TS.
+
+- id: q4
+  type: quiz
+  question: |
+    Що повідомить `mypy --strict` про рядок 5?
+    ```python
+    def field_width(columns: int) -> str:
+        return f"{columns * 8}px"
+
+
+    e = field_width("3").upperr()  # type: ignore
+    ```
+  options:
+    - "Нічого: голий ignore глушить і arg-type, і одруківку upperr"
+    - "attr-defined для upperr: ignore без коду глушить лише першу помилку рядка"
+    - "unused-ignore, бо strict забороняє ignore без коду"
+    - "arg-type: у strict ignore без коду не діє"
+  answer: 0
+  explain: |
+    `# type: ignore` без коду вимикає всі помилки рядка, тут їх дві: `arg-type` і `attr-defined`, і в рантаймі
+    одруківка `upperr` дасть `AttributeError`. `unused-ignore` спрацьовує лише тоді, коли під коментарем немає жодної
+    помилки. Заборона ignore без коду це окремий код помилки `ignore-without-code`, який у `strict` не входить:
+    його вмикають через `enable_error_code = ["ignore-without-code"]`, і тоді mypy сам підкаже
+    `consider "type: ignore[arg-type, attr-defined]" instead`. Звичка з `// @ts-ignore`, який теж глушить усе, тут
+    шкодить так само.
+
+- id: p1
+  type: project
+  title: "Strict mypy у капстоуні"
+  prompt: |
+    Увімкніть mypy у strict-режимі в `capstone/` і доведіть код до нуля помилок без `cast` і без `# type: ignore`.
+
+    1. `uv add --dev mypy` у `capstone/`.
+    2. Додайте в `capstone/pyproject.toml` блок:
+
+       ```toml
+       [tool.mypy]
+       python_version = "3.12"
+       strict = true
+       warn_unused_configs = true
+       enable_error_code = ["ignore-without-code"]
+       files = ["src", "tests"]
+       ```
+
+    3. Покладіть порожній маркер `src/formbuilder/py.typed`.
+    4. Запустіть `uv run mypy src` і виправте кожну помилку. На скелеті з m0-l06 це зазвичай `no-untyped-def`
+       у `cli.py` і `no-untyped-call` у `__main__.py`; якщо ви вже переносили моделі з m2-l09, mypy перевірить і їх.
+  checklist:
+    - "`mypy` є в `[dependency-groups] dev` у `capstone/pyproject.toml`, а не в основних залежностях"
+    - "Блок `[tool.mypy]` містить `strict = true`, `python_version`, `files` і `warn_unused_configs`"
+    - "`src/formbuilder/py.typed` існує"
+    - "У `src/` немає жодного `cast(` і жодного `type: ignore`"
+    - "`uv run mypy src` друкує `Success: no issues found`"
+  verify: "cd capstone && uv run mypy src"
+
+- id: p2
+  type: project
+  title: "Тести під тим самим strict"
+  prompt: |
+    Поширте strict-перевірку на `tests/`, щоб `uv run mypy` без аргументів перевіряв усе, що вказано в `files`.
+
+    - Кожна тестова функція має `-> None`; фікстури pytest анотуються своїми типами, наприклад
+      `capsys: pytest.CaptureFixture[str]`, `tmp_path: Path`.
+    - Override для `tests.*` не додавайте: тести пишуться за тими самими правилами, що й код. Якщо все ж
+      додали, пам'ятайте, що шаблон модуля працює лише за наявності `tests/__init__.py`, і `warn_unused_configs`
+      покаже, якщо override ні на що не вплинув.
+    - Перевірте, що чекер справді дивиться в тести: тимчасово додайте в тест `x: int = "1"`, переконайтесь,
+      що `uv run mypy` друкує `Incompatible types in assignment`, і приберіть рядок.
+  checklist:
+    - "`uv run mypy` без аргументів перевіряє і `src`, і `tests` (у підсумку кількість файлів більша, ніж для `uv run mypy src`)"
+    - "Усі тестові функції анотовані `-> None`, фікстури мають типи"
+    - "Немає `[[tool.mypy.overrides]]` для власного коду; overrides лише для сторонніх бібліотек без типів, якщо такі є"
+    - "`uv run mypy` друкує `Success: no issues found`, `uv run pytest -q` зелений"
+  verify: "cd capstone && uv run mypy"

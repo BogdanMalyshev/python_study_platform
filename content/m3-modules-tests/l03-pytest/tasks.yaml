@@ -1,0 +1,630 @@
+- id: t1
+  type: code
+  title: "Перші тести голим assert"
+  prompt: |
+    Функція `field_label` уже написана й правильна. Не змінюйте її. Напишіть під нею тести так,
+    як pytest їх збирає: функції з іменем `test_...`, без аргументів, усередині лише голий `assert`.
+
+    Специфікація, яку мають зафіксувати тести:
+    - підкреслення стають пробілами: `"first_name"` дає `"First name"`;
+    - велика лише перша літера, решта слів з малої: `"phone_number_mobile"` дає `"Phone number mobile"`;
+    - підкреслення на краях зникають разом з пробілами: `"_internal_"` дає `"Internal"`.
+
+    Харнес робить те, що робить pytest: знаходить у модулі всі функції `test*` і викликає їх. Спершу зі
+    справжньою `field_label` (усі тести мають бути зелені), потім по черзі з трьома зламаними
+    реалізаціями (мутантами). Кожен мутант має зламати хоча б один ваш тест.
+  starter: |
+    def field_label(name: str) -> str:
+        return name.replace("_", " ").strip().capitalize()
+
+
+    def test_snake_case_becomes_words():
+        ...
+  harness: |
+    _real = field_label
+    _tests = [f for _n, f in list(globals().items()) if _n.startswith("test") and callable(f)]
+
+
+    def _failures() -> int:
+        failed = 0
+        for _test in _tests:
+            try:
+                _test()
+            except Exception:
+                failed += 1
+        return failed
+
+
+    _mutants = [
+        ("без заміни _", lambda name: name.strip().capitalize()),
+        ("title() замість capitalize()", lambda name: name.replace("_", " ").strip().title()),
+        ("без strip()", lambda name: name.replace("_", " ").capitalize()),
+    ]
+    print("тестів знайдено:", len(_tests) > 0)
+    print("справжня функція:", "усі тести зелені" if _failures() == 0 else "є червоні тести")
+    for _label, _impl in _mutants:
+        field_label = _impl
+        print(f"мутант '{_label}':", "спіймано" if _failures() else "НЕ спіймано")
+    field_label = _real
+  expected: |
+    тестів знайдено: True
+    справжня функція: усі тести зелені
+    мутант 'без заміни _': спіймано
+    мутант 'title() замість capitalize()': спіймано
+    мутант 'без strip()': спіймано
+  hints:
+    - "Тіло `...` нічого не перевіряє, тому тест зелений і на мутантах. Кожен пункт специфікації це окремий assert з конкретним входом і конкретним очікуваним рядком."
+    - "Мутант без strip() відрізняється лише на вході з підкресленнями на краях, а title() лише на вході з кількох слів."
+    - "def test_snake_case_becomes_words():\n    assert field_label(\"first_name\") == \"First name\"\n\ndef test_edges():\n    assert field_label(\"_internal_\") == \"Internal\""
+  solution: |
+    def field_label(name: str) -> str:
+        return name.replace("_", " ").strip().capitalize()
+
+
+    def test_snake_case_becomes_words():
+        assert field_label("first_name") == "First name"
+
+
+    def test_only_first_letter_capital():
+        assert field_label("phone_number_mobile") == "Phone number mobile"
+
+
+    def test_edge_underscores_dropped():
+        assert field_label("_internal_") == "Internal"
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Таблиця для parametrize, яка ловить баги"
+  prompt: |
+    Функція `is_hex_color` перевіряє колір теми FormBuilder: рівно `#` і шість hex-цифр, регістр літер
+    будь-який. Вона вже написана. Ваша задача: заповнити `CASES`, таблицю для
+    `@pytest.mark.parametrize(("value", "expected"), CASES)`, від 4 до 10 рядків `(рядок, очікуваний bool)`.
+
+    Таблиця хороша, якщо вона зелена на справжній функції і червона на кожній правдоподібній помилці
+    реалізації. Харнес проганяє ваші рядки через справжню функцію і через п'ять мутантів, без pytest:
+    рівно так, як parametrize прогнав би кожен рядок окремим тестом.
+
+    Якщо в рядку "справжня функція" з'явився список, це значення, для яких ваш `expected` неправильний.
+  starter: |
+    import re
+
+
+    def is_hex_color(value: str) -> bool:
+        return re.fullmatch(r"#[0-9a-fA-F]{6}", value) is not None
+
+
+    CASES: list[tuple[str, bool]] = [
+        ("#2563eb", True),
+    ]
+  harness: |
+    import re as _re
+
+    _real = is_hex_color
+
+
+    def _broken(impl) -> list[str]:
+        return [value for value, expected in CASES if impl(value) != expected]
+
+
+    _mutants = [
+        ("re.match замість fullmatch", lambda v: _re.match(r"#[0-9a-fA-F]{6}", v) is not None),
+        ("лише малі літери", lambda v: _re.fullmatch(r"#[0-9a-f]{6}", v) is not None),
+        ("# необов'язковий", lambda v: _re.fullmatch(r"#?[0-9a-fA-F]{6}", v) is not None),
+        ("довжина 3..6", lambda v: _re.fullmatch(r"#[0-9a-fA-F]{3,6}", v) is not None),
+        ("\\w замість hex", lambda v: _re.fullmatch(r"#\w{6}", v) is not None),
+    ]
+    print("рядків у таблиці:", "від 4 до 10" if 4 <= len(CASES) <= 10 else len(CASES))
+    print("справжня функція:", _broken(_real) or "усі випадки зелені")
+    for _label, _impl in _mutants:
+        print(f"мутант '{_label}':", "спіймано" if _broken(_impl) else "НЕ спіймано")
+  expected: |
+    рядків у таблиці: від 4 до 10
+    справжня функція: усі випадки зелені
+    мутант 're.match замість fullmatch': спіймано
+    мутант 'лише малі літери': спіймано
+    мутант '# необов'язковий': спіймано
+    мутант 'довжина 3..6': спіймано
+    мутант '\w замість hex': спіймано
+  hints:
+    - "Кожен рядок таблиці має відповідати на одне питання специфікації: чи обов'язковий `#`, чи приймаються великі літери, що з довшими й коротшими рядками, що з літерами після `f`."
+    - "Валідні рядки ловлять мутантів, які забагато відкидають (`#2563EB`). Невалідні ловлять тих, хто забагато приймає: без `#`, коротший, довший, з літерою `g`."
+    - "[(\"#2563eb\", True), (\"#2563EB\", True), (\"2563eb\", False), (\"#256\", False), (\"#2563eb00\", False), (\"#2563eg\", False)]"
+  solution: |
+    import re
+
+
+    def is_hex_color(value: str) -> bool:
+        return re.fullmatch(r"#[0-9a-fA-F]{6}", value) is not None
+
+
+    CASES: list[tuple[str, bool]] = [
+        ("#2563eb", True),
+        ("#2563EB", True),
+        ("2563eb", False),
+        ("#256", False),
+        ("#2563eb00", False),
+        ("#2563eg", False),
+    ]
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Фабрика тестових конфігів"
+  prompt: |
+    Напишіть дві фабрики тестових даних, які потім стануть тілом factory fixture у `conftest.py`.
+
+    `make_input(name, **overrides)` повертає поле:
+    `{"type": "input", "id": name, "name": name, "label": <name з пробілами замість _ і великою першою літерою>, "validation": {"required": False}}`.
+    Іменовані аргументи замінюють ключі верхнього рівня.
+
+    `make_form(**overrides)` повертає `{"id": "signup", "title": "Sign up", "elements": [make_input("email")]}`,
+    іменовані аргументи так само замінюють ключі верхнього рівня.
+
+    Головна вимога: кожен виклик повертає незалежний об'єкт до найглибшого рівня. Тест, який змінив
+    `elements` або `validation` в одному результаті, не має вплинути на жоден наступний виклик.
+
+    ```python
+    make_input("first_name")["label"]          # 'First name'
+    make_form(title="Contact")["title"]        # 'Contact'
+    ```
+  starter: |
+    from typing import Any
+
+
+    def make_input(name: str, **overrides: Any) -> dict[str, Any]:
+        ...
+
+
+    def make_form(**overrides: Any) -> dict[str, Any]:
+        ...
+  harness: |
+    print(make_input("first_name"))
+    print(make_input("age", label="Your age", validation={"required": True}))
+    print(make_form()["elements"][0]["id"], make_form(title="Contact")["title"])
+    print(make_form(elements=[make_input("phone")])["elements"][0]["id"])
+
+    a = make_form()
+    a["elements"][0]["validation"]["required"] = True
+    a["elements"].append(make_input("phone"))
+    b = make_form()
+    print(len(b["elements"]), b["elements"][0]["validation"])
+
+    f1 = make_input("email")
+    f1["validation"]["required"] = True
+    print(make_input("email")["validation"])
+  expected: |
+    {'type': 'input', 'id': 'first_name', 'name': 'first_name', 'label': 'First name', 'validation': {'required': False}}
+    {'type': 'input', 'id': 'age', 'name': 'age', 'label': 'Your age', 'validation': {'required': True}}
+    email Contact
+    phone
+    1 {'required': False}
+    {'required': False}
+  hints:
+    - "Модульна константа з дефолтами і `{**DEFAULT, **overrides}` копіює лише верхній рівень: список `elements` і словник `validation` будуть спільні для всіх викликів."
+    - "Найпростіше будувати словник літералом усередині функції: кожен виклик виконує літерал заново і створює нові вкладені об'єкти. Потім `result.update(overrides)`."
+    - "def make_form(**overrides):\n    form = {\"id\": \"signup\", \"title\": \"Sign up\", \"elements\": [make_input(\"email\")]}\n    form.update(overrides)\n    return form"
+  solution: |
+    from typing import Any
+
+
+    def make_input(name: str, **overrides: Any) -> dict[str, Any]:
+        field = {
+            "type": "input",
+            "id": name,
+            "name": name,
+            "label": name.replace("_", " ").capitalize(),
+            "validation": {"required": False},
+        }
+        field.update(overrides)
+        return field
+
+
+    def make_form(**overrides: Any) -> dict[str, Any]:
+        form = {
+            "id": "signup",
+            "title": "Sign up",
+            "elements": [make_input("email")],
+        }
+        form.update(overrides)
+        return form
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "id параметрів, як їх будує pytest"
+  prompt: |
+    Відтворіть правила, за якими pytest генерує id для рядків `parametrize` без явних `ids=`.
+    Напишіть `make_ids(argnames, argvalues)`: `argnames` це список імен параметрів, `argvalues` список
+    кортежів-рядків таблиці. Повертає список id, по одному на рядок.
+
+    Правила (усі значення в харнесі ASCII):
+    - id рядка це id його значень через `-`;
+    - `str` потрапляє як є, навіть порожній; `None`, `bool`, `int`, `float` через `str(value)`;
+    - будь-яке інше значення (dict, list, tuple, об'єкт) стає `<ім'я параметра><індекс рядка>`, наприклад `field0`;
+    - якщо однаковий id трапився кілька разів, кожен його екземпляр отримує суфікс-лічильник з нуля
+      в порядку появи: `a0`, `a1`; якщо id закінчується цифрою, перед лічильником стоїть `_`: `email-3_0`.
+      Унікальні id не змінюються.
+
+    ```python
+    make_ids(["v"], [("a",), ("b",), ("a",)])          # ['a0', 'b', 'a1']
+    make_ids(["field", "n"], [({"x": 1}, 3)])          # ['field0-3']
+    ```
+  starter: |
+    def make_ids(argnames: list[str], argvalues: list[tuple]) -> list[str]:
+        ...
+  harness: |
+    print(make_ids(["value", "expected"], [("#2563eb", True), ("", False), ("#256", False)]))
+    print(make_ids(["field", "limit"], [({"name": "email"}, 3), (["a"], None), ("age", 1.5)]))
+    print(make_ids(["v"], [("a",), ("b",), ("a",), ("a",)]))
+    print(make_ids(["value", "limit"], [("email", 3), ("email", 3), ("a b", -2)]))
+    print(make_ids([], []))
+  expected: |
+    ['#2563eb-True', '-False', '#256-False']
+    ['field0-3', 'field1-None', 'age-1.5']
+    ['a0', 'b', 'a1', 'a2']
+    ['email-3_0', 'email-3_1', 'a b--2']
+    []
+  hints:
+    - "Розбийте на два кроки: спершу сирі id для кожного рядка (функція для одного значення плюс `-`.join), потім окремий прохід, що робить повтори унікальними."
+    - "`bool` у Python підклас `int`, тож `isinstance(value, int | float)` покриває і `True`. Для повторів знадобляться `Counter(ids)` (скільки разів трапився id) і `defaultdict(int)` (який наступний лічильник)."
+    - "for id_ in ids:\n    if counts[id_] > 1:\n        sep = \"_\" if id_[-1].isdigit() else \"\"\n        result.append(f\"{id_}{sep}{next_suffix[id_]}\")\n        next_suffix[id_] += 1"
+  solution: |
+    from collections import Counter, defaultdict
+
+
+    def value_id(argname: str, value: object, index: int) -> str:
+        if isinstance(value, str):
+            return value
+        if value is None or isinstance(value, int | float):
+            return str(value)
+        return f"{argname}{index}"
+
+
+    def make_ids(argnames: list[str], argvalues: list[tuple]) -> list[str]:
+        ids = [
+            "-".join(value_id(name, value, index) for name, value in zip(argnames, row, strict=True))
+            for index, row in enumerate(argvalues)
+        ]
+        counts = Counter(ids)
+        next_suffix: defaultdict[str, int] = defaultdict(int)
+        result = []
+        for id_ in ids:
+            if counts[id_] > 1:
+                sep = "_" if id_ and id_[-1].isdigit() else ""
+                result.append(f"{id_}{sep}{next_suffix[id_]}")
+                next_suffix[id_] += 1
+            else:
+                result.append(id_)
+        return result
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Міні-pytest: збирання, класи й фікстури за іменем"
+  prompt: |
+    Напишіть спрощений раннер, який збирає й запускає тести за правилами pytest з цього уроку.
+
+    `run_tests(namespace, fixtures)` отримує словник модуля (ім'я → об'єкт, у порядку визначення) і словник
+    фікстур (ім'я → функція без аргументів). Повертає список рядків звіту в порядку збирання.
+
+    Збирання:
+    - функція (будь-який callable, що не клас) з іменем на `test` це тест з node id, що дорівнює імені;
+    - клас з іменем на `Test`: якщо в ньому самому визначено `__init__`, тести не збираються, у звіт іде
+      `WARNING <Клас> (has __init__)`; інакше кожен його callable-атрибут з іменем на `test` це тест
+      з node id `<Клас>::<метод>`, і для кожного такого тесту створюється новий екземпляр класу;
+    - усе інше (класи без `Test`, функції без `test`, дані з іменем на `test`) ігнорується.
+
+    Запуск одного тесту (`run_one(node_id, func, fixtures)`):
+    - імена параметрів беруться з `inspect.signature(func).parameters` (для методу екземпляра `self` туди
+      не входить); якщо якогось імені немає серед фікстур, рядок `ERROR <node id>: fixture '<ім'я>' not found`,
+      і тест не викликається;
+    - інакше кожна фікстура викликається заново для цього тесту, результати передаються іменованими
+      аргументами; будь-який виняток дає `FAILED <node id>: <ім'я класу винятку>`, без винятку `PASSED <node id>`.
+  starter: |
+    import inspect
+    from collections.abc import Callable
+
+
+    def run_one(node_id: str, func: Callable, fixtures: dict[str, Callable[[], object]]) -> str:
+        ...
+
+
+    def run_tests(namespace: dict[str, object], fixtures: dict[str, Callable[[], object]]) -> list[str]:
+        ...
+  harness: |
+    def helper_not_a_test():
+        raise RuntimeError("must not be collected")
+
+
+    def test_add_element(form):
+        form["elements"].append({"type": "button"})
+        assert len(form["elements"]) == 1
+
+
+    def test_form_is_fresh(form):
+        assert form["elements"] == []
+
+
+    def test_two_fixtures(form, theme):
+        assert (form["id"], theme) == ("signup", "light")
+
+
+    def test_unknown_fixture(fomr):
+        pass
+
+
+    def test_fails():
+        assert 1 + 1 == 3
+
+
+    def test_crashes(form):
+        form["missing"]
+
+
+    class TestCounter:
+        def test_first(self):
+            self.hits = 1
+            assert self.hits == 1
+
+        def test_fresh_instance(self):
+            assert not hasattr(self, "hits")
+
+        def helper(self):
+            raise RuntimeError("must not be collected")
+
+
+    class TestWithInit:
+        def __init__(self):
+            self.ready = True
+
+        def test_never_runs(self):
+            raise RuntimeError("must not run")
+
+
+    class NotATestClass:
+        def test_ignored(self):
+            raise RuntimeError("must not run")
+
+
+    namespace = {
+        "helper_not_a_test": helper_not_a_test,
+        "test_add_element": test_add_element,
+        "test_form_is_fresh": test_form_is_fresh,
+        "test_two_fixtures": test_two_fixtures,
+        "test_unknown_fixture": test_unknown_fixture,
+        "test_fails": test_fails,
+        "test_crashes": test_crashes,
+        "TestCounter": TestCounter,
+        "TestWithInit": TestWithInit,
+        "NotATestClass": NotATestClass,
+        "test_data": [1, 2, 3],
+    }
+    fixtures = {
+        "form": lambda: {"id": "signup", "elements": []},
+        "theme": lambda: "light",
+    }
+    for line in run_tests(namespace, fixtures):
+        print(line)
+  expected: |
+    PASSED test_add_element
+    PASSED test_form_is_fresh
+    PASSED test_two_fixtures
+    ERROR test_unknown_fixture: fixture 'fomr' not found
+    FAILED test_fails: AssertionError
+    FAILED test_crashes: KeyError
+    PASSED TestCounter::test_first
+    PASSED TestCounter::test_fresh_instance
+    WARNING TestWithInit (has __init__)
+  hints:
+    - "`run_one` спершу перевіряє, що всі імена параметрів є серед фікстур, і лише потім викликає фікстури й тест. `test_form_is_fresh` проходить лише тоді, коли фікстура викликається заново для кожного тесту, а `TestCounter::test_fresh_instance` лише тоді, коли екземпляр класу новий."
+    - "Клас від функції відрізняє `isinstance(obj, type)`. Власні атрибути класу в порядку визначення дає `vars(cls)`, і там же видно, чи визначено `__init__` саме в цьому класі. Метод для виклику без `self`: `getattr(cls(), attr)`."
+    - "params = list(inspect.signature(func).parameters)\nfor p in params:\n    if p not in fixtures:\n        return f\"ERROR {node_id}: fixture '{p}' not found\"\nkwargs = {p: fixtures[p]() for p in params}"
+  solution: |
+    import inspect
+    from collections.abc import Callable
+
+
+    def run_one(node_id: str, func: Callable, fixtures: dict[str, Callable[[], object]]) -> str:
+        params = list(inspect.signature(func).parameters)
+        for name in params:
+            if name not in fixtures:
+                return f"ERROR {node_id}: fixture '{name}' not found"
+        kwargs = {name: fixtures[name]() for name in params}
+        try:
+            func(**kwargs)
+        except Exception as exc:
+            return f"FAILED {node_id}: {type(exc).__name__}"
+        return f"PASSED {node_id}"
+
+
+    def run_tests(namespace: dict[str, object], fixtures: dict[str, Callable[[], object]]) -> list[str]:
+        report = []
+        for name, obj in namespace.items():
+            if isinstance(obj, type):
+                if not name.startswith("Test"):
+                    continue
+                if "__init__" in vars(obj):
+                    report.append(f"WARNING {name} (has __init__)")
+                    continue
+                for attr, member in vars(obj).items():
+                    if attr.startswith("test") and callable(member):
+                        report.append(run_one(f"{name}::{attr}", getattr(obj(), attr), fixtures))
+            elif name.startswith("test") and callable(obj):
+                report.append(run_one(name, obj, fixtures))
+        return report
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Файл з двома тестами запускають командою `uv run pytest -q`. Що буде?
+    ```python
+    import pytest
+
+
+    @pytest.fixture(scope="module")
+    def base_form():
+        return {"id": "signup", "elements": []}
+
+
+    def test_add_button(base_form):
+        base_form["elements"].append({"type": "button"})
+        assert len(base_form["elements"]) == 1
+
+
+    def test_form_starts_empty(base_form):
+        assert base_form["elements"] == []
+    ```
+  options:
+    - "Обидва тести зелені: фікстура викликається заново для кожного тесту"
+    - "`test_add_button` зелений, `test_form_starts_empty` червоний; окремо через `-k starts` другий зелений"
+    - "Обидва червоні: `scope=\"module\"` забороняє змінювати значення фікстури"
+    - "`ERROR` при збиранні: фікстура з `scope=\"module\"` не може повертати мутабельне значення"
+  answer: 1
+  explain: |
+    `scope="module"` означає один виклик фікстури на файл, і обидва тести отримують той самий словник.
+    Перший додає кнопку, другий бачить її, тож `[{'type': 'button'}] == []` падає. Запущений сам через
+    `-k starts`, другий тест зелений: падіння залежить від порядку, і саме тому мутабельні дані тримають
+    у фікстурах з `scope="function"` (за замовчуванням). Перший варіант описує поведінку за замовчуванням,
+    яка тут вимкнена. pytest нічого не забороняє змінювати й не перевіряє мутабельність, тому третій і
+    четвертий варіанти вигадані; це та сама пастка, що `beforeAll` зі спільним об'єктом у Jest.
+
+- id: q2
+  type: quiz
+  question: |
+    Функція кидає `ValueError("visible_if references unknown field 'phone' (in step 2)")`. Який з тестів
+    упаде?
+    ```python
+    def test_a():
+        with pytest.raises(ValueError, match="unknown field"):
+            check_ref("phone")
+
+
+    def test_b():
+        with pytest.raises(ValueError, match="'phone' (in step 2)"):
+            check_ref("phone")
+
+
+    def test_c():
+        with pytest.raises(ValueError, match=re.escape("'phone' (in step 2)")):
+            check_ref("phone")
+    ```
+  options:
+    - "`test_a`: `match` вимагає збігу з усім повідомленням"
+    - "`test_b`: дужки в `match` це група регулярного виразу, і шукається текст без дужок"
+    - "`test_c`: після `re.escape` у шаблоні з'являються зворотні слеші, яких немає в повідомленні"
+    - "Жоден: `match` шукає підрядок, як `toThrow(\"text\")` у Jest"
+  answer: 1
+  explain: |
+    `match` це регулярний вираз, який pytest шукає через `re.search`. Тому `test_a` проходить: підрядку
+    достатньо, повного збігу не треба. У `test_b` `(in step 2)` це група, яка збігається з `in step 2`
+    без дужок, а в повідомленні дужки є, тож pytest пише "Regex pattern did not match". `re.escape`
+    екранує дужки й пробіли, і слеші з'являються лише в шаблоні, а не в тексті, який шукається, тож
+    `test_c` зелений. Останній варіант це інтуїція з Jest, де рядок у `toThrow` справді підрядок.
+
+- id: q3
+  type: quiz
+  question: |
+    `status` дорівнює `"draft"`. Що зробить pytest з цим тестом?
+    ```python
+    def test_published():
+        status = "draft"
+        assert (status == "published", "form must be published")
+    ```
+  options:
+    - "Червоний тест з `AssertionError: form must be published`"
+    - "Червоний тест з розкладкою `assert 'draft' == 'published'`"
+    - "Зелений тест і попередження `assertion is always true, perhaps remove parentheses?`"
+    - "`SyntaxError`: `assert` не можна писати з дужками"
+  answer: 2
+  explain: |
+    `assert` це оператор, а не функція, тож дужки створюють кортеж з двох елементів, а непорожній кортеж
+    завжди truthy. Тест проходить за будь-якого `status`; pytest лише попереджає `PytestAssertRewriteWarning`.
+    Перші два варіанти описують те, що дала б форма без дужок: `assert status == "published", "form must
+    be published"`, і тоді pytest показує і повідомлення, і розкладку. Синтаксичної помилки немає:
+    вираз у дужках цілком коректний, через це пастка і живуча.
+
+- id: q4
+  type: quiz
+  question: |
+    Скільки тестів збере pytest і який id буде першим?
+    ```python
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    @pytest.mark.parametrize("required", [True, False])
+    @pytest.mark.parametrize("input_type", ["text", "email", "tel"])
+    def test_render(theme, required, input_type):
+        pass
+    ```
+  options:
+    - "3 тести, бо діє лише найближчий до функції декоратор; перший `test_render[text]`"
+    - "7 тестів, по одному на кожне значення; перший `test_render[light]`"
+    - "12 тестів; перший `test_render[light-True-text]`"
+    - "12 тестів; перший `test_render[text-True-light]`"
+  answer: 3
+  explain: |
+    Стек `parametrize` дає декартовий добуток: 2 × 2 × 3 = 12. Декоратори застосовуються знизу вгору,
+    тому першим іде значення найближчого до функції, `input_type`, і саме воно змінюється найповільніше:
+    `text-True-light`, `text-True-dark`, `text-False-light` і так далі. Порядок `light-True-text`
+    був би, якби id читався в порядку написання декораторів зверху вниз. Варіант з 7 тестами це модель
+    `it.each` на кожну таблицю окремо, а з 3 тестами модель "останній декоратор перезаписує попередні".
+
+- id: p1
+  type: project
+  title: "Тести конфігу капстоуну: conftest, parametrize на 20 конфігів, tmp_path"
+  prompt: |
+    Продовження проєктного завдання m2-l09 (там з'явились моделі в `src/formbuilder/config.py`, `tests/test_models.py`
+    і `tests/fixtures/form_signup.json`). Тепер тести отримують структуру з цього уроку.
+
+    1. `tests/conftest.py` з трьома фікстурами з docstring: `signup_raw` (свіжий dict з
+       `tests/fixtures/form_signup.json` на кожен тест), `make_form` (factory fixture мінімального валідного
+       конфігу, іменовані аргументи замінюють ключі верхнього рівня), `write_config` (фабрика, що пише
+       dict як JSON або сирий рядок у `tmp_path` і повертає шлях).
+    2. У `tests/test_models.py` два параметризовані тести: валідні конфіги (тест лише перевіряє, що
+       `model_validate` не кидає) і невалідні (очікують рівно одну помилку з конкретним `type`). Разом
+       щонайменше 20 рядків, кожен через `pytest.param(..., id="...")` з читабельним id. Серед невалідних
+       обов'язково: невідомий `type` елемента, зайвий ключ, `visible_if` на неіснуюче поле всередині `block`,
+       порожній `title`, неправильний `primary_color`. Серед валідних: camelCase-ключі з фронтенду і вкладений `block`.
+    3. У `src/formbuilder/config.py` поруч з моделями `ConfigError` і `load_config(path: Path) -> FormConfig`
+       (як у розділі "Для капстоуну"), і `tests/test_config.py`: валідний файл, відсутній файл, файл не-JSON
+       з перевіркою `__cause__`, валідний JSON з невалідним конфігом. Файли лише в `tmp_path`, без моків.
+    4. `test_models.py` і `test_config.py` не імпортують одне одного й не імпортують `conftest.py`.
+  checklist:
+    - "`tests/conftest.py` має `signup_raw`, `make_form`, `write_config`, у кожної docstring; `uv run pytest --fixtures tests` їх показує"
+    - "Параметризовані тести валідних і невалідних конфігів разом дають щонайменше 20 рядків, усі з явними `id`"
+    - "Кожен невалідний рядок перевіряє список `type` помилок цілком (`== [\"extra_forbidden\"]`), а не лише факт `ValidationError`"
+    - "`visible_if` на неіснуюче поле всередині `block` очікує `value_error`; camelCase-конфіг з фронтенду проходить"
+    - "`load_config` перетворює відсутній файл, не-JSON і невалідний конфіг на `ConfigError`; тест не-JSON перевіряє `__cause__` з типом `json_invalid`"
+    - "Жоден тест не пише файли поза `tmp_path` і не використовує моки"
+    - "`uv run pytest -q` зелений, `uv run ruff check` і `uv run mypy src` проходять"
+  verify: "cd capstone && uv run pytest -q"
+
+- id: p2
+  type: project
+  title: "Строгий конфіг pytest і тести CLI через capsys"
+  prompt: |
+    Доведіть `[tool.pytest.ini_options]` капстоуну до робочого стану й покрийте точку входу з m0-l06.
+
+    1. У `pyproject.toml` до наявних `testpaths` і `--import-mode=importlib` додайте `strict = true`
+       (pytest 9: строгі маркери, конфіг, xfail і унікальні id параметрів), `-ra` в `addopts` і
+       зареєстрований маркер `slow` з описом.
+    2. `tests/test_cli.py`: `main(["--version"])` повертає 0 і друкує в stdout рівно
+       `formbuilder <версія>\n` (через `capsys`); невідомий аргумент повертає 2, stdout порожній, stderr
+       містить `unknown arguments`; виклик `main()` без аргументів читає `sys.argv`, підмінений через
+       `monkeypatch.setattr("sys.argv", [...])`.
+    3. Один тест з `@pytest.mark.slow`, що валідує 200 конфігів з `make_form`, і переконайтесь, що
+       `uv run pytest -q -m "not slow"` його відфільтровує.
+    4. Перевірте строгість: тимчасово напишіть `@pytest.mark.slwo` і переконайтесь, що збирання падає
+       з `'slwo' not found in markers`; поверніть як було.
+  checklist:
+    - "`[tool.pytest.ini_options]` має `testpaths`, `addopts` з `--import-mode=importlib` і `-ra`, `strict = true`, `markers` зі `slow`"
+    - "`tests/test_cli.py` перевіряє stdout `--version` рівністю рядка, код 2 і stderr для невідомого аргументу, і `sys.argv` через `monkeypatch`"
+    - "`uv run pytest -q -m \"not slow\"` показує `1 deselected`"
+    - "Опечатка в маркері дає помилку збирання, а не попередження"
+    - "`uv run pytest -q` зелений"
+  verify: "cd capstone && uv run pytest -q"

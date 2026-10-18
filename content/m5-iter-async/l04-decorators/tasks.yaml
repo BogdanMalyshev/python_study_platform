@@ -1,0 +1,664 @@
+- id: q1
+  type: quiz
+  question: |
+    У якому порядку надрукуються рядки?
+    ```python
+    def deco(fn):
+        print("deco")
+        def wrapper():
+            print("wrapper")
+            return fn()
+        return wrapper
+
+    print("start")
+
+    @deco
+    def job():
+        print("job")
+
+    print("defined")
+    job()
+    ```
+  options:
+    - "start, deco, defined, wrapper, job"
+    - "start, defined, deco, wrapper, job"
+    - "deco, start, defined, wrapper, job"
+    - "start, defined, wrapper, job"
+  answer: 0
+  explain: |
+    `@deco` це `job = deco(job)` одразу після виконання `def`, тому `deco` друкується між `start`
+    і `defined`, а при виклику працює лише wrapper. Варіант 2 уявляє декоратор лінивим, як HOC,
+    який нічого не робить до першого рендеру; але декоратор це звичайний виклик функції в момент
+    визначення. Варіант 3 переносить hoisting з JS: у Python `def` це інструкція, яка виконується
+    там, де стоїть, і декоратор разом з нею. Варіант 4 вважає, що тіло декоратора виконується лише
+    як частина виклику; насправді виклик іде через wrapper, а `deco` вже відпрацював раніше і більше
+    не запускається.
+
+- id: t1
+  type: code
+  title: "trace: класичний шаблон з wraps"
+  prompt: |
+    Напишіть декоратор `trace`, який перед викликом друкує `call <ім'я>(<аргументи>)`, після
+    виклику друкує `<ім'я> returned <результат>` і повертає результат. Аргументи форматуються
+    через `repr`: спершу позиційні, потім іменовані у вигляді `k=v`, через кому з пробілом.
+    Декорована функція має зберегти `__name__` і `__doc__`.
+
+    ```python
+    @trace
+    def add(a, b=0):
+        return a + b
+
+    add(1, b=10)
+    # call add(1, b=10)
+    # add returned 11
+    ```
+  starter: |
+    import functools
+
+
+    def trace(fn):
+        ...
+  harness: |
+    @trace
+    def add(a, b=0):
+        """Add two numbers."""
+        return a + b
+
+
+    @trace
+    def label(name, *, upper=False):
+        return name.upper() if upper else name
+
+
+    print(add(2, 3))
+    print(add(1, b=10))
+    print(label("email", upper=True))
+    print(add.__name__, add.__doc__)
+  expected: |
+    call add(2, 3)
+    add returned 5
+    5
+    call add(1, b=10)
+    add returned 11
+    11
+    call label('email', upper=True)
+    label returned 'EMAIL'
+    EMAIL
+    add Add two numbers.
+  hints:
+    - "Три рівні не потрібні: `trace` приймає функцію, всередині `wrapper(*args, **kwargs)`, `trace` повертає `wrapper`. Не забудьте `return` результату з wrapper."
+    - "Рядок аргументів збирається зі списку: `[repr(a) for a in args]` плюс `[f\"{k}={v!r}\" for k, v in kwargs.items()]`, потім `\", \".join(...)`."
+    - |
+      ```python
+      @functools.wraps(fn)
+      def wrapper(*args, **kwargs):
+          parts = [repr(a) for a in args] + [f"{k}={v!r}" for k, v in kwargs.items()]
+          print(f"call {fn.__name__}({', '.join(parts)})")
+          result = fn(*args, **kwargs)
+          ...
+      ```
+  solution: |
+    import functools
+
+
+    def trace(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            parts = [repr(a) for a in args] + [f"{k}={v!r}" for k, v in kwargs.items()]
+            print(f"call {fn.__name__}({', '.join(parts)})")
+            result = fn(*args, **kwargs)
+            print(f"{fn.__name__} returned {result!r}")
+            return result
+        return wrapper
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "retry(times, on): фабрика декораторів"
+  prompt: |
+    Напишіть фабрику `retry(times, on=(ConnectionError,))`. Декорована функція викликається
+    до `times` разів, поки кидає виняток одного з типів у кортежі `on`. Якщо спроба вдалась,
+    повертається її результат. Якщо всі `times` спроб провалились, назовні летить останній
+    виняток як є. Виняток іншого типу не повторюється, а одразу летить назовні. Пауз між
+    спробами не потрібно.
+
+    Некоректний параметр має зламатися одразу при створенні декоратора, а не при першому
+    виклику: `retry(times=0)` кидає `ValueError("times must be >= 1")`. Ім'я функції зберігається.
+
+    ```python
+    @retry(times=3)
+    def publish(page): ...      # падає двічі з ConnectionError, утретє повертає "/home"
+
+    publish("home")              # "/home", функцію викликано 3 рази
+    ```
+  starter: |
+    import functools
+
+
+    def retry(times, on=(ConnectionError,)):
+        ...
+  harness: |
+    calls = []
+
+
+    @retry(times=3)
+    def publish(page):
+        calls.append(page)
+        if len(calls) < 3:
+            raise ConnectionError(f"fail {len(calls)}")
+        return f"/{page}"
+
+
+    print(publish("home"), len(calls), publish.__name__)
+
+    attempts = 0
+
+
+    @retry(times=2)
+    def always_down():
+        global attempts
+        attempts += 1
+        raise ConnectionError(f"down {attempts}")
+
+
+    try:
+        always_down()
+    except ConnectionError as exc:
+        print("gave up:", exc, attempts)
+
+    bugs = 0
+
+
+    @retry(times=5)
+    def buggy():
+        global bugs
+        bugs += 1
+        raise ValueError("bad config")
+
+
+    try:
+        buggy()
+    except ValueError as exc:
+        print("not retried:", exc, bugs)
+
+    timeouts = 0
+
+
+    @retry(times=3, on=(TimeoutError,))
+    def slow():
+        global timeouts
+        timeouts += 1
+        if timeouts == 1:
+            raise TimeoutError("slow")
+        return "ok"
+
+
+    print(slow(), timeouts)
+
+    try:
+        retry(times=0)
+    except ValueError as exc:
+        print("factory:", exc)
+  expected: |
+    /home 3 publish
+    gave up: down 2 2
+    not retried: bad config 1
+    ok 2
+    factory: times must be >= 1
+  hints:
+    - "Три рівні: `retry(times, on)` перевіряє `times` і повертає `decorator(fn)`, той повертає `wrapper(*args, **kwargs)`. Перевірка `times` стоїть у зовнішній функції, бо саме вона виконується при `@retry(...)`."
+    - "У wrapper цикл `for attempt in range(1, times + 1)` з `try: return fn(...)`. `except on:` приймає кортеж типів. Чужі винятки ловити не треба, вони пролетять самі."
+    - |
+      ```python
+      except on:
+          if attempt == times:
+              raise
+      ```
+      `raise` без аргументу перекидає поточний виняток з його traceback.
+  solution: |
+    import functools
+
+
+    def retry(times, on=(ConnectionError,)):
+        if times < 1:
+            raise ValueError("times must be >= 1")
+
+        def decorator(fn):
+            @functools.wraps(fn)
+            def wrapper(*args, **kwargs):
+                for attempt in range(1, times + 1):
+                    try:
+                        return fn(*args, **kwargs)
+                    except on:
+                        if attempt == times:
+                            raise
+            return wrapper
+        return decorator
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Що станеться при виконанні останнього рядка (Python 3.12)?
+    ```python
+    import functools
+
+    def logged(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            return fn(*args, **kwargs)
+        return wrapper
+
+    class Form:
+        @logged
+        @staticmethod
+        def slug(title):
+            return title.lower()
+
+    print(Form.slug("A"))
+    print(Form().slug("B"))
+    ```
+  options:
+    - "Надрукує a і b: порядок декораторів на результат не впливає"
+    - "TypeError ще при створенні класу: staticmethod не можна обгорнути"
+    - "Надрукує a, потім TypeError: Form.slug() takes 1 positional argument but 2 were given"
+    - "Обидва виклики кинуть TypeError: 'staticmethod' object is not callable"
+  answer: 2
+  explain: |
+    `logged` отримує не функцію, а об'єкт `staticmethod`. З 3.10 він callable, тож виклик через
+    клас `Form.slug("A")` працює. Але на класі тепер лежить звичайна функція `wrapper`, а функції
+    це дескриптори: через екземпляр вона прив'язується як метод, і `self` їде в `args`, а далі в
+    статичну функцію з одним параметром. Варіант 1 був би правдою, якби `@staticmethod` стояв
+    найвище. Варіант 2 плутає з `@cache` над `@property`, який справді падає при створенні класу.
+    Варіант 4 описує поведінку до Python 3.10 і поведінку `@classmethod`, об'єкт якого досі
+    не callable.
+
+- id: t3
+  type: code
+  title: "CallCounter: декоратор-клас, що працює і на методах"
+  prompt: |
+    Напишіть клас-декоратор `CallCounter`. Екземпляр стає на місце функції, рахує виклики в
+    атрибуті `calls`, має метод `reset()` і зберігає `__name__` та `__doc__` оригіналу.
+
+    Декоратор має працювати й на методах: `Form("x").submit()` отримує `self` як зазвичай.
+    Лічильник методу один на клас. Звернення через клас `Form.submit` повертає сам `CallCounter`,
+    щоб можна було прочитати `Form.submit.calls`.
+
+    Рішення через функцію з атрибутом не пройде: харнес перевіряє, що на класі лежить саме
+    екземпляр `CallCounter`.
+  starter: |
+    import functools
+    import types
+
+
+    class CallCounter:
+        def __init__(self, fn):
+            ...
+
+        def __call__(self, *args, **kwargs):
+            ...
+  harness: |
+    @CallCounter
+    def validate(value):
+        """Return True for non-empty values."""
+        return bool(value)
+
+
+    print(validate("a"), validate(""), validate.calls)
+    print(validate.__name__, validate.__doc__)
+    validate.reset()
+    print(validate.calls)
+
+
+    class Form:
+        def __init__(self, name):
+            self.name = name
+
+        @CallCounter
+        def submit(self, suffix="!"):
+            return f"submit {self.name}{suffix}"
+
+
+    print(Form("signup").submit())
+    print(Form("login").submit(suffix="?"))
+    print(Form.submit.calls, type(Form.__dict__["submit"]).__name__)
+  expected: |
+    True False 2
+    validate Return True for non-empty values.
+    0
+    submit signup!
+    submit login?
+    2 CallCounter
+  hints:
+    - "Функції й `reset` вистачить для першої половини: `functools.update_wrapper(self, fn)` у `__init__`, лічильник в атрибуті екземпляра. Методи ламаються, бо екземпляр класу не дескриптор і не прив'язує `self`."
+    - "Додайте `__get__(self, obj, objtype=None)`. Коли `obj is None`, звернулися через клас, і треба повернути `self`. Інакше потрібен прив'язаний метод."
+    - |
+      ```python
+      def __get__(self, obj, objtype=None):
+          if obj is None:
+              return self
+          return types.MethodType(self, obj)
+      ```
+  solution: |
+    import functools
+    import types
+
+
+    class CallCounter:
+        def __init__(self, fn):
+            functools.update_wrapper(self, fn)
+            self.fn = fn
+            self.calls = 0
+
+        def __call__(self, *args, **kwargs):
+            self.calls += 1
+            return self.fn(*args, **kwargs)
+
+        def reset(self):
+            self.calls = 0
+
+        def __get__(self, obj, objtype=None):
+            if obj is None:
+                return self
+            return types.MethodType(self, obj)
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "register: декоратор класу як реєстр рендерерів"
+  prompt: |
+    Напишіть фабрику `register(kind)` для класів-рендерерів і функцію `render(element)`.
+
+    - `register(kind)` кладе клас у `REGISTRY[kind]`, ставить класу атрибут `kind` і повертає
+      той самий клас, щоб ім'я в модулі лишилось робочим.
+    - Повторна реєстрація того самого `kind` кидає
+      `ValueError("'input' already registered by InputRenderer")`: у повідомленні `repr` ключа і
+      ім'я класу, який уже зареєстровано.
+    - `render(element)` створює екземпляр зареєстрованого класу за `element["type"]` і повертає
+      результат його `render(element)`. Невідомий тип: `ValueError("unknown element type 'slider'")`.
+  starter: |
+    REGISTRY: dict[str, type] = {}
+
+
+    def register(kind):
+        ...
+
+
+    def render(element):
+        ...
+  harness: |
+    @register("input")
+    class InputRenderer:
+        def render(self, el):
+            return f'<input name="{el["name"]}">'
+
+
+    @register("checkbox")
+    class CheckboxRenderer:
+        def render(self, el):
+            return f'<input type="checkbox" name="{el["name"]}">'
+
+
+    print(sorted(REGISTRY))
+    print(InputRenderer.kind, CheckboxRenderer.__name__, REGISTRY["input"] is InputRenderer)
+    print(render({"type": "checkbox", "name": "agree"}))
+
+    try:
+        @register("input")
+        class Duplicate:
+            pass
+    except ValueError as exc:
+        print("duplicate:", exc)
+
+    try:
+        render({"type": "slider", "name": "volume"})
+    except ValueError as exc:
+        print("unknown:", exc)
+  expected: |
+    ['checkbox', 'input']
+    input CheckboxRenderer True
+    <input type="checkbox" name="agree">
+    duplicate: 'input' already registered by InputRenderer
+    unknown: unknown element type 'slider'
+  hints:
+    - "Два рівні: `register(kind)` повертає `decorator(cls)`. Wrapper не потрібен, бо клас не обгортається, а лише записується в словник."
+    - "Перевірку дубліката робіть до запису: `if kind in REGISTRY: raise ValueError(...)` з `REGISTRY[kind].__name__` у повідомленні. Найчастіша помилка тут забутий `return cls`."
+    - |
+      ```python
+      def render(element):
+          cls = REGISTRY.get(element["type"])
+          if cls is None:
+              raise ValueError(f"unknown element type {element['type']!r}")
+          return cls().render(element)
+      ```
+  solution: |
+    REGISTRY: dict[str, type] = {}
+
+
+    def register(kind):
+        def decorator(cls):
+            if kind in REGISTRY:
+                raise ValueError(f"{kind!r} already registered by {REGISTRY[kind].__name__}")
+            REGISTRY[kind] = cls
+            cls.kind = kind
+            return cls
+        return decorator
+
+
+    def render(element):
+        cls = REGISTRY.get(element["type"])
+        if cls is None:
+            raise ValueError(f"unknown element type {element['type']!r}")
+        return cls().render(element)
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Скільки рядків `attempt ... failed` надрукує цей код і чим він закінчиться?
+    ```python
+    import asyncio
+    import functools
+
+    def retry(times):
+        def decorator(fn):
+            @functools.wraps(fn)
+            def wrapper(*args, **kwargs):
+                for attempt in range(1, times + 1):
+                    try:
+                        return fn(*args, **kwargs)
+                    except ConnectionError:
+                        print(f"attempt {attempt} failed")
+                        if attempt == times:
+                            raise
+            return wrapper
+        return decorator
+
+    @retry(times=3)
+    async def publish():
+        raise ConnectionError("down")
+
+    asyncio.run(publish())
+    ```
+  options:
+    - "Три рядки, потім ConnectionError: down"
+    - "Жодного рядка, одразу ConnectionError: down"
+    - "Три рядки, потім asyncio.run повертає None без винятку"
+    - "Жодного рядка, TypeError: wrapper повертає корутину замість результату"
+  answer: 1
+  explain: |
+    `fn(*args, **kwargs)` для `async def` не виконує тіло, а лише створює корутину. `try` у
+    wrapper нічого не ловить, бо винятку ще немає, і `return` одразу віддає корутину назовні.
+    `asyncio.run` виконує її поза wrapper, тіло кидає `ConnectionError`, і повторів не було.
+    Варіант 1 це очікування з JS, що обгортка "чекає" async-функцію; без `await` у wrapper вона
+    не чекає. Варіант 3 неможливий: останню спробу `raise` перекидає назовні. Варіант 4 невірний,
+    бо `asyncio.run` отримує саме корутину, і з типом усе гаразд, через це баг і непомітний.
+
+- id: t5
+  type: code
+  title: "timed: один декоратор для sync і async"
+  prompt: |
+    Напишіть фабрику `timed(stage, *, clock)`. `clock` це callable без аргументів, що повертає
+    поточний час у секундах (у продакшні `time.perf_counter`, у тестах фейковий годинник).
+    Декорована функція після завершення друкує рядок:
+
+    - `<stage>: ok in <секунди>s`, якщо повернула результат;
+    - `<stage>: failed in <секунди>s`, якщо кинула виняток, і виняток летить далі без змін.
+
+    Секунди з двома знаками після коми. Декоратор має працювати і на звичайних функціях, і на
+    `async def`: для асинхронної час міряється до завершення `await`, а `inspect.iscoroutinefunction`
+    на результаті повертає `True`. `__name__` і `__doc__` зберігаються.
+
+    У харнесі годинник фейковий, час рухається лише через `clock.advance` і `clock.sleep`, тому
+    вивід детермінований і не залежить від швидкості машини.
+  starter: |
+    import functools
+    import inspect
+
+
+    def timed(stage, *, clock):
+        ...
+  harness: |
+    import asyncio
+
+
+    class FakeClock:
+        def __init__(self):
+            self.now = 0.0
+
+        def __call__(self):
+            return self.now
+
+        def advance(self, seconds):
+            self.now += seconds
+
+        async def sleep(self, seconds):
+            self.now += seconds
+            await asyncio.sleep(0)
+
+
+    clock = FakeClock()
+
+
+    @timed("render", clock=clock)
+    def render(page):
+        """Render a page."""
+        clock.advance(0.25)
+        return f"<html>{page}</html>"
+
+
+    @timed("publish", clock=clock)
+    async def publish(page):
+        await clock.sleep(1.5)
+        return f"/{page}"
+
+
+    @timed("upload", clock=clock)
+    async def upload(page):
+        await clock.sleep(0.5)
+        raise ConnectionError("503")
+
+
+    print(render("home"))
+    print(asyncio.run(publish("home")))
+    try:
+        asyncio.run(upload("home"))
+    except ConnectionError as exc:
+        print("raised:", exc)
+    print(render.__name__, render.__doc__)
+    print(inspect.iscoroutinefunction(render), inspect.iscoroutinefunction(publish))
+  expected: |
+    render: ok in 0.25s
+    <html>home</html>
+    publish: ok in 1.50s
+    /home
+    upload: failed in 0.50s
+    raised: 503
+    render Render a page.
+    False True
+  hints:
+    - "Розгалуження робиться один раз, у `decorator(fn)`: `inspect.iscoroutinefunction(fn)` вирішує, який wrapper повернути, `async def` чи звичайний. Синхронний wrapper над корутиною зупинить годинник до початку тіла."
+    - "Щоб не дублювати логіку друку, винесіть її в маленьку функцію `report(start, ok)`. Статус зручно рахувати через `try/except/else` або прапорець і `finally`."
+    - |
+      ```python
+      @functools.wraps(fn)
+      async def async_wrapper(*args, **kwargs):
+          start = clock()
+          try:
+              result = await fn(*args, **kwargs)
+          except BaseException:
+              report(start, "failed")
+              raise
+          report(start, "ok")
+          return result
+      ```
+  solution: |
+    import functools
+    import inspect
+
+
+    def timed(stage, *, clock):
+        def report(start, status):
+            print(f"{stage}: {status} in {clock() - start:.2f}s")
+
+        def decorator(fn):
+            if inspect.iscoroutinefunction(fn):
+                @functools.wraps(fn)
+                async def async_wrapper(*args, **kwargs):
+                    start = clock()
+                    try:
+                        result = await fn(*args, **kwargs)
+                    except BaseException:
+                        report(start, "failed")
+                        raise
+                    report(start, "ok")
+                    return result
+                return async_wrapper
+
+            @functools.wraps(fn)
+            def wrapper(*args, **kwargs):
+                start = clock()
+                try:
+                    result = fn(*args, **kwargs)
+                except BaseException:
+                    report(start, "failed")
+                    raise
+                report(start, "ok")
+                return result
+            return wrapper
+        return decorator
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "Модуль декораторів пайплайну в капстоуні"
+  prompt: |
+    У репозиторії капстоуну створіть `src/formbuilder/decorators.py` з трьома типізованими
+    декораторами для пайплайну генерації і тести до них у `tests/test_decorators.py`.
+
+    - `register(kind)` для рендерерів: ключ `ElementType` (StrEnum, з m4-l06; якщо його ще немає
+      в `formbuilder`, створіть з двома значеннями `INPUT` і `TEXTAREA`), значення функція
+      `Callable[[dict[str, Any]], str]`; повторна реєстрація кидає `ValueError`.
+    - `timed(stage, *, clock=time.perf_counter)` для async-етапів пайплайну: логує через
+      `logging.getLogger("formbuilder.pipeline")` рядок з назвою етапу й тривалістю, і в разі
+      успіху, і в разі винятку. Повна конфігурація логування буде в m5-l09, тут лише `getLogger`.
+    - `retry(times, delay, *, sleep=asyncio.sleep, exceptions=(ConnectionError,))` для публікації:
+      експоненційна затримка `delay * 2 ** (attempt - 1)` між спробами, після останньої спроби
+      виняток летить назовні.
+
+    Усі три типізовані через `ParamSpec`/`TypeVar` (синтаксис 3.12 `[**P, R]`), без `Any` у
+    сигнатурах декорованих функцій. Тести не чекають реальних секунд: годинник і `sleep`
+    підставляються фейкові, як у прикладі з уроку.
+  checklist:
+    - "`reveal_type` на декорованій функції під `mypy --strict` показує оригінальну сигнатуру, а не `(*Any, **Any)`"
+    - "Тест на `retry`: функція, що падає двічі, повертає результат з третьої спроби, а фейковий `sleep` отримав паузи `[delay, 2 * delay]`"
+    - "Тест на `retry`: виняток не з `exceptions` не повторюється, функцію викликано один раз"
+    - "Тест на `timed`: через `caplog` (m3-l03) видно запис з назвою етапу й тривалістю з фейкового годинника, і для успіху, і для винятку"
+    - "Тест на `register`: дублікат кидає `ValueError`, декорована функція лишається викликаною напряму"
+    - "`inspect.iscoroutinefunction` на результаті `timed` і `retry` повертає `True`"
+  verify: "cd capstone && uv run pytest tests/test_decorators.py -q && uv run mypy --strict src/formbuilder/decorators.py"

@@ -1,0 +1,393 @@
+- id: t1
+  type: code
+  title: "Мінімум і максимум одним кортежем"
+  prompt: |
+    Напишіть `bounds(values)`, яка повертає кортеж `(найменше, найбільше)` для непорожнього списку
+    і `None` для порожнього. Анотації параметра й результату обов'язкові.
+
+    ```python
+    bounds([3, 1, 4, 1, 5])    # (1, 5)
+    low, high = bounds([10])   # low == 10, high == 10
+    bounds([])                 # None
+    ```
+  starter: |
+    def bounds(values: list[int]) -> tuple[int, int] | None:
+        ...
+  harness: |
+    print(bounds([3, 1, 4, 1, 5]))
+    low, high = bounds([10])
+    print(low, high)
+    print(bounds([-2, -7]))
+    print(bounds([]))
+  expected: |
+    (1, 5)
+    10 10
+    (-7, -2)
+    None
+  hints:
+    - "Порожній список перевірте першим і поверніть None явно; для решти кортеж утворює кома в return."
+    - "if not values: return None, а далі return min(values), max(values)."
+  solution: |
+    def bounds(values: list[int]) -> tuple[int, int] | None:
+        if not values:
+            return None
+        return min(values), max(values)
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Виправити mutable default"
+  prompt: |
+    Функція `add_error` додає повідомлення до списку помилок і повертає цей список. Якщо список
+    не передали, вона має почати новий. У стартовому коді класична пастка: помилки накопичуються
+    між незалежними викликами. Виправте сигнатуру й тіло.
+
+    Вимоги:
+    - кожен виклик без `errors` повертає новий список;
+    - переданий список (навіть порожній) доповнюється на місці й повертається той самий об'єкт;
+    - значенням за замовчуванням лишається `None`.
+
+    ```python
+    add_error("email: required")        # ['email: required']
+    add_error("age: must be a number")  # ['age: must be a number'], а не два елементи
+    ```
+  starter: |
+    def add_error(message: str, errors: list[str] = []) -> list[str]:
+        errors.append(message)
+        return errors
+  harness: |
+    print(add_error("email: required"))
+    print(add_error("age: must be a number"))
+    mine = ["page 1: invalid"]
+    result = add_error("phone: too short", mine)
+    print(result is mine, mine)
+    empty: list[str] = []
+    add_error("note: too long", empty)
+    print(empty)
+    print(add_error.__defaults__)
+  expected: |
+    ['email: required']
+    ['age: must be a number']
+    True ['page 1: invalid', 'phone: too short']
+    ['note: too long']
+    (None,)
+  hints:
+    - "Значення за замовчуванням обчислюється один раз при def. Безпечне значення за замовчуванням має бути незмінним, а новий список створюватися при кожному виклику."
+    - "errors: list[str] | None = None, а в тілі перевірка саме через is None: варіант errors or [] підмінить переданий порожній список."
+  solution: |
+    def add_error(message: str, errors: list[str] | None = None) -> list[str]:
+        if errors is None:
+            errors = []
+        errors.append(message)
+        return errors
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "classnames на *args і **kwargs"
+  prompt: |
+    Перекладіть на Python відому JS-утиліту `classnames`. `class_names(*names, **flags)` повертає рядок
+    класів через пробіл:
+    - позиційні аргументи це імена класів, вони йдуть першими в порядку передачі; порожні рядки й `None` пропускаються;
+    - іменовані аргументи це умовні класи: ім'я аргументу потрапляє в результат, якщо значення truthy;
+      порядок відповідає порядку у виклику.
+
+    Класи з дефісом не можна написати як іменований аргумент, тому їх передають розгортанням словника.
+
+    ```python
+    class_names("btn", "btn-primary")                         # 'btn btn-primary'
+    class_names("btn", disabled=True, active=False)           # 'btn disabled'
+    class_names("field", **{"is-invalid": True})              # 'field is-invalid'
+    class_names()                                             # ''
+    ```
+  starter: |
+    def class_names(*names: str | None, **flags: object) -> str:
+        ...
+  harness: |
+    print(class_names("btn", "btn-primary"))
+    print(class_names("btn", disabled=True, active=False))
+    print(class_names("btn", "", None, loading=1, hidden=0))
+    print(repr(class_names()))
+    print(class_names(*["field", "field-email"], **{"is-invalid": True, "is-dirty": False}))
+    print(class_names(zeta=True, alpha=True))
+  expected: |
+    btn btn-primary
+    btn disabled
+    btn loading
+    ''
+    field field-email is-invalid
+    zeta alpha
+  hints:
+    - "names усередині функції це кортеж, flags словник у порядку виклику. Зберіть один список класів і з'єднайте його через ' '.join."
+    - "for name in names: if name: classes.append(name); далі for name, enabled in flags.items(): if enabled: classes.append(name)."
+  solution: |
+    def class_names(*names: str | None, **flags: object) -> str:
+        classes = []
+        for name in names:
+            if name:
+                classes.append(name)
+        for name, enabled in flags.items():
+            if enabled:
+                classes.append(name)
+        return " ".join(classes)
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Сигнатура з / і *"
+  prompt: |
+    Напишіть `make_field` з такою сигнатурою:
+    - `field_id` лише позиційно;
+    - `field_type` позиційно або за ім'ям, за замовчуванням `"text"`;
+    - `required` і `label` лише за ім'ям, за замовчуванням `False` і `None`.
+
+    Функція повертає словник `{"id", "type", "required", "label"}`. Якщо `label` не передали,
+    він будується з `field_id`: підкреслення стають пробілами, перша літера велика (`str.capitalize`).
+
+    ```python
+    make_field("first_name", required=True)
+    # {'id': 'first_name', 'type': 'text', 'required': True, 'label': 'First name'}
+    make_field("email", "email", True)   # TypeError: required лише за ім'ям
+    make_field(field_id="email")         # TypeError: field_id лише позиційно
+    ```
+  starter: |
+    def make_field(field_id: str, field_type: str = "text", required: bool = False, label: str | None = None) -> dict:
+        # Розставте / і * так, щоб виконувались вимоги
+        ...
+  harness: |
+    def outcome(fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except TypeError:
+            return "TypeError"
+
+    print(make_field("email"))
+    print(make_field("first_name", required=True))
+    print(make_field("age", field_type="number", label="Your age"))
+    print(outcome(make_field, field_id="email"))
+    print(outcome(make_field, "email", "email", True))
+    print(outcome(make_field, "email", "text", label="Email", extra=1))
+    print(make_field.__defaults__, make_field.__kwdefaults__)
+  expected: |
+    {'id': 'email', 'type': 'text', 'required': False, 'label': 'Email'}
+    {'id': 'first_name', 'type': 'text', 'required': True, 'label': 'First name'}
+    {'id': 'age', 'type': 'number', 'required': False, 'label': 'Your age'}
+    TypeError
+    TypeError
+    TypeError
+    ('text',) {'required': False, 'label': None}
+  hints:
+    - "Порядок у сигнатурі: позиційний-only, потім /, потім звичайний, потім *, потім keyword-only."
+    - "def make_field(field_id: str, /, field_type: str = \"text\", *, required: bool = False, label: str | None = None) -> dict; label is None перевіряйте явно."
+  solution: |
+    def make_field(
+        field_id: str,
+        /,
+        field_type: str = "text",
+        *,
+        required: bool = False,
+        label: str | None = None,
+    ) -> dict:
+        if label is None:
+            label = field_id.replace("_", " ").capitalize()
+        return {"id": field_id, "type": field_type, "required": required, "label": label}
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Трасування виклику"
+  prompt: |
+    Напишіть `trace(fn, *args, **kwargs)`, яка викликає `fn` з тими самими аргументами і повертає рядок
+    виду `"<ім'я>(<аргументи>) -> <результат>"`:
+    - ім'я береться з атрибута функції;
+    - позиційні аргументи друкуються через `repr`, потім іменовані як `ім'я=repr(значення)`, усе через `", "`;
+    - результат теж через `repr`.
+
+    Підступ: серед перевірок є функція з параметром, що називається `fn`. Виклик `trace(wrap, fn="y")`
+    має передати `fn="y"` у `wrap`, а не конфліктувати з першим параметром `trace`.
+
+    ```python
+    def add(a, b=0):
+        return a + b
+
+    trace(add, 2, b=5)   # 'add(2, b=5) -> 7'
+    trace(len, [1, 2])   # 'len([1, 2]) -> 2'
+    ```
+  starter: |
+    def trace(fn, *args, **kwargs) -> str:
+        ...
+  harness: |
+    def add(a: int, b: int = 0) -> int:
+        return a + b
+
+    def wrap(fn: str, *, prefix: str = "") -> str:
+        return prefix + fn
+
+    print(trace(add, 2, 3))
+    print(trace(add, 2, b=5))
+    print(trace(add, a=1))
+    print(trace(wrap, "x", prefix="> "))
+    print(trace(wrap, fn="y"))
+    print(trace(len, [1, 2]))
+  expected: |
+    add(2, 3) -> 5
+    add(2, b=5) -> 7
+    add(a=1) -> 1
+    wrap('x', prefix='> ') -> '> x'
+    wrap(fn='y') -> 'y'
+    len([1, 2]) -> 2
+  hints:
+    - "Виклик з тими самими аргументами це розгортання зібраного: fn(*args, **kwargs). Конфлікт імен з **kwargs знімає маркер / у сигнатурі."
+    - "def trace(fn, /, *args, **kwargs); parts = [repr(a) for a in args] + [f\"{k}={v!r}\" for k, v in kwargs.items()]; далі fn.__name__ і \", \".join(parts)."
+  solution: |
+    def trace(fn, /, *args, **kwargs) -> str:
+        result = fn(*args, **kwargs)
+        parts = [repr(arg) for arg in args]
+        for name, value in kwargs.items():
+            parts.append(f"{name}={value!r}")
+        return f"{fn.__name__}({', '.join(parts)}) -> {result!r}"
+  requires: []
+  runtime: browser
+
+- id: t6
+  type: code
+  title: "Збір id з дерева елементів"
+  prompt: |
+    Елемент форми це словник `{"id": str, "type": str, "children": [...]}`, ключ `children` необов'язковий.
+    Напишіть рекурсивну `collect_ids(element, *, types=None, found=None)`, яка повертає список `id`
+    усіх елементів дерева в порядку обходу: спершу сам елемент, потім його діти зліва направо.
+
+    - `types`: множина типів, які потрапляють у результат; `None` означає всі типи.
+    - `found`: список, у який дописуються `id`; якщо його не передали, створюється новий.
+      Функція повертає саме цей список.
+    - `types` і `found` передаються лише за ім'ям, обидва з `None` за замовчуванням.
+    - Повторний виклик з тими самими аргументами дає той самий результат: нічого не накопичується між викликами.
+
+    ```python
+    form = {"id": "root", "type": "form", "children": [{"id": "email", "type": "input"}]}
+    collect_ids(form)                    # ['root', 'email']
+    collect_ids(form, types={"input"})   # ['email']
+    ```
+  starter: |
+    def collect_ids(element: dict, *, types: set[str] | None = None, found: list[str] | None = None) -> list[str]:
+        ...
+  harness: |
+    form = {"id": "root", "type": "form", "children": [
+        {"id": "email", "type": "input"},
+        {"id": "contacts", "type": "fieldset", "children": [
+            {"id": "phone", "type": "input"},
+            {"id": "country", "type": "select"},
+        ]},
+    ]}
+    print(collect_ids(form))
+    print(collect_ids(form, types={"input"}))
+    print(collect_ids(form, types={"input"}))
+    print(collect_ids(form, types={"select", "fieldset"}))
+    acc = ["existing"]
+    result = collect_ids({"id": "solo", "type": "input"}, found=acc)
+    print(result is acc, acc)
+    print(collect_ids.__kwdefaults__)
+    try:
+        collect_ids(form, {"input"})
+    except TypeError:
+        print("TypeError")
+  expected: |
+    ['root', 'email', 'contacts', 'phone', 'country']
+    ['email', 'phone']
+    ['email', 'phone']
+    ['contacts', 'country']
+    True ['existing', 'solo']
+    {'types': None, 'found': None}
+    TypeError
+  hints:
+    - "Накопичувач створюється лише на верхньому рівні рекурсії, а всі рекурсивні виклики отримують той самий список. Зміни списку видно викликачу, бо передається той самий об'єкт."
+    - "if found is None: found = []; додайте element['id'], якщо types is None or element['type'] in types; для кожної дитини collect_ids(child, types=types, found=found); return found."
+  solution: |
+    def collect_ids(element: dict, *, types: set[str] | None = None, found: list[str] | None = None) -> list[str]:
+        if found is None:
+            found = []
+        if types is None or element["type"] in types:
+            found.append(element["id"])
+        for child in element.get("children", []):
+            collect_ids(child, types=types, found=found)
+        return found
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    def tag(name, seen=[]):
+        seen.append(name)
+        return len(seen)
+
+    tag("input")
+    print(tag("select"))
+    ```
+  options: ["1", "2", "TypeError", "None"]
+  answer: 1
+  explain: |
+    Список `seen` створено один раз при `def` і збережено в `tag.__defaults__`; обидва виклики додають у той самий
+    об'єкт, тож другий бачить два елементи. `1` це інтуїція JS, де `(seen = [])` обчислюється при кожному виклику.
+    `TypeError` спокушає думкою, що пропущений аргумент заборонений, але значення за замовчуванням робить його
+    необов'язковим. `None` було б, якби функція не мала `return`, а вона повертає `len(seen)`.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    def reset(items):
+        items = []
+
+    def clear(items):
+        items.clear()
+
+    a = [1]
+    b = [1]
+    reset(a)
+    clear(b)
+    print(a, b)
+    ```
+  options: ["[1] []", "[] []", "[1] [1]", "[] [1]"]
+  answer: 0
+  explain: |
+    Параметр прив'язаний до того самого об'єкта, що й аргумент. `items = []` у `reset` переприв'язує лише локальне ім'я,
+    список `a` не змінюється. `items.clear()` у `clear` мутує сам об'єкт, тому `b` стає порожнім. `[] []` це інтуїція
+    "передача за посиланням на змінну", як `ref` у C#, якої в Python немає. `[1] [1]` це інтуїція "передача копії".
+    `[] [1]` переплутало, яка з операцій мутує.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    fields = ["phone", "email"]
+    ordered = fields.sort()
+    print(ordered)
+    ```
+  options: ["['email', 'phone']", "None", "['phone', 'email']", "AttributeError"]
+  answer: 1
+  explain: |
+    `list.sort()` сортує на місці й повертає `None`, як усі методи, що мутують об'єкт. `['email', 'phone']` це звичка з JS,
+    де `arr.sort()` повертає той самий масив; тут відсортований список лежить у `fields`, а не в `ordered`.
+    `['phone', 'email']` припускає, що `sort` повернув би копію без змін. `AttributeError` ні: метод існує.
+    Для нового списку є `sorted(fields)`.
+
+- id: q4
+  type: quiz
+  question: |
+    Дано `def f(a, /, b, *, c): ...`. Який виклик не кидає `TypeError`?
+  options: ["f(1, 2, 3)", "f(a=1, b=2, c=3)", "f(1, b=2, c=3)", "f(1, 2)"]
+  answer: 2
+  explain: |
+    `a` до `/` лише позиційний, `b` будь-яким способом, `c` після `*` лише за ім'ям і обов'язковий, бо без значення
+    за замовчуванням. `f(1, b=2, c=3)` виконує всі три умови. `f(1, 2, 3)` передає `c` позиційно: "takes 2 positional
+    arguments but 3 were given". `f(a=1, b=2, c=3)` передає `a` за ім'ям, хоча він positional-only. `f(1, 2)`
+    пропускає `c`, і замість `undefined` виходить "missing 1 required keyword-only argument: 'c'".

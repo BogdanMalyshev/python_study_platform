@@ -1,0 +1,455 @@
+- id: q1
+  type: quiz
+  question: |
+    Що опиниться в stdout після запуску?
+    ```python
+    import asyncio
+
+    async def greet() -> None:
+        print("hello")
+
+    async def main() -> None:
+        greet()
+        print("main")
+
+    asyncio.run(main())
+    ```
+  options:
+    - "hello, потім main"
+    - "main, потім hello"
+    - "лише main; у stderr з'явиться RuntimeWarning про never awaited"
+    - "TypeError: корутину не можна викликати без await"
+  answer: 2
+  explain: |
+    `greet()` лише створює об'єкт корутини, тіло не виконується. У JS виклик async-функції
+    виконав би тіло до першого `await`, і `hello` надрукувалося б першим, звідси спокуса
+    варіанта 1. Варіант 2 це інтуїція "воно виконається пізніше, як мікрозадача": у Python
+    ніхто не поставив корутину в цикл, тож "пізніше" не настане. Варіант 4 невірний, бо
+    виклик цілком легальний, Python лише попереджає у stderr, коли об'єкт збирає GC.
+
+- id: q2
+  type: quiz
+  question: |
+    У якому порядку друкуються рядки?
+    ```python
+    import asyncio
+
+    async def child() -> None:
+        print("child")
+
+    async def main() -> None:
+        asyncio.create_task(child())
+        print("main 1")
+        await asyncio.sleep(0)
+        print("main 2")
+
+    asyncio.run(main())
+    ```
+  options:
+    - "child, main 1, main 2"
+    - "main 1, child, main 2"
+    - "main 1, main 2, child"
+    - "main 1, main 2; child не виконається, бо на задачу ніхто не чекав"
+  answer: 1
+  explain: |
+    `create_task` лише ставить перший крок `child` у чергу готових callback-ів і повертається,
+    тому `main 1` іде першим. `await asyncio.sleep(0)` віддає керування циклу, і той виконує
+    чергу по порядку: крок `child` (друкує `child`), потім продовження `main`. Варіант 1 це
+    JS-інтуїція, де тіло async-функції стартує синхронно при виклику. Варіант 3 переплутав
+    `sleep(0)` із `setTimeout(…, 0)`: у asyncio `sleep(0)` ставить продовження в ту саму
+    FIFO-чергу, після вже запланованого кроку `child`. Варіант 4: задача таки виконалась під
+    час `sleep(0)`; скасування "сиріт" відбувається лише коли `main` повертається.
+
+- id: t1
+  type: code
+  title: "gather замість послідовних await"
+  prompt: |
+    `fake_fetch(id, delay)` імітує запит до бекенду: спить `delay` секунд і додає в `log`
+    рядок `done <id>`. Напишіть `fetch_all(jobs)`, яка запускає всі `fake_fetch` одночасно
+    і повертає список результатів у порядку `jobs`, а не в порядку завершення.
+
+    ```python
+    results = await fetch_all([(1, 0.03), (2, 0.01), (3, 0.02)])
+    [r["id"] for r in results]   # [1, 2, 3]
+    log                          # ['done 2', 'done 3', 'done 1']: завершились за тривалістю
+    ```
+  starter: |
+    import asyncio
+
+    log: list[str] = []
+
+    async def fake_fetch(id: int, delay: float) -> dict:
+        await asyncio.sleep(delay)
+        log.append(f"done {id}")
+        return {"id": id, "delay": delay}
+
+    async def fetch_all(jobs: list[tuple[int, float]]) -> list[dict]:
+        ...
+  harness: |
+    async def main() -> None:
+        results = await fetch_all([(1, 0.03), (2, 0.01), (3, 0.02)])
+        print([r["id"] for r in results])
+        print(log)
+
+    asyncio.run(main())
+  expected: |
+    [1, 2, 3]
+    ['done 2', 'done 3', 'done 1']
+  hints:
+    - "Цикл з await всередині дасть ['done 1', 'done 2', 'done 3']: це послідовне виконання. Потрібен аналог Promise.all."
+    - "asyncio.gather приймає корутини через *args і повертає результати в порядку аргументів незалежно від порядку завершення."
+    - "return await asyncio.gather(*(fake_fetch(id, delay) for id, delay in jobs))"
+  solution: |
+    import asyncio
+
+    log: list[str] = []
+
+    async def fake_fetch(id: int, delay: float) -> dict:
+        await asyncio.sleep(delay)
+        log.append(f"done {id}")
+        return {"id": id, "delay": delay}
+
+    async def fetch_all(jobs: list[tuple[int, float]]) -> list[dict]:
+        return await asyncio.gather(*(fake_fetch(id, delay) for id, delay in jobs))
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    `fast_fail()` кидає `ValueError` через 10 мс, `slow_ok()` друкує `slow done` через 50 мс.
+    ```python
+    async def main() -> None:
+        try:
+            await asyncio.gather(slow_ok(), fast_fail())
+        except ValueError:
+            print("caught")
+        await asyncio.sleep(0.1)
+    ```
+    Що станеться зі `slow_ok` після того, як `fast_fail` впаде?
+  options:
+    - "Її скасують, `slow done` не надрукується, як було б із TaskGroup"
+    - "Вона продовжить працювати у фоні: спершу `caught`, потім `slow done`"
+    - "gather дочекається її завершення і лише тоді кине ValueError: спершу `slow done`, потім `caught`"
+    - "Виняток загубиться, gather поверне список із None замість результату"
+  answer: 1
+  explain: |
+    `gather` піднімає перший виняток негайно, але не скасовує решту задач: вони загорнуті в
+    Task і живуть у циклі далі, тому `caught` друкується через 10 мс, а `slow done` через 50.
+    Варіант 1 описує `TaskGroup`, а не `gather`. Варіант 3 це поведінка
+    `gather(..., return_exceptions=True)`, але й тоді винятку не буде, а буде список. Варіант 4
+    змішує два режими: без `return_exceptions` виняток кидається, а не кладеться в список.
+
+- id: t2
+  type: code
+  title: "allSettled через gather"
+  prompt: |
+    Напишіть `settle(aws)`: приймає список awaitable, запускає всі одночасно й повертає список
+    кортежів у порядку аргументів: `("ok", результат)` для успішних, `("err", "<ТипВинятку>: <повідомлення>")`
+    для тих, що впали. Жоден виняток не має вилетіти назовні, усі задачі мають дожити до кінця.
+
+    ```python
+    await settle([ok("a", 0.02), fail("bad config", 0.01), ok("c", 0.03)])
+    # [("ok", "a"), ("err", "ValueError: bad config"), ("ok", "c")]
+    ```
+  starter: |
+    import asyncio
+    from collections.abc import Awaitable
+
+    async def settle(aws: list[Awaitable]) -> list[tuple[str, object]]:
+        ...
+  harness: |
+    async def ok(value: str, delay: float) -> str:
+        await asyncio.sleep(delay)
+        return value
+
+    async def fail(msg: str, delay: float) -> str:
+        await asyncio.sleep(delay)
+        raise ValueError(msg)
+
+    async def main() -> None:
+        for status, value in await settle([ok("a", 0.02), fail("bad config", 0.01), ok("c", 0.03)]):
+            print(status, value)
+
+    asyncio.run(main())
+  expected: |
+    ok a
+    err ValueError: bad config
+    ok c
+  hints:
+    - "Потрібен режим gather, у якому винятки стають значеннями в списку, а не летять назовні."
+    - "gather(*aws, return_exceptions=True), а далі isinstance(r, BaseException) для кожного елемента."
+    - "('err', f'{type(r).__name__}: {r}') if isinstance(r, BaseException) else ('ok', r)"
+  solution: |
+    import asyncio
+    from collections.abc import Awaitable
+
+    async def settle(aws: list[Awaitable]) -> list[tuple[str, object]]:
+        results = await asyncio.gather(*aws, return_exceptions=True)
+        return [
+            ("err", f"{type(r).__name__}: {r}") if isinstance(r, BaseException) else ("ok", r)
+            for r in results
+        ]
+  requires: []
+  runtime: browser
+
+- id: q4
+  type: quiz
+  question: |
+    ```python
+    async def job() -> str:
+        try:
+            await asyncio.sleep(1)
+        except Exception:
+            print("error")
+            return "fallback"
+        return "done"
+
+    async def main() -> None:
+        task = asyncio.create_task(job())
+        await asyncio.sleep(0.01)
+        task.cancel()
+        print(await task)
+    ```
+    Що надрукує `main`?
+  options:
+    - "error, потім fallback: except Exception зловив скасування"
+    - "нічого з job; await task кине asyncio.CancelledError у main"
+    - "done: cancel() не діє на задачу, яка стоїть на sleep"
+    - "main зависне, бо задача ніколи не завершиться"
+  answer: 1
+  explain: |
+    `CancelledError` успадковується від `BaseException`, тому `except Exception` його не ловить,
+    `error` не друкується, задача завершується як скасована, і `await task` піднімає
+    `CancelledError` у `main`. Варіант 1 був би правдою для `except BaseException`, і це саме той
+    код, який робить задачу нескасовуваною. Варіант 3 плутає з блокуючим `time.sleep`: на
+    `await asyncio.sleep` скасування працює. Варіант 4 описує задачу, яка ковтає
+    `CancelledError` у нескінченному циклі; тут циклу немає.
+
+- id: t3
+  type: code
+  title: "Таймаут зі значенням за замовчуванням"
+  prompt: |
+    Напишіть `with_timeout(coro, seconds, default)`: виконує корутину, і якщо вона не встигла за
+    `seconds`, повертає `default`. Корутина, яка не встигла, має бути скасована, тобто її
+    `finally` має відпрацювати до того, як ви повернете `default`.
+
+    ```python
+    await with_timeout(render("fast", 0.01), 0.05, "fallback")   # "<html>fast</html>"
+    await with_timeout(render("slow", 0.2), 0.05, "fallback")    # "fallback", log містить "slow cleanup"
+    ```
+  starter: |
+    import asyncio
+    from collections.abc import Coroutine
+    from typing import TypeVar
+
+    T = TypeVar("T")
+
+    async def with_timeout(coro: Coroutine[object, object, T], seconds: float, default: T) -> T:
+        ...
+  harness: |
+    log: list[str] = []
+
+    async def render(name: str, delay: float) -> str:
+        try:
+            await asyncio.sleep(delay)
+            return f"<html>{name}</html>"
+        finally:
+            log.append(f"{name} cleanup")
+
+    async def main() -> None:
+        print(await with_timeout(render("fast", 0.01), 0.05, "fallback"))
+        print(await with_timeout(render("slow", 0.2), 0.05, "fallback"))
+        print(log)
+
+    asyncio.run(main())
+  expected: |
+    <html>fast</html>
+    fallback
+    ['fast cleanup', 'slow cleanup']
+  hints:
+    - "Таймаут в asyncio це контекстний менеджер, який по закінченню часу скасовує поточну задачу і перетворює скасування на TimeoutError."
+    - "async with asyncio.timeout(seconds): return await coro, і зовні except TimeoutError. Альтернатива: asyncio.wait_for(coro, timeout=seconds)."
+    - "try: async with asyncio.timeout(seconds): return await coro / except TimeoutError: return default"
+  solution: |
+    import asyncio
+    from collections.abc import Coroutine
+    from typing import TypeVar
+
+    T = TypeVar("T")
+
+    async def with_timeout(coro: Coroutine[object, object, T], seconds: float, default: T) -> T:
+        try:
+            async with asyncio.timeout(seconds):
+                return await coro
+        except TimeoutError:
+            return default
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "map з лімітом паралелізму (p-limit)"
+  prompt: |
+    Напишіть `map_limited(items, fn, limit)`: викликає асинхронну `fn` для кожного елемента,
+    тримаючи не більше `limit` викликів одночасно, і повертає результати в порядку `items`.
+    `render` у стартері рахує, скільки викликів активні одночасно, і запам'ятовує пік.
+
+    ```python
+    await map_limited([("a", 0.03), ("b", 0.01), ("c", 0.02), ("d", 0.01), ("e", 0.01)], render, 2)
+    # ['A', 'B', 'C', 'D', 'E'], peak == 2
+    ```
+  starter: |
+    import asyncio
+    from collections.abc import Awaitable, Callable
+
+    active = 0
+    peak = 0
+
+    async def render(item: tuple[str, float]) -> str:
+        global active, peak
+        name, delay = item
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(delay)
+        active -= 1
+        return name.upper()
+
+    async def map_limited[T, R](items: list[T], fn: Callable[[T], Awaitable[R]], limit: int) -> list[R]:
+        ...
+  harness: |
+    async def main() -> None:
+        items = [("a", 0.03), ("b", 0.01), ("c", 0.02), ("d", 0.01), ("e", 0.01)]
+        print(await map_limited(items, render, 2))
+        print("peak:", peak)
+
+    asyncio.run(main())
+  expected: |
+    ['A', 'B', 'C', 'D', 'E']
+    peak: 2
+  hints:
+    - "Semaphore(limit) пропускає не більше limit корутин у свій блок async with; решта чекають на вході."
+    - "Внутрішня корутина guarded(item): async with sem: return await fn(item). Далі gather по всіх items, він збереже порядок."
+    - "sem = asyncio.Semaphore(limit); async def guarded(item): async with sem: return await fn(item); return await asyncio.gather(*(guarded(i) for i in items))"
+  solution: |
+    import asyncio
+    from collections.abc import Awaitable, Callable
+
+    active = 0
+    peak = 0
+
+    async def render(item: tuple[str, float]) -> str:
+        global active, peak
+        name, delay = item
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(delay)
+        active -= 1
+        return name.upper()
+
+    async def map_limited[T, R](items: list[T], fn: Callable[[T], Awaitable[R]], limit: int) -> list[R]:
+        sem = asyncio.Semaphore(limit)
+
+        async def guarded(item: T) -> R:
+            async with sem:
+                return await fn(item)
+
+        return await asyncio.gather(*(guarded(item) for item in items))
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Пул воркерів із graceful shutdown"
+  prompt: |
+    Напишіть `run_pool(jobs, workers)`: кладе всі `jobs` в `asyncio.Queue`, запускає `workers`
+    воркерів, кожен у циклі бере задачу через `queue.get()`, викликає `render(job, delay)` і
+    складає результат у словник `{job: html}`. Коли черга оброблена (`queue.join()`), воркери
+    треба скасувати і дочекатись їх зупинки. Воркер при скасуванні додає в `log` рядок
+    `<name> stopped`, де `name` це `w0`, `w1`, ..., і кидає `CancelledError` далі.
+    Функція повертає словник результатів. Усі задачі в черзі мають бути оброблені, усі воркери
+    зупинені, і `run_pool` не має підняти виняток.
+
+    ```python
+    await run_pool([("landing", 0.03), ("signup", 0.01)], workers=2)
+    # {"landing": "landing.html", "signup": "signup.html"}; log == ["w0 stopped", "w1 stopped"]
+    ```
+  starter: |
+    import asyncio
+
+    log: list[str] = []
+
+    async def render(job: str, delay: float) -> str:
+        await asyncio.sleep(delay)
+        return f"{job}.html"
+
+    async def run_pool(jobs: list[tuple[str, float]], workers: int) -> dict[str, str]:
+        ...
+  harness: |
+    async def main() -> None:
+        jobs = [("landing", 0.03), ("signup", 0.01), ("survey", 0.02), ("quiz", 0.01), ("contact", 0.01)]
+        results = await run_pool(jobs, workers=2)
+        print(sorted(results.items()))
+        print(sorted(log))
+
+    asyncio.run(main())
+  expected: |
+    [('contact', 'contact.html'), ('landing', 'landing.html'), ('quiz', 'quiz.html'), ('signup', 'signup.html'), ('survey', 'survey.html')]
+    ['w0 stopped', 'w1 stopped']
+  hints:
+    - "Три частини: наповнити чергу через put_nowait; воркер з while True, queue.get(), task_done() у finally, except CancelledError з raise; після queue.join() викликати cancel() на кожному воркері."
+    - "Воркерів зручно запускати всередині async with asyncio.TaskGroup(): група дочекається їх зупинки після cancel() і не вважатиме скасування помилкою."
+    - "async with asyncio.TaskGroup() as tg: tasks = [tg.create_task(worker(f'w{i}')) for i in range(workers)]; await queue.join(); for t in tasks: t.cancel()"
+  solution: |
+    import asyncio
+
+    log: list[str] = []
+
+    async def render(job: str, delay: float) -> str:
+        await asyncio.sleep(delay)
+        return f"{job}.html"
+
+    async def run_pool(jobs: list[tuple[str, float]], workers: int) -> dict[str, str]:
+        queue: asyncio.Queue[tuple[str, float]] = asyncio.Queue()
+        results: dict[str, str] = {}
+        for job in jobs:
+            queue.put_nowait(job)
+
+        async def worker(name: str) -> None:
+            try:
+                while True:
+                    job, delay = await queue.get()
+                    try:
+                        results[job] = await render(job, delay)
+                    finally:
+                        queue.task_done()
+            except asyncio.CancelledError:
+                log.append(f"{name} stopped")
+                raise
+
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(worker(f"w{i}")) for i in range(workers)]
+            await queue.join()
+            for t in tasks:
+                t.cancel()
+        return results
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "Воркер генерації для капстоуну"
+  prompt: |
+    У репозиторії капстоуну додайте модуль `src/formbuilder/worker.py` зі скелетом воркера генерації:
+    `asyncio.Queue[GenerationJob]` (`GenerationJob` з `formbuilder.jobs`, m4-l01), функція
+    `run_workers(queue, n, render)` запускає `n` воркерів у `TaskGroup`, кожен бере задачу з черги, викликає `render` під `asyncio.timeout`, пише результат
+    у `job.result` або `job.error`, завжди робить `task_done()`. Функція `shutdown(tasks)` скасовує
+    воркерів і чекає їх зупинки. Рендер поки імітуйте через `asyncio.sleep`; справжній
+    Jinja2/subprocess з'явиться в модулях 6–7, а виклик із FastAPI в m7-l03.
+  checklist:
+    - "`render`, який кидає виняток, не кладе воркер: помилка потрапляє в `job.error`, воркер бере наступну задачу"
+    - "`render`, який перевищив таймаут, позначається як `job.error = 'timeout'`, його `finally` відпрацьовує"
+    - "`shutdown` зупиняє воркерів, які стоять на порожній черзі, без зависання і без винятку назовні"
+    - "`CancelledError` ніде не ковтається: у воркері він лише логується і кидається далі"
+    - "Тести на всі чотири пункти через pytest із `asyncio.run` у тестах або `pytest-asyncio`"
+  verify: "cd capstone && uv run pytest tests/test_worker.py -q"

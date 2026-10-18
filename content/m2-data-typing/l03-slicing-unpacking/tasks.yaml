@@ -1,0 +1,336 @@
+- id: t1
+  type: code
+  title: "Сторінка списку через зріз"
+  prompt: |
+    Напишіть `get_page(items, page, page_size)`, яка повертає елементи сторінки номер `page`
+    (нумерація з 1) по `page_size` елементів. Остання сторінка може бути коротшою, сторінка за межами
+    списку порожня. Тип результату той самий, що в `items`: для кортежу кортеж.
+
+    Номер сторінки менший за 1 це теж порожній результат. Перевірте це явно: від'ємні межі зрізу
+    рахуються з кінця, і `page=-1` без перевірки поверне шматок з середини списку.
+
+    ```python
+    get_page(["a", "b", "c", "d", "e"], 2, 2)   # ['c', 'd']
+    get_page(["a", "b", "c", "d", "e"], 9, 2)   # []
+    get_page(["a", "b", "c"], 0, 2)             # []
+    ```
+  starter: |
+    def get_page(items: list, page: int, page_size: int) -> list:
+        ...
+  harness: |
+    items = ["a", "b", "c", "d", "e", "f", "g"]
+    print(get_page(items, 1, 3))
+    print(get_page(items, 3, 3))
+    print(get_page(items, 4, 3))
+    print(get_page(items, 0, 3))
+    print(get_page(items, -1, 3))
+    print(get_page([], 1, 5))
+    print(get_page(("x", "y", "z"), 2, 2))
+  expected: |
+    ['a', 'b', 'c']
+    ['g']
+    []
+    []
+    []
+    []
+    ('z',)
+  hints:
+    - "Початок сторінки це (page - 1) * page_size, кінець на page_size далі. Зріз за межами не падає, тож перевіряти довжину не треба."
+    - "if page < 1: return []; start = (page - 1) * page_size; return items[start:start + page_size]"
+  solution: |
+    def get_page(items: list, page: int, page_size: int) -> list:
+        if page < 1:
+            return []
+        start = (page - 1) * page_size
+        return items[start:start + page_size]
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "splice з JS через присвоєння в зріз"
+  prompt: |
+    Напишіть `splice(items, start, delete_count=None, *new_items)` з поведінкою `Array.prototype.splice`:
+
+    - змінює `items` на місці (усі посилання на цей список бачать зміну) і повертає новий список видалених елементів;
+    - від'ємний `start` рахується з кінця, `start` за межами обрізається до меж списку;
+    - `delete_count=None` видаляє все від `start` до кінця, від'ємний `delete_count` означає 0;
+    - `new_items` вставляються на місце видалених.
+
+    Нормалізувати `start` вручну через `if` не треба: це рівно те, що робить `slice(...).indices(len)`.
+
+    ```python
+    fields = ["a", "b", "c", "d"]
+    splice(fields, 1, 2, "X")   # ['b', 'c'], fields == ['a', 'X', 'd']
+    splice(fields, -1, 1)       # ['d'],      fields == ['a', 'X']
+    ```
+  starter: |
+    def splice(items: list, start: int, delete_count: int | None = None, *new_items) -> list:
+        ...
+  harness: |
+    fields = ["a", "b", "c", "d", "e"]
+    alias = fields
+    print(splice(fields, 1, 2, "X", "Y", "Z"), fields)
+    print(splice(fields, -2, 1), fields)
+    print(splice(fields, 100, 0, "end"), fields)
+    print(splice(fields, -100, 1, "start"), fields)
+    print(splice(fields, 2, -5, "mid"), fields)
+    print(splice(fields, 4), fields)
+    print(alias is fields, alias)
+  expected: |
+    ['b', 'c'] ['a', 'X', 'Y', 'Z', 'd', 'e']
+    ['d'] ['a', 'X', 'Y', 'Z', 'e']
+    [] ['a', 'X', 'Y', 'Z', 'e', 'end']
+    ['a'] ['start', 'X', 'Y', 'Z', 'e', 'end']
+    [] ['start', 'X', 'mid', 'Y', 'Z', 'e', 'end']
+    ['Z', 'e', 'end'] ['start', 'X', 'mid', 'Y']
+    True ['start', 'X', 'mid', 'Y']
+  hints:
+    - "Спершу зведіть start до звичайного індексу в межах [0, len], потім прочитайте видалене зрізом і запишіть new_items у той самий зріз."
+    - "start = slice(start, None).indices(len(items))[0]; stop це len(items) для None, інакше start + max(delete_count, 0); removed = items[start:stop]; items[start:stop] = new_items."
+  solution: |
+    def splice(items: list, start: int, delete_count: int | None = None, *new_items) -> list:
+        start = slice(start, None).indices(len(items))[0]
+        if delete_count is None:
+            stop = len(items)
+        else:
+            stop = start + max(delete_count, 0)
+        removed = items[start:stop]
+        items[start:stop] = new_items
+        return removed
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Скорочені хлібні крихти через *rest"
+  prompt: |
+    Напишіть `compact_path(parts)`, яка збирає хлібні крихти з частин шляху через `" / "`.
+    Якщо частин більше трьох, лишаються перша і дві останні, а середина замінюється на `...(N)`,
+    де `N` кількість схованих частин. `parts` може бути списком або кортежем.
+
+    Індекси й зрізи для довгого шляху не використовуйте: одне розпакування з зірочкою посередині.
+
+    ```python
+    compact_path(["Home", "Forms"])                                # 'Home / Forms'
+    compact_path(["Home", "Forms", "Signup", "Step 2", "Email"])   # 'Home / ...(2) / Step 2 / Email'
+    ```
+  starter: |
+    def compact_path(parts: list[str] | tuple[str, ...]) -> str:
+        ...
+  harness: |
+    print(repr(compact_path([])))
+    print(compact_path(["Home"]))
+    print(compact_path(["Home", "Forms", "Signup"]))
+    print(compact_path(["Home", "Forms", "Signup", "Step 2"]))
+    print(compact_path(("Home", "Forms", "Signup", "Step 2", "Fields", "Email")))
+  expected: |
+    ''
+    Home
+    Home / Forms / Signup
+    Home / ...(1) / Signup / Step 2
+    Home / ...(3) / Fields / Email
+  hints:
+    - "Короткі шляхи просто склеюються через join. Для довгих потрібні три іменовані частини і все, що між ними."
+    - "first, *hidden, prev, last = parts; f\"{first} / ...({len(hidden)}) / {prev} / {last}\""
+  solution: |
+    def compact_path(parts: list[str] | tuple[str, ...]) -> str:
+        if len(parts) <= 3:
+            return " / ".join(parts)
+        first, *hidden, prev, last = parts
+        return f"{first} / ...({len(hidden)}) / {prev} / {last}"
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Стиль елемента: тема, тип і overrides"
+  prompt: |
+    Тема форми має базовий стиль `theme["base"]` і стилі за типом елемента (`theme["button"]`, `theme["input"]`, ...).
+    Елемент може мати власний `"style"`. Напишіть `resolve_style(theme, element)`, яка зливає три рівні:
+    база, потім стиль типу (якщо є), потім стиль елемента (якщо є); пізніший рівень перемагає.
+
+    Значення `None` у будь-якому рівні означає "прибрати ключ": у результаті такого ключа немає.
+    Тема не змінюється, результат це новий словник.
+
+    ```python
+    theme = {"base": {"color": "black", "size": 14}, "button": {"color": "white"}}
+    resolve_style(theme, {"type": "button"})                              # {'color': 'white', 'size': 14}
+    resolve_style(theme, {"type": "text", "style": {"size": None}})       # {'color': 'black'}
+    ```
+  starter: |
+    def resolve_style(theme: dict, element: dict) -> dict:
+        ...
+  harness: |
+    theme = {
+        "base": {"color": "black", "font": "Inter", "size": 14},
+        "button": {"color": "white", "background": "blue"},
+        "input": {"border": "1px solid gray"},
+    }
+    print(resolve_style(theme, {"id": "title", "type": "text"}))
+    print(resolve_style(theme, {"id": "ok", "type": "button"}))
+    print(resolve_style(theme, {"id": "email", "type": "input", "style": {"size": 16, "border": None}}))
+    print(resolve_style(theme, {"id": "cta", "type": "button", "style": {"background": "red", "font": None}}))
+    print(theme["base"], theme["input"])
+  expected: |
+    {'color': 'black', 'font': 'Inter', 'size': 14}
+    {'color': 'white', 'font': 'Inter', 'size': 14, 'background': 'blue'}
+    {'color': 'black', 'font': 'Inter', 'size': 16}
+    {'color': 'white', 'size': 14, 'background': 'red'}
+    {'color': 'black', 'font': 'Inter', 'size': 14} {'border': '1px solid gray'}
+  hints:
+    - "Три рівні зливаються одним літералом словника з трьома **; відсутній рівень замінюється порожнім словником через .get."
+    - "merged = {**theme[\"base\"], **theme.get(element[\"type\"], {}), **element.get(\"style\", {})}; далі comprehension, що відкидає value is None."
+  solution: |
+    def resolve_style(theme: dict, element: dict) -> dict:
+        merged = {
+            **theme["base"],
+            **theme.get(element["type"], {}),
+            **element.get("style", {}),
+        }
+        return {key: value for key, value in merged.items() if value is not None}
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Сторінки форми: перший екран, пагінація, стилі"
+  prompt: |
+    Напишіть `build_pages(elements, theme, first_screen, page_size)`, яка розкладає елементи форми по сторінках:
+
+    - сторінка 1 це перші `first_screen` елементів;
+    - решта йде сторінками по `page_size`, остання може бути коротшою;
+    - порожніх сторінок немає: якщо `first_screen == 0`, першою стає перша сторінка решти;
+    - кожна сторінка це `{"page": N, "elements": [...]}`, нумерація з 1;
+    - кожен елемент у результаті це копія вхідного з ключем `"style"`, де тема злита з власним `"style"` елемента
+      (власний перемагає).
+
+    Вхідні `elements` і `theme` не змінюються: харнес перевіряє, що в першого елемента не з'явився `"style"`.
+
+    ```python
+    theme = {"color": "black"}
+    elements = [{"id": "a"}, {"id": "b", "style": {"color": "red"}}, {"id": "c"}]
+    build_pages(elements, theme, 1, 5)
+    # [{'page': 1, 'elements': [{'id': 'a', 'style': {'color': 'black'}}]},
+    #  {'page': 2, 'elements': [{'id': 'b', 'style': {'color': 'red'}}, {'id': 'c', 'style': {'color': 'black'}}]}]
+    ```
+  starter: |
+    def build_pages(elements: list[dict], theme: dict, first_screen: int, page_size: int) -> list[dict]:
+        ...
+  harness: |
+    theme = {"color": "black", "size": 14}
+    elements = [
+        {"id": "hero", "type": "block"},
+        {"id": "email", "type": "input", "style": {"color": "red"}},
+        {"id": "phone", "type": "input"},
+        {"id": "age", "type": "input", "style": {"size": 12}},
+        {"id": "note", "type": "text"},
+        {"id": "submit", "type": "button"},
+    ]
+    for page in build_pages(elements, theme, 2, 3):
+        print(page["page"], [(e["id"], e["style"]["color"], e["style"]["size"]) for e in page["elements"]])
+    for page in build_pages(elements, theme, 0, 4):
+        print(page["page"], [e["id"] for e in page["elements"]])
+    for page in build_pages(elements, theme, 10, 2):
+        print(page["page"], [e["id"] for e in page["elements"]])
+    print(build_pages([], theme, 2, 3))
+    print(build_pages(elements, theme, 1, 5)[0]["elements"][0])
+    print(elements[0], elements[1])
+    print(theme)
+  expected: |
+    1 [('hero', 'black', 14), ('email', 'red', 14)]
+    2 [('phone', 'black', 14), ('age', 'black', 12), ('note', 'black', 14)]
+    3 [('submit', 'black', 14)]
+    1 ['hero', 'email', 'phone', 'age']
+    2 ['note', 'submit']
+    1 ['hero', 'email', 'phone', 'age', 'note', 'submit']
+    []
+    {'id': 'hero', 'type': 'block', 'style': {'color': 'black', 'size': 14}}
+    {'id': 'hero', 'type': 'block'} {'id': 'email', 'type': 'input', 'style': {'color': 'red'}}
+    {'color': 'black', 'size': 14}
+  hints:
+    - "Розріжте список двічі: голова до first_screen і хвіст після; хвіст поріжте на шматки по page_size через range з кроком. Порожню голову не додавайте."
+    - "Новий елемент це {**el, \"style\": {**theme, **el.get(\"style\", {})}}: мутації немає ні в елементі, ні в темі."
+    - "head, tail = elements[:first_screen], elements[first_screen:]; chunks = ([head] if head else []) + [tail[i:i + page_size] for i in range(0, len(tail), page_size)]; далі enumerate(chunks, start=1)."
+  solution: |
+    def build_pages(elements: list[dict], theme: dict, first_screen: int, page_size: int) -> list[dict]:
+        head, tail = elements[:first_screen], elements[first_screen:]
+        chunks = [head] if head else []
+        chunks += [tail[i:i + page_size] for i in range(0, len(tail), page_size)]
+        pages = []
+        for page_no, chunk in enumerate(chunks, start=1):
+            styled = [{**el, "style": {**theme, **el.get("style", {})}} for el in chunk]
+            pages.append({"page": page_no, "elements": styled})
+        return pages
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    items = [1, 2, 3]
+    view = items
+    items[:] = [9]
+    print(view)
+    ```
+  options: ["[1, 2, 3]", "[9]", "[9, 2, 3]", "TypeError"]
+  answer: 1
+  explain: |
+    `view` і `items` це одне ім'я на один список, а `items[:] = [9]` замінює весь вміст того самого об'єкта, тому `view`
+    бачить `[9]`. `[1, 2, 3]` це результат `items = [9]`, яке перев'язало б ім'я на новий список, а старий лишився б
+    у `view`. `[9, 2, 3]` це інтуїція "присвоєння поелементне, як `Object.assign` для масиву": присвоєння в зріз
+    змінює довжину, бо працює як `splice`. `TypeError` ні: звичайний зріз приймає праву частину будь-якої довжини,
+    обмеження на рівну довжину є лише для зрізу з кроком.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    first, *rest = (1,)
+    print(rest)
+    ```
+  options: ["()", "None", "[]", "ValueError"]
+  answer: 2
+  explain: |
+    Ім'я із зірочкою в присвоєнні завжди отримує список, навіть якщо праворуч кортеж, а коли на нього нічого не лишилось,
+    це порожній список. `()` спокусливий, бо `*args` у сигнатурі функції справді збирає кортеж, але в присвоєнні правило
+    інше. `None` це інтуїція `undefined` з JS. `ValueError` був би, якби не вистачило елементів на звичайні імена:
+    `first, *rest, last = (1,)`.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    defaults = {"color": "black", "size": 14}
+    print({**defaults, **{"size": 16, "color": "red", "font": "Inter"}})
+    ```
+  options:
+    - "{'color': 'red', 'size': 16, 'font': 'Inter'}"
+    - "{'size': 16, 'color': 'red', 'font': 'Inter'}"
+    - "{'color': 'black', 'size': 14, 'font': 'Inter'}"
+    - "TypeError"
+  answer: 0
+  explain: |
+    Пізніший ключ перемагає за значенням, але позицію ключа задає його перша поява, тому `color` і `size` лишаються
+    на своїх місцях з `defaults`, а `font` дописується в кінець. Другий варіант це очікування, що злиття "переносить"
+    ключі в порядку другого словника. Третій плутає порядок пріоритету: перемагає правий, як у `{...a, ...b}`.
+    `TypeError` буває при подвійному ключі у виклику функції `f(**a, **b)`, а в літералі словника дублікати дозволені.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    a, b = {"x": 1, "y": 2}
+    print(a)
+    ```
+  options: ["1", "('x', 1)", "TypeError", "x"]
+  answer: 3
+  explain: |
+    Розпакування позиційне і бере елементи з ітерації словника, а ітерація словника віддає ключі. Тому `a` це `'x'`.
+    `1` це інтуїція `const { x, y } = obj`, якої в Python немає. `('x', 1)` дали б пари з `.items()`. `TypeError` ні:
+    словник iterable, і з двома ключами кількість збігається, тому присвоєння мовчки проходить.

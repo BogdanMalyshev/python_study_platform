@@ -1,0 +1,580 @@
+- id: t1
+  type: code
+  title: "Read-only обчислювана властивість"
+  prompt: |
+    Клас `RangeField` описує числове поле з межами `minimum` і `maximum` (звичайні публічні атрибути).
+    Додайте властивість `span`, що повертає `maximum - minimum`.
+
+    - `span` рахується при кожному читанні: після зміни `maximum` вона одразу нова.
+    - `span` лише для читання: присвоєння має кидати стандартний `AttributeError`, який Python
+      генерує сам. Нічого не перевіряйте вручну, просто не оголошуйте setter.
+
+    ```python
+    r = RangeField(0, 10)
+    r.span            # 10
+    r.maximum = 25
+    r.span            # 25
+    r.span = 5        # AttributeError: property 'span' of 'RangeField' object has no setter
+    ```
+  starter: |
+    class RangeField:
+        def __init__(self, minimum: int, maximum: int) -> None:
+            self.minimum = minimum
+            self.maximum = maximum
+  harness: |
+    r = RangeField(0, 10)
+    print(r.span)
+    r.maximum = 25
+    print(r.span)
+    r.minimum = 5
+    print(r.span)
+    try:
+        r.span = 5
+    except AttributeError as e:
+        print("AttributeError:", e)
+    print(isinstance(RangeField.__dict__.get("span"), property))
+  expected: |
+    10
+    25
+    20
+    AttributeError: property 'span' of 'RangeField' object has no setter
+    True
+  hints:
+    - "Метод без параметрів, крім self, позначений декоратором, читається як атрибут без дужок."
+    - "@property над def span(self) -> int: return self.maximum - self.minimum. Setter не потрібен."
+  solution: |
+    class RangeField:
+        def __init__(self, minimum: int, maximum: int) -> None:
+            self.minimum = minimum
+            self.maximum = maximum
+
+        @property
+        def span(self) -> int:
+            return self.maximum - self.minimum
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Setter з валідацією і нормалізацією"
+  prompt: |
+    Перетворіть атрибути `label` і `max_length` класу `TextField` на property з перевірками.
+    `name` лишається звичайним атрибутом. Інтерфейс класу (конструктор і імена атрибутів) не змінюється.
+
+    - `label`: setter обрізає пробіли з країв (`strip`). Якщо після цього рядок порожній,
+      кидає `ValueError("label must not be empty")`.
+    - `max_length`: якщо значення не `int` або це `bool`, кидає
+      `TypeError(f"max_length must be int, got {type(value).__name__}")`.
+      Якщо менше 1, кидає `ValueError(f"max_length must be >= 1, got {value}")`.
+    - Перевірки мають спрацьовувати і в конструкторі.
+    - Невдале присвоєння не змінює збережене значення.
+
+    ```python
+    f = TextField("email", "  Email ", 100)
+    f.label         # 'Email'
+    f.max_length = True   # TypeError: max_length must be int, got bool
+    ```
+  starter: |
+    class TextField:
+        def __init__(self, name: str, label: str, max_length: int = 255) -> None:
+            self.name = name
+            self.label = label
+            self.max_length = max_length
+  harness: |
+    f = TextField("email", "  Email ", 100)
+    print(repr(f.label), f.max_length)
+    f.label = "E-mail\n"
+    f.max_length = 50
+    print(repr(f.label), f.max_length)
+    for attr, bad in [("label", "   "), ("max_length", 0), ("max_length", "10"), ("max_length", True)]:
+        try:
+            setattr(f, attr, bad)
+        except (TypeError, ValueError) as e:
+            print(f"{type(e).__name__}: {e}")
+    print(repr(f.label), f.max_length)
+    try:
+        TextField("bio", "Bio", -3)
+    except ValueError as e:
+        print("init ValueError:", e)
+    try:
+        TextField("bio", "")
+    except ValueError as e:
+        print("init ValueError:", e)
+    print(TextField("bio", "Bio").max_length)
+    print(sorted(k for k, v in vars(TextField).items() if isinstance(v, property)))
+  expected: |
+    'Email' 100
+    'E-mail' 50
+    ValueError: label must not be empty
+    ValueError: max_length must be >= 1, got 0
+    TypeError: max_length must be int, got str
+    TypeError: max_length must be int, got bool
+    'E-mail' 50
+    init ValueError: max_length must be >= 1, got -3
+    init ValueError: label must not be empty
+    255
+    ['label', 'max_length']
+  hints:
+    - "Конструктор не змінюйте: присвоєння self.label = ... у __init__ саме піде через setter. Значення зберігайте в атрибутах з підкресленням."
+    - "bool це підклас int, тому isinstance(True, int) дає True. Спершу перевірте isinstance(value, bool), потім isinstance(value, int)."
+    - "@property def max_length(self): return self._max_length; @max_length.setter def max_length(self, value): перевірки, потім self._max_length = value."
+  solution: |
+    class TextField:
+        def __init__(self, name: str, label: str, max_length: int = 255) -> None:
+            self.name = name
+            self.label = label
+            self.max_length = max_length
+
+        @property
+        def label(self) -> str:
+            return self._label
+
+        @label.setter
+        def label(self, value: str) -> None:
+            value = value.strip()
+            if not value:
+                raise ValueError("label must not be empty")
+            self._label = value
+
+        @property
+        def max_length(self) -> int:
+            return self._max_length
+
+        @max_length.setter
+        def max_length(self, value: int) -> None:
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"max_length must be int, got {type(value).__name__}")
+            if value < 1:
+                raise ValueError(f"max_length must be >= 1, got {value}")
+            self._max_length = value
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "cached_property зі скиданням кешу"
+  prompt: |
+    `FormSchema` тримає список полів (словники з ключем `"id"`). Пошук поля за `id` потрібен часто,
+    тому індекс `by_id` (словник `id -> поле`) будується один раз через `functools.cached_property`.
+    Атрибут `builds` рахує, скільки разів індекс будувався: збільшуйте його в тілі `by_id`.
+
+    Допишіть метод `add_field(field)`:
+
+    - якщо поле з таким `id` уже є, кидає `ValueError(f"duplicate id: {id}")` і нічого не змінює
+      (для перевірки використайте `by_id`);
+    - інакше додає поле в `fields` і скидає кеш, щоб наступне читання `by_id` перебудувало індекс;
+    - метод має працювати й тоді, коли `by_id` ще жодного разу не читали.
+
+    ```python
+    s = FormSchema([{"id": "email"}])
+    s.by_id; s.by_id        # індекс будується один раз, builds == 1
+    s.add_field({"id": "phone"})
+    list(s.by_id)           # ['email', 'phone'], builds == 2
+    ```
+  starter: |
+    from functools import cached_property
+
+
+    class FormSchema:
+        def __init__(self, fields: list[dict]) -> None:
+            self.fields = fields
+            self.builds = 0
+
+        @cached_property
+        def by_id(self) -> dict[str, dict]:
+            ...
+
+        def add_field(self, field: dict) -> None:
+            ...
+  harness: |
+    s = FormSchema([{"id": "email", "type": "text"}])
+    print(s.by_id["email"]["type"], list(s.by_id), s.builds)
+    s.add_field({"id": "phone", "type": "tel"})
+    print(list(s.by_id), s.builds)
+    print(s.by_id["phone"]["type"], s.builds)
+    try:
+        s.add_field({"id": "email", "type": "text"})
+    except ValueError as e:
+        print("ValueError:", e)
+    print(len(s.fields), s.builds)
+
+    fresh = FormSchema([])
+    fresh.add_field({"id": "age"})
+    fresh.add_field({"id": "city"})
+    print(list(fresh.by_id), fresh.builds)
+    print(type(FormSchema.__dict__["by_id"]).__name__)
+  expected: |
+    text ['email'] 1
+    ['email', 'phone'] 2
+    tel 2
+    ValueError: duplicate id: email
+    2 2
+    ['age', 'city'] 3
+    cached_property
+  hints:
+    - "cached_property кладе результат у __dict__ екземпляра під іменем властивості. Скинути кеш означає прибрати цей ключ."
+    - "del self.by_id падає з AttributeError, якщо кеш ще не заповнений. Метод словника pop з другим аргументом не падає."
+    - "if field['id'] in self.by_id: raise ...; self.fields.append(field); self.__dict__.pop('by_id', None)"
+  solution: |
+    from functools import cached_property
+
+
+    class FormSchema:
+        def __init__(self, fields: list[dict]) -> None:
+            self.fields = fields
+            self.builds = 0
+
+        @cached_property
+        def by_id(self) -> dict[str, dict]:
+            self.builds += 1
+            return {f["id"]: f for f in self.fields}
+
+        def add_field(self, field: dict) -> None:
+            if field["id"] in self.by_id:
+                raise ValueError(f"duplicate id: {field['id']}")
+            self.fields.append(field)
+            self.__dict__.pop("by_id", None)
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Дескриптор Bounded з __set_name__"
+  prompt: |
+    Напишіть дескриптор `Bounded(low, high)` для числових полів з межами. Його ставлять як атрибут класу
+    на скільки завгодно полів, і кожне поле знає своє ім'я без повторення в аргументах.
+
+    - `__set_name__` запам'ятовує ім'я атрибута.
+    - Читання з класу (`Slider.min_value`) повертає сам дескриптор.
+    - Присвоєння числа (`int` або `float`, але не `bool`) у межах `[low, high]` включно зберігає його
+      на екземплярі. Різні екземпляри класу мають незалежні значення.
+    - Не число: `TypeError(f"{name} must be a number, got {type(value).__name__}")`.
+    - Поза межами: `ValueError(f"{name} must be between {low} and {high}, got {value}")`.
+
+    ```python
+    class Slider:
+        min_value = Bounded(0, 100)
+
+    s = Slider()
+    s.min_value = 101   # ValueError: min_value must be between 0 and 100, got 101
+    ```
+  starter: |
+    class Bounded:
+        def __init__(self, low: float, high: float) -> None:
+            self.low = low
+            self.high = high
+
+        def __set_name__(self, owner: type, name: str) -> None:
+            ...
+
+        def __get__(self, obj, objtype=None):
+            ...
+
+        def __set__(self, obj, value) -> None:
+            ...
+  harness: |
+    class Slider:
+        min_value = Bounded(0, 100)
+        step = Bounded(1, 10)
+
+        def __init__(self, min_value, step):
+            self.min_value = min_value
+            self.step = step
+
+    a = Slider(10, 1)
+    b = Slider(50, 5)
+    print(a.min_value, a.step, b.min_value, b.step)
+    a.min_value = 0
+    b.step = 2.5
+    print(a.min_value, b.min_value, a.step, b.step)
+    for bad in [101, -1]:
+        try:
+            a.min_value = bad
+        except ValueError as e:
+            print("ValueError:", e)
+    for bad in ["5", True]:
+        try:
+            b.step = bad
+        except TypeError as e:
+            print("TypeError:", e)
+    try:
+        Slider(10, 11)
+    except ValueError as e:
+        print("init ValueError:", e)
+    print(a.min_value, b.step)
+    print(type(Slider.min_value).__name__, type(Slider.step).__name__)
+  expected: |
+    10 1 50 5
+    0 50 1 2.5
+    ValueError: min_value must be between 0 and 100, got 101
+    ValueError: min_value must be between 0 and 100, got -1
+    TypeError: step must be a number, got str
+    TypeError: step must be a number, got bool
+    init ValueError: step must be between 1 and 10, got 11
+    0 2.5
+    Bounded Bounded
+  hints:
+    - "Один екземпляр Bounded обслуговує всі екземпляри Slider. Значення в self дескриптора спільне для всіх, тому зберігайте його на obj."
+    - "У __set_name__ запам'ятайте self.name = name і self.private = '_' + name. У __get__ при obj is None поверніть self."
+    - "__get__: return getattr(obj, self.private). __set__: перевірка isinstance(value, bool) or not isinstance(value, (int, float)), потім межі, потім setattr(obj, self.private, value)."
+  solution: |
+    class Bounded:
+        def __init__(self, low: float, high: float) -> None:
+            self.low = low
+            self.high = high
+
+        def __set_name__(self, owner: type, name: str) -> None:
+            self.name = name
+            self.private = "_" + name
+
+        def __get__(self, obj, objtype=None):
+            if obj is None:
+                return self
+            return getattr(obj, self.private)
+
+        def __set__(self, obj, value) -> None:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{self.name} must be a number, got {type(value).__name__}")
+            if not self.low <= value <= self.high:
+                raise ValueError(
+                    f"{self.name} must be between {self.low} and {self.high}, got {value}"
+                )
+            setattr(obj, self.private, value)
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Вузол дерева: __slots__ і property з інваріантом"
+  prompt: |
+    Вузол дерева елементів форми. Об'єктів буде багато, тому клас `Node` має `__slots__`
+    і не має `__dict__`. Атрибути: `id` (рядок), `children` (список вузлів), батько за property `parent`.
+
+    - `Node(id, parent=None)` створює вузол і, якщо батька передано, додає вузол у `parent.children`.
+    - `node.parent = new` переносить вузол: прибирає його з `children` старого батька (якщо був) і додає
+      в кінець `children` нового. `node.parent = None` робить вузол коренем.
+    - Перенесення, що створює цикл (новий батько це сам вузол або його нащадок), кидає
+      `ValueError(f"cycle: {node.id} cannot be moved under {new.id}")` і нічого не змінює.
+    - `depth`: read-only властивість, 0 для кореня, 1 для його дітей і так далі.
+    - `path`: read-only властивість, id від кореня до вузла через `/`, наприклад `"form/page1/email"`.
+
+    Підказка щодо слотів: у `__slots__` ім'я сховища батька, а не `parent`, інакше слот і property
+    конфліктують.
+  starter: |
+    class Node:
+        __slots__ = ...
+
+        def __init__(self, id: str, parent: "Node | None" = None) -> None:
+            ...
+
+        @property
+        def parent(self) -> "Node | None":
+            ...
+
+        @parent.setter
+        def parent(self, new: "Node | None") -> None:
+            ...
+
+        @property
+        def depth(self) -> int:
+            ...
+
+        @property
+        def path(self) -> str:
+            ...
+  harness: |
+    root = Node("form")
+    page1 = Node("page1", root)
+    email = Node("email", page1)
+    print(email.path, email.depth, root.depth)
+    print([c.id for c in root.children], [c.id for c in page1.children])
+
+    page2 = Node("page2", root)
+    email.parent = page2
+    print(email.path, [c.id for c in page1.children], [c.id for c in page2.children])
+
+    for node, new in [(root, email), (page2, page2)]:
+        try:
+            node.parent = new
+        except ValueError as e:
+            print("ValueError:", e)
+    print(root.parent, page2.parent.id, [c.id for c in root.children])
+
+    try:
+        email.nmae = "x"
+    except AttributeError:
+        print("typo rejected")
+    print(hasattr(email, "__dict__"))
+    for attr in ["depth", "path"]:
+        try:
+            setattr(email, attr, 0)
+        except AttributeError:
+            print(attr, "is read-only")
+
+    email.parent = None
+    print(email.path, email.depth, [c.id for c in page2.children])
+  expected: |
+    form/page1/email 2 0
+    ['page1'] ['email']
+    form/page2/email [] ['email']
+    ValueError: cycle: form cannot be moved under email
+    ValueError: cycle: page2 cannot be moved under page2
+    None form ['page1', 'page2']
+    typo rejected
+    False
+    depth is read-only
+    path is read-only
+    email 0 []
+  hints:
+    - "Слоти: id, children і сховище батька, наприклад _parent. У __init__ спершу self._parent = None, потім self.parent = parent, щоб перенесення пройшло через setter."
+    - "Перевірка циклу: від new піднімайтесь по _parent до кореня; якщо зустріли self, це цикл. Перевірка до будь-яких змін."
+    - "depth і path теж підйом по батьках: рахуйте кроки або збирайте id у список, потім reversed і '/'.join."
+  solution: |
+    class Node:
+        __slots__ = ("id", "children", "_parent")
+
+        def __init__(self, id: str, parent: "Node | None" = None) -> None:
+            self.id = id
+            self.children: list[Node] = []
+            self._parent: Node | None = None
+            self.parent = parent
+
+        @property
+        def parent(self) -> "Node | None":
+            return self._parent
+
+        @parent.setter
+        def parent(self, new: "Node | None") -> None:
+            ancestor = new
+            while ancestor is not None:
+                if ancestor is self:
+                    raise ValueError(f"cycle: {self.id} cannot be moved under {new.id}")
+                ancestor = ancestor._parent
+            if self._parent is not None:
+                self._parent.children.remove(self)
+            self._parent = new
+            if new is not None:
+                new.children.append(self)
+
+        @property
+        def depth(self) -> int:
+            depth = 0
+            node = self._parent
+            while node is not None:
+                depth += 1
+                node = node._parent
+            return depth
+
+        @property
+        def path(self) -> str:
+            ids = []
+            node = self
+            while node is not None:
+                ids.append(node.id)
+                node = node._parent
+            return "/".join(reversed(ids))
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class Field:
+        def __init__(self) -> None:
+            self._label = "Email"
+
+        @property
+        def label(self) -> str:
+            return self._label
+
+    f = Field()
+    f.__dict__["label"] = "Phone"
+    print(f.label, f.__dict__["label"])
+    ```
+  options:
+    - "Email Phone"
+    - "Phone Phone"
+    - "AttributeError: property 'label' of 'Field' object has no setter"
+    - "KeyError: 'label'"
+  answer: 0
+  explain: |
+    Property це дескриптор даних: у нього є `__set__`, навіть коли setter не оголошено. Для дескрипторів
+    даних пошук `f.label` викликає `__get__` з класу і в `__dict__` екземпляра не дивиться, тому виходить
+    `Email`. Ключ `"label"` у словнику при цьому справді є, і пряме читання `f.__dict__["label"]` його
+    бачить: `Phone`.
+
+    `Phone Phone` це інтуїція з JS, де власна властивість об'єкта затіняє аксесор на прототипі. Так у Python
+    поводяться лише дескриптори без даних (функції, `cached_property`). `AttributeError` був би при
+    `f.label = "Phone"`, але запис напряму в `__dict__` оминає `__setattr__` і setter. `KeyError` неможливий:
+    ключ щойно записали.
+
+- id: q2
+  type: quiz
+  question: |
+    Що станеться в останньому рядку?
+    ```python
+    class Field:
+        def __init__(self) -> None:
+            self._label = "Email"
+
+        @property
+        def label(self) -> str:
+            return self._label
+
+        @label.setter
+        def set_label(self, value: str) -> None:
+            self._label = value.strip()
+
+    f = Field()
+    f.label = " Phone "
+    ```
+  options:
+    - "Нічого особливого: `f.label` стане `'Phone'`"
+    - "AttributeError: property 'label' of 'Field' object has no setter"
+    - "`f.label` стане `' Phone '`: setter не викликається, значення лягає в `__dict__`"
+    - "NameError: name 'set_label' is not defined"
+  answer: 1
+  explain: |
+    `@label.setter` не змінює наявну властивість, а повертає нову з тим самим геттером і доданим setter-ом.
+    Результат декоратора присвоюється імені функції, тобто `set_label`. Тепер на класі дві властивості:
+    `set_label` з геттером і setter-ом та стара `label` лише з геттером. Присвоєння `f.label` іде в стару, і
+    вона кидає `AttributeError ... has no setter`.
+
+    Перший варіант очікує, що декоратор "прикріплює" setter до `label` незалежно від імені, як у TS, де
+    `set label()` завжди про `label`. Третій варіант неможливий, бо property це дескриптор даних і
+    присвоєння завжди йде через нього, а не в `__dict__`. `NameError` теж ні: `set_label` визначено, це
+    просто атрибут класу з неочікуваним вмістом.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class Base:
+        __slots__ = ("id",)
+
+    class Child(Base):
+        pass
+
+    c = Child()
+    c.id = "e1"
+    c.nmae = "email"
+    print(c.nmae, hasattr(c, "__dict__"), "id" in vars(c))
+    ```
+  options:
+    - "email True False"
+    - "AttributeError: 'Child' object has no attribute 'nmae'"
+    - "email True True"
+    - "TypeError при створенні класу Child: батько має __slots__"
+  answer: 0
+  explain: |
+    `__slots__` не успадковується як заборона: нащадок без власних `__slots__` отримує `__dict__`, і туди
+    лягає будь-який новий атрибут, включно з одруківкою. Тому `email` і `True`. При цьому `id` все ще
+    зберігається в слоті, оголошеному в `Base` (дескриптор слота знаходиться на класі раніше за `__dict__`),
+    тому в `vars(c)` його немає: `False`.
+
+    `AttributeError` був би, якби `Child` оголосив `__slots__ = ()` або власні імена. `email True True`
+    очікує, що з появою `__dict__` всі атрибути переїжджають туди. `TypeError` при створенні класу буває
+    лише при двох батьках з непорожніми слотами, а не при звичайному наслідуванні.

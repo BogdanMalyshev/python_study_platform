@@ -1,0 +1,390 @@
+- id: t1
+  type: code
+  title: "Перемістити поле в списку на місці"
+  prompt: |
+    Напишіть `move_to(ids, name, index)`, яка переміщує елемент `name` у позицію `index`
+    у тому самому списку `ids` і, як усі методи, що змінюють список на місці, повертає `None`.
+
+    - Індекс більший за довжину означає "в кінець", так само як у `insert`.
+    - Якщо `name` у списку немає, має вилетіти `ValueError`, а список лишитися без змін.
+      Окремо перевіряти наявність не потрібно: відповідний метод списку кидає `ValueError` сам.
+
+    ```python
+    ids = ["email", "phone", "age"]
+    move_to(ids, "age", 0)     # None
+    ids                        # ['age', 'email', 'phone']
+    move_to(ids, "zip", 0)     # ValueError
+    ```
+  starter: |
+    def move_to(ids: list[str], name: str, index: int) -> None:
+        ...
+  harness: |
+    ids = ["email", "phone", "age"]
+    print(move_to(ids, "age", 0))
+    print(ids)
+    move_to(ids, "age", 99)
+    print(ids)
+    move_to(ids, "phone", 0)
+    print(ids)
+    try:
+        move_to(ids, "zip", 0)
+    except ValueError as e:
+        print("ValueError:", e)
+    print(ids)
+  expected: |
+    None
+    ['age', 'email', 'phone']
+    ['email', 'phone', 'age']
+    ['phone', 'email', 'age']
+    ValueError: list.remove(x): x not in list
+    ['phone', 'email', 'age']
+  hints:
+    - "Переміщення це видалення за значенням і вставка за індексом; обидва методи змінюють список на місці."
+    - "ids.remove(name), потім ids.insert(index, name). Без return: функція й так поверне None."
+  solution: |
+    def move_to(ids: list[str], name: str, index: int) -> None:
+        ids.remove(name)
+        ids.insert(index, name)
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Групування елементів за типом через setdefault"
+  prompt: |
+    Напишіть `group_by_type(elements)`, яка повертає словник `{type: [name, ...]}`.
+    Елементи це словники з обов'язковим ключем `"name"` і необов'язковим `"type"`;
+    якщо `"type"` немає, елемент вважається `"text"`.
+
+    Типи в результаті йдуть у порядку першої появи, імена всередині групи в порядку елементів.
+    Без `if key not in groups`: один виклик методу словника дає список за ключем, створюючи його за потреби.
+
+    ```python
+    group_by_type([{"name": "email", "type": "email"}, {"name": "first"}, {"name": "last"}])
+    # {'email': ['email'], 'text': ['first', 'last']}
+    ```
+  starter: |
+    def group_by_type(elements: list[dict]) -> dict[str, list[str]]:
+        ...
+  harness: |
+    elements = [
+        {"name": "phone", "type": "tel"},
+        {"name": "first_name"},
+        {"name": "email", "type": "email"},
+        {"name": "plan", "type": "select"},
+        {"name": "last_name", "type": "text"},
+        {"name": "work_email", "type": "email"},
+    ]
+    print(group_by_type(elements))
+    print(group_by_type([]))
+    print(elements[1])
+  expected: |
+    {'tel': ['phone'], 'text': ['first_name', 'last_name'], 'email': ['email', 'work_email'], 'select': ['plan']}
+    {}
+    {'name': 'first_name'}
+  hints:
+    - "Тип елемента з запасним значенням дає .get, а список групи, створений за потреби, дає setdefault."
+    - "groups.setdefault(el.get('type', 'text'), []).append(el['name']) у циклі по elements."
+  solution: |
+    def group_by_type(elements: list[dict]) -> dict[str, list[str]]:
+        groups: dict[str, list[str]] = {}
+        for el in elements:
+            groups.setdefault(el.get("type", "text"), []).append(el["name"])
+        return groups
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Відсутні й невідомі поля через операції множин"
+  prompt: |
+    Напишіть `check_answers(allowed, required, answers)`, яка повертає кортеж `(missing, unknown)`:
+
+    - `missing` це обов'язкові поля, на які немає відповіді. Відповіді немає, якщо ключа нема в `answers`
+      або значення `None` чи `""`. Значення `0` і `False` це відповідь.
+    - `unknown` це ключі з `answers`, яких немає в `allowed`, незалежно від значення.
+
+    Обидва списки відсортовані, бо порядок множини не гарантований.
+    Використайте операції множин і те, що `answers.keys()` поводиться як множина; циклів з `append` не потрібно.
+
+    ```python
+    check_answers({"email", "plan"}, {"email"}, {"email": "", "promo": "X"})
+    # (['email'], ['promo'])
+    ```
+  starter: |
+    def check_answers(
+        allowed: set[str], required: set[str], answers: dict
+    ) -> tuple[list[str], list[str]]:
+        ...
+  harness: |
+    allowed = {"email", "phone", "age", "plan"}
+    required = {"email", "plan"}
+    print(check_answers(allowed, required, {"email": "a@b.c", "plan": "pro"}))
+    print(check_answers(allowed, required, {"email": "", "promo": "X", "age": 0}))
+    print(check_answers(allowed, required, {"email": "a@b.c", "plan": False}))
+    print(check_answers(allowed, set(), {}))
+    missing, unknown = check_answers(allowed, required, {"zip": "1", "city": None})
+    print(missing, unknown)
+  expected: |
+    ([], [])
+    (['email', 'plan'], ['promo'])
+    ([], [])
+    ([], [])
+    ['email', 'plan'] ['city', 'zip']
+  hints:
+    - "Відсутні це обов'язкові мінус ті, що мають непорожню відповідь; невідомі це ключі відповідей мінус дозволені."
+    - "answered = {k for k, v in answers.items() if v is not None and v != ''}; missing = sorted(required - answered); unknown = sorted(answers.keys() - allowed)."
+  solution: |
+    def check_answers(
+        allowed: set[str], required: set[str], answers: dict
+    ) -> tuple[list[str], list[str]]:
+        answered = {k for k, v in answers.items() if v is not None and v != ""}
+        missing = sorted(required - answered)
+        unknown = sorted(answers.keys() - allowed)
+        return missing, unknown
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Дедуплікація опцій-словників за O(n)"
+  prompt: |
+    Опції select-поля приходять списком словників, і в них трапляються дублікати після злиття
+    кількох джерел. Напишіть `dedupe_options(options)`, яка повертає новий список без дублікатів,
+    зберігаючи першу появу кожної опції й порядок.
+
+    - Дві опції дублікати, якщо вони рівні через `==`: ті самі ключі з тими самими значеннями,
+      незалежно від порядку ключів.
+    - Значення бувають `str`, `int`, `bool`, `None` і списки з таких значень (наприклад, `"tags"`).
+      Порядок елементів у списку важливий: `["a", "b"]` і `["b", "a"]` різні.
+    - Перевірка "чи вже бачили" має бути O(1), тобто через `set`, а не через `option in result`.
+      Словник і список у множину не покласти, тож потрібен hashable ключ, рівний для рівних опцій.
+
+    ```python
+    dedupe_options([{"value": "ua", "label": "UA"}, {"label": "UA", "value": "ua"}])
+    # [{'value': 'ua', 'label': 'UA'}]
+    ```
+  starter: |
+    def dedupe_options(options: list[dict]) -> list[dict]:
+        ...
+  harness: |
+    options = [
+        {"value": "ua", "label": "Україна"},
+        {"value": "pl", "label": "Польща", "tags": ["eu", "neighbour"]},
+        {"label": "Україна", "value": "ua"},
+        {"value": "pl", "label": "Польща", "tags": ["neighbour", "eu"]},
+        {"value": "pl", "label": "Польща", "tags": ["eu", "neighbour"]},
+        {"value": "ua", "label": "Україна", "disabled": False},
+        {"value": None, "label": "Інше"},
+        {"value": None, "label": "Інше"},
+    ]
+    for option in dedupe_options(options):
+        print(option)
+    print(dedupe_options([]))
+    print(len(options))
+  expected: |
+    {'value': 'ua', 'label': 'Україна'}
+    {'value': 'pl', 'label': 'Польща', 'tags': ['eu', 'neighbour']}
+    {'value': 'pl', 'label': 'Польща', 'tags': ['neighbour', 'eu']}
+    {'value': 'ua', 'label': 'Україна', 'disabled': False}
+    {'value': None, 'label': 'Інше'}
+    []
+    8
+  hints:
+    - "Ключ має не залежати від порядку ключів словника, але залежати від порядку елементів у списку-значенні. Подумайте, яка незмінна колекція не має порядку, а яка має."
+    - "Список-значення стає tuple, пари (ключ, значення) збираються у frozenset; цей frozenset кладеться в множину seen."
+    - "key = frozenset((k, tuple(v) if isinstance(v, list) else v) for k, v in option.items()); if key not in seen: seen.add(key); result.append(option)"
+  solution: |
+    def dedupe_options(options: list[dict]) -> list[dict]:
+        seen: set[frozenset] = set()
+        result = []
+        for option in options:
+            key = frozenset(
+                (k, tuple(v) if isinstance(v, list) else v) for k, v in option.items()
+            )
+            if key not in seen:
+                seen.add(key)
+                result.append(option)
+        return result
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Розкладка форми по сторінках з конфігу JSON"
+  prompt: |
+    Напишіть `layout(config_text)`, яка приймає JSON-рядок конфігу форми і повертає JSON-рядок
+    з розкладкою по сторінках. Конфіг виглядає так:
+
+    ```json
+    {
+      "required": ["email"],
+      "elements": [
+        {"name": "email", "label": "Пошта", "page": 1, "order": 2},
+        {"name": "promo", "page": 1, "order": 1}
+      ]
+    }
+    ```
+
+    `"required"` необов'язковий, `"label"` теж: без нього береться `name`.
+    Елементи можуть іти в будь-якому порядку. Перевірки, кожна з `ValueError` і точним текстом:
+
+    - два елементи з однаковим `name`: `duplicate name: 'email'`
+    - два елементи на одній позиції `(page, order)`: `position (1, 2) taken by 'email' and 'phone'`,
+      де першим іде ім'я, що трапилось у списку раніше
+    - імена з `"required"`, яких немає серед елементів: `unknown required: ['city', 'zip']` (відсортовані)
+
+    Результат: `json.dumps` словника `{page: [label, ...]}`, сторінки за зростанням, елементи всередині за `order`,
+    до мітки обов'язкового поля дописується `*`. Українські мітки мають лишитися читабельними.
+    Для прикладу вище: `{"1": ["promo", "Пошта*"]}`. Зверніть увагу, чому ключі сторінок у результаті рядки.
+  starter: |
+    import json
+
+
+    def layout(config_text: str) -> str:
+        ...
+  harness: |
+    import json
+
+    config = {
+        "required": ["email", "name"],
+        "elements": [
+            {"name": "plan", "label": "Тариф", "page": 2, "order": 1},
+            {"name": "email", "label": "Пошта", "page": 1, "order": 2},
+            {"name": "name", "label": "Ім'я", "page": 1, "order": 1},
+            {"name": "promo", "page": 2, "order": 2},
+            {"name": "phone", "label": "Телефон", "page": 1, "order": 10},
+        ],
+    }
+    print(layout(json.dumps(config)))
+    print(layout('{"elements": []}'))
+
+    bad = [
+        {"elements": [
+            {"name": "email", "page": 1, "order": 1},
+            {"name": "email", "page": 1, "order": 2},
+        ]},
+        {"elements": [
+            {"name": "email", "page": 1, "order": 2},
+            {"name": "phone", "page": 1, "order": 2},
+        ]},
+        {"required": ["zip", "email", "city"], "elements": [
+            {"name": "email", "page": 1, "order": 1},
+        ]},
+    ]
+    for item in bad:
+        try:
+            layout(json.dumps(item))
+        except ValueError as e:
+            print("ValueError:", e)
+  expected: |
+    {"1": ["Ім'я*", "Пошта*", "Телефон"], "2": ["Тариф", "promo"]}
+    {}
+    ValueError: duplicate name: 'email'
+    ValueError: position (1, 2) taken by 'email' and 'phone'
+    ValueError: unknown required: ['city', 'zip']
+  hints:
+    - "Три похідні структури: словник name → елемент, словник (page, order) → name, множина обов'язкових. Перевірки дублікатів це перевірки `in` перед записом у словник."
+    - "Невідомі обов'язкові це різниця множини required і by_name.keys(). Порядок рендеру дає sorted() по ключах-кортежах словника позицій, а групування по сторінках setdefault(page, [])."
+    - "Наприкінці json.dumps(pages, ensure_ascii=False): без ensure_ascii мітки стануть \\uXXXX, а цілі ключі сторінок JSON у будь-якому разі запише рядками."
+  solution: |
+    import json
+
+
+    def layout(config_text: str) -> str:
+        config = json.loads(config_text)
+        by_name: dict[str, dict] = {}
+        by_position: dict[tuple[int, int], str] = {}
+        for el in config["elements"]:
+            name = el["name"]
+            if name in by_name:
+                raise ValueError(f"duplicate name: {name!r}")
+            by_name[name] = el
+            position = (el["page"], el["order"])
+            if position in by_position:
+                first = by_position[position]
+                raise ValueError(f"position {position} taken by {first!r} and {name!r}")
+            by_position[position] = name
+
+        required = set(config.get("required", []))
+        unknown = required - by_name.keys()
+        if unknown:
+            raise ValueError(f"unknown required: {sorted(unknown)}")
+
+        pages: dict[int, list[str]] = {}
+        for position in sorted(by_position):
+            el = by_name[by_position[position]]
+            label = el.get("label", el["name"])
+            if el["name"] in required:
+                label += "*"
+            pages.setdefault(position[0], []).append(label)
+        return json.dumps(pages, ensure_ascii=False)
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    fields = ("email")
+    for f in fields:
+        print(f, end=" ")
+    ```
+  options: ["email", "e m a i l", "TypeError: 'str' object is not iterable", "('email',)"]
+  answer: 1
+  explain: |
+    Кортеж створює кома, а не дужки. `("email")` це просто рядок у дужках, тому `for` обходить його символи
+    й друкує `e m a i l`. `email` очікує той, хто читає дужки як кортеж з одного елемента; для цього потрібно
+    `("email",)`. `TypeError` неможливий, бо рядок iterable. `('email',)` це repr кортежу, але `for` друкує
+    елементи, а не сам контейнер, і кортежу тут усе одно немає.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    d = {1: "a", True: "b", 1.0: "c"}
+    print(d)
+    ```
+  options: ["{1: 'c'}", "{1: 'a', True: 'b', 1.0: 'c'}", "{1.0: 'c'}", "{'1': 'c'}"]
+  answer: 0
+  explain: |
+    `1`, `True` і `1.0` рівні через `==` і мають однаковий хеш, тож для словника це один ключ. Кожне наступне
+    присвоєння перезаписує значення, але ключ лишається тим об'єктом, що був вставлений першим, тобто `1`.
+    Три окремі ключі тримав би JS `Map`, бо порівнює за SameValueZero, і саме так інтуїтивно читається літерал.
+    `{1.0: 'c'}` припускає, що ключ замінюється разом зі значенням, а це не так. `{'1': 'c'}` це логіка JS `Object`,
+    який приводить ключі до рядків; `dict` нічого не приводить.
+
+- id: q3
+  type: quiz
+  question: |
+    `ids` це список зі 100 000 рядків. Яка з операцій має складність O(n)?
+    ```python
+    ids_set = set(ids)
+    by_name = {name: {"name": name} for name in ids}
+    ```
+  options: ["\"x\" in ids_set", "\"x\" in by_name", "{\"name\": \"x\"} in by_name.values()", "len(ids)"]
+  answer: 2
+  explain: |
+    Хеш-таблиця прискорює лише пошук за ключем. `in by_name.values()` перебирає значення одне за одним і порівнює
+    через `==`, як `in` для списку, тому O(n). `in` для множини й для словника (по ключах) обчислює хеш і дивиться
+    одну комірку, O(1). `len` не рахує елементи: розмір зберігається в самому об'єкті, тому теж O(1),
+    на відміну від інтуїції "довжину треба порахувати".
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    import json
+    data = json.loads(json.dumps({1: "one"}))
+    print(data.get(1), data.get("1"))
+    ```
+  options: ["one one", "None one", "one None", "KeyError: 1"]
+  answer: 1
+  explain: |
+    Ключі JSON-об'єкта завжди рядки, тому `dumps` записує `{"1": "one"}`, а `loads` повертає словник з ключем `"1"`.
+    У Python `1` і `"1"` різні ключі, тож `get(1)` дає `None`. `one one` це звичка з JS, де `obj[1]` і `obj["1"]`
+    одне й те саме. `one None` припускає, що JSON зберіг тип ключа. `KeyError` не буде, бо `get` не кидає,
+    а повертає `None`.

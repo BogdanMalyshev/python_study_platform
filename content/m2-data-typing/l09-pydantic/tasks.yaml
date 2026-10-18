@@ -1,0 +1,825 @@
+- id: t1
+  type: code
+  title: "Модель теми з обмеженнями Field"
+  prompt: |
+    Опишіть модель `Theme` для конфігу форми. Zod-схема, яку треба перекласти:
+
+    ```ts
+    const Theme = z.object({
+      mode: z.enum(["light", "dark"]).default("light"),
+      primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+      fontSize: z.number().int().min(8).max(72).default(14),
+    });
+    ```
+
+    Імена полів у Python: `mode`, `primary_color`, `font_size` (аліаси в цьому завданні не потрібні).
+    `Theme(primary_color="#ff8800")` має дати `mode='light'`, `font_size=14`; невалідні дані
+    мають давати `ValidationError` з кодами `literal_error`, `string_pattern_mismatch`, `less_than_equal`.
+  starter: |
+    from typing import Literal
+    from pydantic import BaseModel, Field
+
+    class Theme(BaseModel):
+        ...
+  harness: |
+    from pydantic import ValidationError
+
+    print(Theme(primary_color="#ff8800"))
+    print(Theme.model_validate({"mode": "dark", "primary_color": "#000000", "font_size": "12"}).font_size)
+    try:
+        Theme.model_validate({"mode": "blue", "primary_color": "red", "font_size": 100})
+    except ValidationError as e:
+        for err in e.errors(include_url=False):
+            print(err["loc"], err["type"])
+  expected: |
+    mode='light' primary_color='#ff8800' font_size=14
+    12
+    ('mode',) literal_error
+    ('primary_color',) string_pattern_mismatch
+    ('font_size',) less_than_equal
+  hints:
+    - "z.enum з двох значень це Literal, значення за замовчуванням пишеться як у dataclass, через знак рівності."
+    - "Обмеження regex і діапазону живуть у Field: pattern=..., ge=..., le=...; значення за замовчуванням разом з обмеженнями теж передається у Field через default=."
+    - "mode: Literal[\"light\", \"dark\"] = \"light\"; primary_color: str = Field(pattern=r\"^#[0-9a-fA-F]{6}$\"); font_size: int = Field(default=14, ge=8, le=72)"
+  solution: |
+    from typing import Literal
+    from pydantic import BaseModel, Field
+
+    class Theme(BaseModel):
+        mode: Literal["light", "dark"] = "light"
+        primary_color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+        font_size: int = Field(default=14, ge=8, le=72)
+  requires: [pydantic]
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "safeParse для Pydantic"
+  prompt: |
+    Напишіть функцію `safe_parse(model, data)`, яка поводиться як `schema.safeParse(data)` у Zod:
+
+    - при успіху повертає `{"success": True, "data": <екземпляр моделі>}`;
+    - при помилці повертає `{"success": False, "errors": [...]}`, де кожен елемент це
+      `{"path": "tags.1", "message": "Input should be a valid string"}`. `path` це елементи `loc`,
+      з'єднані крапкою; індекси списків теж стають частиною шляху.
+
+    Функція має повертати всі помилки, а не лише першу, у тому порядку, в якому їх віддає Pydantic.
+  starter: |
+    from pydantic import BaseModel, ValidationError
+
+    def safe_parse(model: type[BaseModel], data: dict) -> dict:
+        ...
+  harness: |
+    from pydantic import Field
+
+    class Author(BaseModel):
+        name: str = Field(min_length=2)
+        email: str | None = None
+
+    class Article(BaseModel):
+        title: str
+        tags: list[str] = []
+        author: Author
+
+    ok = safe_parse(Article, {"title": "Hi", "author": {"name": "Ann"}})
+    print(ok["success"], ok["data"].author.name)
+
+    bad = safe_parse(Article, {"tags": ["a", 1, None], "author": {"name": "A"}})
+    print(bad["success"])
+    for err in bad["errors"]:
+        print(err["path"], "->", err["message"])
+  expected: |
+    True Ann
+    False
+    title -> Field required
+    tags.1 -> Input should be a valid string
+    tags.2 -> Input should be a valid string
+    author.name -> String should have at least 2 characters
+  hints:
+    - "safeParse у Pydantic це try / except ValidationError навколо model.model_validate(data)."
+    - "e.errors() повертає список словників; loc у кожному це кортеж з рядків і цілих, тому перед join кожен елемент треба перетворити на str."
+    - "errors = [{\"path\": \".\".join(str(p) for p in err[\"loc\"]), \"message\": err[\"msg\"]} for err in e.errors()]"
+  solution: |
+    from pydantic import BaseModel, ValidationError
+
+    def safe_parse(model: type[BaseModel], data: dict) -> dict:
+        try:
+            return {"success": True, "data": model.model_validate(data)}
+        except ValidationError as e:
+            errors = [
+                {"path": ".".join(str(part) for part in err["loc"]), "message": err["msg"]}
+                for err in e.errors()
+            ]
+            return {"success": False, "errors": errors}
+  requires: [pydantic]
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Умова видимості з валідаторами"
+  prompt: |
+    Опишіть модель `Condition` для правила `{field, operator, value}` з FormBuilder:
+
+    - `field: str`: обрізати пробіли по краях (`field_validator`); після цього значення має бути
+      коректним ідентифікатором (`str.isidentifier()`), інакше `ValueError` з текстом
+      `'first name' is not a valid field name` (через `{v!r}`);
+    - `operator`: один з `"eq"`, `"neq"`, `"in"`, `"gt"`, `"lt"`;
+    - `value: str | int | bool | list[str]`;
+    - правила між полями (`model_validator(mode="after")`):
+      для `"in"` значення має бути списком, інакше `ValueError("operator 'in' requires a list value")`;
+      для `"gt"` і `"lt"` значення має бути `int`, але не `bool`, інакше
+      `ValueError(f"operator {self.operator!r} requires an integer value")`.
+
+    Пам'ятайте, що в Python `isinstance(True, int)` дорівнює `True`.
+  starter: |
+    from typing import Literal, Self
+    from pydantic import BaseModel, field_validator, model_validator
+
+    class Condition(BaseModel):
+        field: str
+        operator: Literal["eq", "neq", "in", "gt", "lt"]
+        value: str | int | bool | list[str]
+
+        ...
+  harness: |
+    from pydantic import ValidationError
+
+    def show(raw: dict) -> None:
+        try:
+            print(Condition.model_validate(raw))
+        except ValidationError as e:
+            for err in e.errors(include_url=False):
+                print("error", err["loc"], err["msg"])
+
+    show({"field": " country ", "operator": "eq", "value": "UA"})
+    show({"field": "plan", "operator": "in", "value": ["pro", "team"]})
+    show({"field": "age", "operator": "gt", "value": 18})
+    show({"field": "first name", "operator": "eq", "value": "x"})
+    show({"field": "plan", "operator": "in", "value": "pro"})
+    show({"field": "age", "operator": "gt", "value": True})
+    show({"field": "age", "operator": "between", "value": 1})
+  expected: |
+    field='country' operator='eq' value='UA'
+    field='plan' operator='in' value=['pro', 'team']
+    field='age' operator='gt' value=18
+    error ('field',) Value error, 'first name' is not a valid field name
+    error () Value error, operator 'in' requires a list value
+    error () Value error, operator 'gt' requires an integer value
+    error ('operator',) Input should be 'eq', 'neq', 'in', 'gt' or 'lt'
+  hints:
+    - "Нормалізація одного поля це field_validator з @classmethod, який повертає нове значення. Перевірка, що залежить від operator і value одночасно, це model_validator(mode=\"after\") на self."
+    - "Для gt/lt перевірка виглядає як isinstance(self.value, bool) or not isinstance(self.value, int): bool відсікається першим, бо він підклас int."
+    - "@field_validator(\"field\") @classmethod def normalize(cls, v): v = v.strip(); if not v.isidentifier(): raise ValueError(f\"{v!r} is not a valid field name\"); return v. Далі @model_validator(mode=\"after\") def check(self) -> Self: ... return self"
+  solution: |
+    from typing import Literal, Self
+    from pydantic import BaseModel, field_validator, model_validator
+
+    class Condition(BaseModel):
+        field: str
+        operator: Literal["eq", "neq", "in", "gt", "lt"]
+        value: str | int | bool | list[str]
+
+        @field_validator("field")
+        @classmethod
+        def normalize_field(cls, v: str) -> str:
+            v = v.strip()
+            if not v.isidentifier():
+                raise ValueError(f"{v!r} is not a valid field name")
+            return v
+
+        @model_validator(mode="after")
+        def check_value_shape(self) -> Self:
+            if self.operator == "in" and not isinstance(self.value, list):
+                raise ValueError("operator 'in' requires a list value")
+            if self.operator in ("gt", "lt") and (
+                isinstance(self.value, bool) or not isinstance(self.value, int)
+            ):
+                raise ValueError(f"operator {self.operator!r} requires an integer value")
+            return self
+  requires: [pydantic]
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "camelCase на вході й виході"
+  prompt: |
+    Фронтенд шле елемент `input` у camelCase, Python-код працює зі snake_case. Опишіть модель
+    `InputElement` з полями `name: str`, `label: str`, `default_value: str | None`,
+    `max_length: int | None`, `placeholder: str | None` (останні три необов'язкові) так, щоб:
+
+    - на вході приймались і `maxLength`, і `max_length`;
+    - невідомі ключі давали помилку `extra_forbidden`;
+    - `model_dump_json()` без аргументів віддавав camelCase.
+
+    Напишіть функцію `roundtrip(raw: dict) -> str`, яка валідує dict і повертає JSON без `None`-полів.
+  starter: |
+    from pydantic import BaseModel, ConfigDict
+    from pydantic.alias_generators import to_camel
+
+    class InputElement(BaseModel):
+        ...
+
+    def roundtrip(raw: dict) -> str:
+        ...
+  harness: |
+    from pydantic import ValidationError
+
+    print(roundtrip({"name": "email", "label": "Email", "maxLength": 80}))
+    print(roundtrip({"name": "email", "label": "Email", "max_length": 80, "defaultValue": ""}))
+    try:
+        roundtrip({"name": "x", "label": "X", "maxLen": 5})
+    except ValidationError as e:
+        print([(err["loc"], err["type"]) for err in e.errors()])
+  expected: |
+    {"name":"email","label":"Email","maxLength":80}
+    {"name":"email","label":"Email","defaultValue":"","maxLength":80}
+    [(('maxLen',), 'extra_forbidden')]
+  hints:
+    - "Усе налаштування живе в model_config = ConfigDict(...): генератор аліасів, дозвіл валідувати за іменем поля, серіалізація за аліасом і заборона зайвих ключів."
+    - "Порядок ключів у JSON це порядок оголошення полів, тому defaultValue іде перед maxLength. None-поля прибирає exclude_none=True у model_dump_json."
+    - "ConfigDict(alias_generator=to_camel, validate_by_name=True, validate_by_alias=True, serialize_by_alias=True, extra=\"forbid\"); roundtrip: InputElement.model_validate(raw).model_dump_json(exclude_none=True)"
+  solution: |
+    from pydantic import BaseModel, ConfigDict
+    from pydantic.alias_generators import to_camel
+
+    class InputElement(BaseModel):
+        model_config = ConfigDict(
+            alias_generator=to_camel,
+            validate_by_name=True,
+            validate_by_alias=True,
+            serialize_by_alias=True,
+            extra="forbid",
+        )
+        name: str
+        label: str
+        default_value: str | None = None
+        max_length: int | None = None
+        placeholder: str | None = None
+
+    def roundtrip(raw: dict) -> str:
+        return InputElement.model_validate(raw).model_dump_json(exclude_none=True)
+  requires: [pydantic]
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "FormConfig: дерево елементів з discriminated union"
+  prompt: |
+    Зберіть моделі для конфігу форми FormBuilder.
+
+    - `Condition`: `field: str`, `operator: Literal["eq", "neq", "in", "gt", "lt"]`,
+      `value: str | int | bool | list[str]`.
+    - `Validation`: `required: bool = False`, `min_length` і `max_length` як `int | None`
+      з `ge=0`, `pattern: str | None`.
+    - Спільна база `BaseElement` з `extra="forbid"`, полями `id: str` і `visible_if: Condition | None = None`.
+    - Чотири елементи, кожен зі своїм `type: Literal[...]`:
+      `InputElement` (`"input"`: `name`, `label`, `input_type: Literal["text", "email", "number", "tel"] = "text"`,
+      `validation: Validation` з фабрикою за замовчуванням), `TextElement` (`"text"`: `content`),
+      `ButtonElement` (`"button"`: `label`, `action: Literal["submit", "next", "reset"] = "submit"`),
+      `BlockElement` (`"block"`: `children: list[Element] = []`).
+    - `Element`: discriminated union чотирьох елементів за полем `type`.
+    - `Theme`: `mode: Literal["light", "dark"] = "light"`, `primary_color` з default `"#2563eb"` і
+      pattern `^#[0-9a-fA-F]{6}$`.
+    - `FormConfig`: `id` (min_length=1), `title` (1..120), `theme: Theme` з фабрикою, `elements: list[Element]`,
+      і `model_validator(mode="after")`, який перевіряє, що кожен `visible_if.field` у дереві
+      посилається на `name` якогось `InputElement`; інакше `ValueError` з текстом
+      `element 'i1': visible_if references unknown field 'country'`.
+    - Функція `field_names(form: FormConfig) -> list[str]`: імена всіх інпутів у порядку обходу в глибину.
+  starter: |
+    from typing import Annotated, Iterator, Literal, Self
+    from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+    Operator = Literal["eq", "neq", "in", "gt", "lt"]
+
+    class Condition(BaseModel):
+        ...
+
+    class Validation(BaseModel):
+        ...
+
+    class BaseElement(BaseModel):
+        ...
+
+    class InputElement(BaseElement):
+        ...
+
+    class TextElement(BaseElement):
+        ...
+
+    class ButtonElement(BaseElement):
+        ...
+
+    class BlockElement(BaseElement):
+        ...
+
+    Element = ...
+
+    class Theme(BaseModel):
+        ...
+
+    class FormConfig(BaseModel):
+        ...
+
+    def field_names(form: FormConfig) -> list[str]:
+        ...
+  harness: |
+    from pydantic import ValidationError
+
+    raw = {
+        "id": "signup",
+        "title": "Sign up",
+        "theme": {"mode": "dark"},
+        "elements": [
+            {"id": "t1", "type": "text", "content": "Create an account"},
+            {"id": "b1", "type": "block", "children": [
+                {"id": "i1", "type": "input", "name": "email", "label": "Email",
+                 "input_type": "email", "validation": {"required": True}},
+                {"id": "i2", "type": "input", "name": "plan", "label": "Plan"},
+                {"id": "i3", "type": "input", "name": "company", "label": "Company",
+                 "visible_if": {"field": "plan", "operator": "in", "value": ["team", "pro"]}},
+            ]},
+            {"id": "btn", "type": "button", "label": "Continue", "action": "next"},
+        ],
+    }
+
+    form = FormConfig.model_validate(raw)
+    print(field_names(form))
+    print([type(el).__name__ for el in form.elements])
+    print(form.theme.primary_color, form.elements[1].children[0].validation.required)
+    print(form.elements[1].children[2].visible_if.operator)
+
+    def show_errors(data: dict) -> None:
+        try:
+            FormConfig.model_validate(data)
+        except ValidationError as e:
+            for err in e.errors(include_url=False):
+                print(err["loc"], err["msg"])
+
+    bad_ref = {**raw, "elements": [
+        {"id": "i1", "type": "input", "name": "email", "label": "Email",
+         "visible_if": {"field": "country", "operator": "eq", "value": "UA"}},
+    ]}
+    show_errors(bad_ref)
+
+    bad_type = {**raw, "elements": [{"id": "x", "type": "image", "src": "a.png"}]}
+    show_errors(bad_type)
+
+    bad_nested = {**raw, "elements": [
+        {"id": "b1", "type": "block", "children": [
+            {"id": "i1", "type": "input", "name": "age", "label": "Age",
+             "validation": {"min_length": -1}, "placeholder": "18"},
+        ]},
+    ]}
+    show_errors(bad_nested)
+  expected: |
+    ['email', 'plan', 'company']
+    ['TextElement', 'BlockElement', 'ButtonElement']
+    #2563eb True
+    in
+    () Value error, element 'i1': visible_if references unknown field 'country'
+    ('elements', 0) Input tag 'image' found using 'type' does not match any of the expected tags: 'input', 'text', 'button', 'block'
+    ('elements', 0, 'block', 'children', 0, 'input', 'validation', 'min_length') Input should be greater than or equal to 0
+    ('elements', 0, 'block', 'children', 0, 'input', 'placeholder') Extra inputs are not permitted
+  hints:
+    - "Обхід дерева це окремий генератор walk(elements), який віддає кожен елемент і рекурсивно заходить у children блоків. І field_names, і model_validator користуються ним."
+    - "Element = Annotated[InputElement | TextElement | ButtonElement | BlockElement, Field(discriminator=\"type\")]; у BlockElement пишіть list[\"Element\"] у лапках, бо Element визначений нижче."
+    - "У валідаторі: names = set(field_names(self)); for el in walk(self.elements): if el.visible_if is not None and el.visible_if.field not in names: raise ValueError(f\"element {el.id!r}: visible_if references unknown field {el.visible_if.field!r}\")"
+  solution: |
+    from typing import Annotated, Iterator, Literal, Self
+    from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+    Operator = Literal["eq", "neq", "in", "gt", "lt"]
+
+    class Condition(BaseModel):
+        field: str
+        operator: Operator
+        value: str | int | bool | list[str]
+
+    class Validation(BaseModel):
+        required: bool = False
+        min_length: int | None = Field(default=None, ge=0)
+        max_length: int | None = Field(default=None, ge=0)
+        pattern: str | None = None
+
+    class BaseElement(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        id: str
+        visible_if: Condition | None = None
+
+    class InputElement(BaseElement):
+        type: Literal["input"]
+        name: str
+        label: str
+        input_type: Literal["text", "email", "number", "tel"] = "text"
+        validation: Validation = Field(default_factory=Validation)
+
+    class TextElement(BaseElement):
+        type: Literal["text"]
+        content: str
+
+    class ButtonElement(BaseElement):
+        type: Literal["button"]
+        label: str
+        action: Literal["submit", "next", "reset"] = "submit"
+
+    class BlockElement(BaseElement):
+        type: Literal["block"]
+        children: list["Element"] = []
+
+    Element = Annotated[
+        InputElement | TextElement | ButtonElement | BlockElement,
+        Field(discriminator="type"),
+    ]
+
+    class Theme(BaseModel):
+        mode: Literal["light", "dark"] = "light"
+        primary_color: str = Field(default="#2563eb", pattern=r"^#[0-9a-fA-F]{6}$")
+
+    def walk(elements: list) -> Iterator[BaseElement]:
+        for el in elements:
+            yield el
+            if isinstance(el, BlockElement):
+                yield from walk(el.children)
+
+    class FormConfig(BaseModel):
+        id: str = Field(min_length=1)
+        title: str = Field(min_length=1, max_length=120)
+        theme: Theme = Field(default_factory=Theme)
+        elements: list[Element]
+
+        @model_validator(mode="after")
+        def check_condition_refs(self) -> Self:
+            names = set(field_names(self))
+            for el in walk(self.elements):
+                if el.visible_if is not None and el.visible_if.field not in names:
+                    raise ValueError(
+                        f"element {el.id!r}: visible_if references unknown field {el.visible_if.field!r}"
+                    )
+            return self
+
+    def field_names(form: FormConfig) -> list[str]:
+        return [el.name for el in walk(form.elements) if isinstance(el, InputElement)]
+  requires: [pydantic]
+  runtime: browser
+
+- id: t6
+  type: code
+  title: "to_domain: з Pydantic у frozen dataclass"
+  prompt: |
+    Перекладіть перевірену Pydantic-модель з t5 у внутрішнє представлення з frozen dataclass (m2-l05).
+    У капстоуні це функція `to_domain` у `config.py`: Pydantic лишається на вході, а рендерер, черга
+    й кеш отримують незмінні domain-об'єкти.
+
+    `to_domain(form: FormConfig) -> domain.FormConfig`:
+
+    - `input` → `domain.Element(type="input", id, name, label)`;
+    - `text` → `label` береться з `content`; `button` → `label`;
+    - `block` → `children` рекурсивно, кортежем;
+    - `visible_if` → `domain.Condition`, список у `value` стає кортежем;
+    - `theme` → `domain.Theme`, `elements` → кортеж.
+
+    У стартері моделі t5 скорочені до потрібних полів, а dataclass з m2-l05 зібрані в клас-простір імен
+    `domain`, щоб імена не зіткнулися (у капстоуні це окремий модуль `formbuilder.domain`).
+
+    ```python
+    form = to_domain(FormConfig.model_validate(raw))
+    form.elements[1].children[1].visible_if
+    # domain.Condition(field='plan', operator='in', value=('team', 'pro'))
+    ```
+  starter: |
+    from dataclasses import dataclass
+    from typing import Annotated, Literal
+
+    from pydantic import BaseModel, ConfigDict, Field
+
+    Operator = Literal["eq", "neq", "in", "gt", "lt"]
+
+
+    # --- вхідний шар: Pydantic-моделі з t5 (скорочено) ---
+    class Condition(BaseModel):
+        field: str
+        operator: Operator
+        value: str | int | bool | list[str]
+
+
+    class BaseElement(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        id: str
+        visible_if: Condition | None = None
+
+
+    class InputElement(BaseElement):
+        type: Literal["input"]
+        name: str
+        label: str
+
+
+    class TextElement(BaseElement):
+        type: Literal["text"]
+        content: str
+
+
+    class ButtonElement(BaseElement):
+        type: Literal["button"]
+        label: str
+
+
+    class BlockElement(BaseElement):
+        type: Literal["block"]
+        children: list["Element"] = []
+
+
+    Element = Annotated[
+        InputElement | TextElement | ButtonElement | BlockElement,
+        Field(discriminator="type"),
+    ]
+
+
+    class Theme(BaseModel):
+        mode: Literal["light", "dark"] = "light"
+        primary_color: str = "#2563eb"
+
+
+    class FormConfig(BaseModel):
+        id: str
+        title: str
+        theme: Theme = Field(default_factory=Theme)
+        elements: list[Element]
+
+
+    # --- внутрішній шар: frozen dataclass з m2-l05 ---
+    # У капстоуні це окремий модуль formbuilder/domain.py; тут клас-простір імен,
+    # щоб імена не зіткнулися з моделями вище.
+    class domain:
+        @dataclass(frozen=True, slots=True)
+        class Theme:
+            mode: Literal["light", "dark"] = "light"
+            primary_color: str = "#2563eb"
+
+        @dataclass(frozen=True, slots=True)
+        class Condition:
+            field: str
+            operator: Operator
+            value: str | int | bool | tuple[str, ...]
+
+        @dataclass(frozen=True, slots=True, kw_only=True)
+        class Element:
+            type: Literal["input", "text", "button", "block"]
+            id: str
+            name: str | None = None
+            label: str = ""
+            children: tuple["domain.Element", ...] = ()
+            visible_if: "domain.Condition | None" = None
+
+        @dataclass(frozen=True, slots=True, kw_only=True)
+        class FormConfig:
+            id: str
+            title: str
+            theme: "domain.Theme"
+            elements: tuple["domain.Element", ...] = ()
+
+
+    def to_domain(form: FormConfig) -> domain.FormConfig:
+        ...
+  harness: |
+    raw = {
+        "id": "signup",
+        "title": "Sign up",
+        "theme": {"mode": "dark"},
+        "elements": [
+            {"id": "t1", "type": "text", "content": "Create an account"},
+            {"id": "b1", "type": "block", "children": [
+                {"id": "i1", "type": "input", "name": "plan", "label": "Plan"},
+                {"id": "i2", "type": "input", "name": "company", "label": "Company",
+                 "visible_if": {"field": "plan", "operator": "in", "value": ["team", "pro"]}},
+            ]},
+            {"id": "btn", "type": "button", "label": "Continue"},
+        ],
+    }
+
+    form = to_domain(FormConfig.model_validate(raw))
+    print(type(form).__qualname__, form.theme)
+    print([(el.type, el.id, el.label) for el in form.elements])
+    block = form.elements[1]
+    print(type(block.children).__name__, [child.name for child in block.children])
+    print(block.children[1].visible_if)
+    print(form == to_domain(FormConfig.model_validate(raw)), {form: "cached"}[form])
+  expected: |
+    domain.FormConfig domain.Theme(mode='dark', primary_color='#2563eb')
+    [('text', 't1', 'Create an account'), ('block', 'b1', ''), ('button', 'btn', 'Continue')]
+    tuple ['plan', 'company']
+    domain.Condition(field='plan', operator='in', value=('team', 'pro'))
+    True cached
+  hints:
+    - Один допоміжний `_element(el)` на елемент і рекурсія лише в гілці `block`; `match el:` з класовими патернами `case InputElement():` розбирає union за типом.
+    - 'Спільні поля зберіть один раз: `common = {"id": el.id, "visible_if": _condition(el.visible_if)}`, далі `domain.Element(type="text", label=el.content, **common)`. У `_condition` список стає кортежем: `tuple(v) if isinstance(v, list) else v`.'
+    - '`to_domain` повертає `domain.FormConfig(id=form.id, title=form.title, theme=domain.Theme(mode=form.theme.mode, primary_color=form.theme.primary_color), elements=tuple(_element(el) for el in form.elements))`.'
+  solution: |
+    from dataclasses import dataclass
+    from typing import Annotated, Literal
+
+    from pydantic import BaseModel, ConfigDict, Field
+
+    Operator = Literal["eq", "neq", "in", "gt", "lt"]
+
+
+    # --- вхідний шар: Pydantic-моделі з t5 (скорочено) ---
+    class Condition(BaseModel):
+        field: str
+        operator: Operator
+        value: str | int | bool | list[str]
+
+
+    class BaseElement(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        id: str
+        visible_if: Condition | None = None
+
+
+    class InputElement(BaseElement):
+        type: Literal["input"]
+        name: str
+        label: str
+
+
+    class TextElement(BaseElement):
+        type: Literal["text"]
+        content: str
+
+
+    class ButtonElement(BaseElement):
+        type: Literal["button"]
+        label: str
+
+
+    class BlockElement(BaseElement):
+        type: Literal["block"]
+        children: list["Element"] = []
+
+
+    Element = Annotated[
+        InputElement | TextElement | ButtonElement | BlockElement,
+        Field(discriminator="type"),
+    ]
+
+
+    class Theme(BaseModel):
+        mode: Literal["light", "dark"] = "light"
+        primary_color: str = "#2563eb"
+
+
+    class FormConfig(BaseModel):
+        id: str
+        title: str
+        theme: Theme = Field(default_factory=Theme)
+        elements: list[Element]
+
+
+    # --- внутрішній шар: frozen dataclass з m2-l05 ---
+    # У капстоуні це окремий модуль formbuilder/domain.py; тут клас-простір імен,
+    # щоб імена не зіткнулися з моделями вище.
+    class domain:
+        @dataclass(frozen=True, slots=True)
+        class Theme:
+            mode: Literal["light", "dark"] = "light"
+            primary_color: str = "#2563eb"
+
+        @dataclass(frozen=True, slots=True)
+        class Condition:
+            field: str
+            operator: Operator
+            value: str | int | bool | tuple[str, ...]
+
+        @dataclass(frozen=True, slots=True, kw_only=True)
+        class Element:
+            type: Literal["input", "text", "button", "block"]
+            id: str
+            name: str | None = None
+            label: str = ""
+            children: tuple["domain.Element", ...] = ()
+            visible_if: "domain.Condition | None" = None
+
+        @dataclass(frozen=True, slots=True, kw_only=True)
+        class FormConfig:
+            id: str
+            title: str
+            theme: "domain.Theme"
+            elements: tuple["domain.Element", ...] = ()
+
+
+    def _condition(cond: Condition | None) -> domain.Condition | None:
+        if cond is None:
+            return None
+        value = tuple(cond.value) if isinstance(cond.value, list) else cond.value
+        return domain.Condition(cond.field, cond.operator, value)
+
+
+    def _element(el: InputElement | TextElement | ButtonElement | BlockElement) -> domain.Element:
+        common = {"id": el.id, "visible_if": _condition(el.visible_if)}
+        match el:
+            case InputElement():
+                return domain.Element(type="input", name=el.name, label=el.label, **common)
+            case TextElement():
+                return domain.Element(type="text", label=el.content, **common)
+            case ButtonElement():
+                return domain.Element(type="button", label=el.label, **common)
+            case BlockElement():
+                children = tuple(_element(child) for child in el.children)
+                return domain.Element(type="block", children=children, **common)
+
+
+    def to_domain(form: FormConfig) -> domain.FormConfig:
+        return domain.FormConfig(
+            id=form.id,
+            title=form.title,
+            theme=domain.Theme(mode=form.theme.mode, primary_color=form.theme.primary_color),
+            elements=tuple(_element(el) for el in form.elements),
+        )
+  requires: [pydantic]
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from pydantic import BaseModel
+
+    class User(BaseModel):
+        age: int
+
+    print(repr(User(age="42").age))
+    ```
+  options: ["42", "'42'", "ValidationError: Input should be a valid integer", "TypeError: age must be int"]
+  answer: 0
+  explain: |
+    Pydantic за замовчуванням працює в lax-режимі: рядок, який парситься як ціле, стає `int`, тому `repr` дає `42` без лапок.
+    `'42'` це інтуїція з TS, де тип не змінює значення; у Pydantic валідація повертає перетворене значення.
+    `ValidationError` було б у strict-режимі (`Field(strict=True)` або `ConfigDict(strict=True)`), і це поведінка Zod без `z.coerce`.
+    `TypeError` Pydantic не кидає для помилок даних взагалі: усе, що стосується вмісту, це `ValidationError`.
+
+- id: q2
+  type: quiz
+  question: |
+    Фронтенд надіслав `{"name": "email", "placeholder": "you@example.com"}`, модель така:
+    ```python
+    class InputElement(BaseModel):
+        name: str
+    ```
+    Що станеться при `InputElement.model_validate(raw)`?
+  options:
+    - "Створиться `InputElement(name='email')`, `placeholder` мовчки відкинуто"
+    - "`ValidationError` з `type='extra_forbidden'`"
+    - "Створиться модель, `placeholder` доступний через `model_extra`"
+    - "`TypeError: unexpected keyword argument 'placeholder'`"
+  answer: 0
+  explain: |
+    За замовчуванням `extra="ignore"`: зайві ключі відкидаються без помилки, як `.strip()` у Zod. Це ж причина, чому помилка в імені ключа (`min_length` замість `minLength` при `alias_generator`) проходить непоміченою.
+    `extra_forbidden` з'являється лише з `model_config = ConfigDict(extra="forbid")`, аналог `.strict()`.
+    `model_extra` заповнюється лише при `extra="allow"`, аналог `.passthrough()`.
+    `TypeError` про unexpected keyword це поведінка звичайного класу або dataclass, Pydantic так не поводиться навіть через `InputElement(**raw)`.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from pydantic import BaseModel
+
+    class Settings(BaseModel):
+        tags: list[str] = []
+
+    a = Settings()
+    b = Settings()
+    a.tags.append("x")
+    print(b.tags, a.tags is b.tags)
+    ```
+  options: ["[] False", "['x'] True", "ValidationError: mutable default", "[] True"]
+  answer: 0
+  explain: |
+    Pydantic копіює значення за замовчуванням для кожного екземпляра, тому `b.tags` порожній, а `a.tags is b.tags` дає `False`.
+    `['x'] True` це пастка mutable default з m1-l07 для звичайних функцій і причина, чому в dataclass потрібен `field(default_factory=list)`; Pydantic від неї захищає сам.
+    `ValidationError` на оголошенні моделі не виникає: `[]` як default дозволений, Pydantic не забороняє mutable defaults, а копіює їх.
+    `[] True` суперечливий: якби це був той самий список, `b.tags` містив би `"x"`.
+
+- id: p1
+  type: project
+  title: "Моделі конфігу FormBuilder у репозиторії капстоуну"
+  prompt: |
+    Перенесіть моделі з завдання t5 у репозиторій капстоуну в `src/formbuilder/config.py`: TypedDict з m2-l06
+    у цьому файлі замінюються Pydantic-моделями з тими самими іменами. Поруч покладіть `to_domain` з t6, яка
+    імпортує dataclass з `formbuilder.domain` (m2-l05) як модуль: `from formbuilder import domain`.
+    Тести в `tests/test_models.py`. Покрийте реальний конфіг вашого FormBuilder: візьміть
+    один справжній JSON з проду або з ваших фікстур, покладіть у `tests/fixtures/form_signup.json`
+    і перевірте, що він проходить валідацію без змін або з мінімальними правками моделей,
+    які ви усвідомлено задокументували в docstring.
+  checklist:
+    - "`FormConfig.model_validate_json(path.read_text())` проходить на реальному конфігу з фікстури"
+    - "Моделі елементів приймають camelCase з фронтенду (`alias_generator=to_camel`, `validate_by_name=True`) і віддають camelCase у `model_dump_json()`"
+    - "`extra=\"forbid\"` на всіх моделях елементів; тест із зайвим ключем очікує `extra_forbidden`"
+    - "Тест на `visible_if`, що посилається на неіснуюче поле, очікує `ValidationError` з текстом `references unknown field`"
+    - "Тест на невідомий `type` елемента перевіряє, що помилка одна і `loc` вказує на індекс елемента"
+    - "`FormConfig.model_json_schema()` зберігається у `schema/form-config.json` окремим скриптом або тестом, і файл закомічений"
+    - "Тест: `to_domain` на реальному конфігу з фікстури повертає `domain.FormConfig`, у якому `children` і `value` умов це кортежі"
+    - "pyright або mypy у strict-режимі з m2-l08 проходять на `config.py` без `type: ignore`"
+  verify: "cd capstone && uv run pytest tests/test_models.py -q"

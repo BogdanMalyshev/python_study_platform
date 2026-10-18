@@ -1,0 +1,514 @@
+- id: q1
+  type: quiz
+  question: |
+    Капстоун тримає чергу задач і словник статусів у пам'яті модуля (m7-l03) і запущений так:
+    ```bash
+    uvicorn formbuilder.api.app:app --host 0.0.0.0 --port 8000 --workers 4
+    ```
+    Клієнт робить `POST /jobs` і отримує `id: 7`, а потім кілька разів `GET /jobs/7`. Що він побачить?
+  options:
+  - 'Частина GET поверне 404: запити розподіляються між чотирма процесами, і в кожного своя черга й свій словник статусів'
+  - 'Завжди 200: воркери uvicorn це потоки одного процесу, пам''ять у них спільна'
+  - 'Завжди 200: uvicorn закріплює клієнта за одним воркером, як sticky sessions'
+  - 'uvicorn не стартує: in-memory стан несумісний з --workers'
+  answer: 0
+  explain: |
+    `--workers N` запускає N окремих процесів, кожен імпортує застосунок і створює власні глобальні об'єкти. З'єднання між процесами розподіляє ядро ОС, тож `GET` може потрапити не в той процес, що прийняв `POST`. Потоки тут ні до чого: через GIL вони не дали б паралелізму, тому uvicorn використовує процеси (як `cluster` у Node). Sticky sessions це функція балансувальника, а не uvicorn. І uvicorn нічого не знає про ваш стан, тому стартує без скарг, саме через це капстоун фіксує `workers: Literal[1]` у налаштуваннях.
+- id: t1
+  type: code
+  title: Налаштування з префіксом
+  prompt: |
+    У контейнері змінних оточення багато: `PATH`, `HOSTNAME`, `HOME` і ваші `FORMBUILDER_*`. Напишіть `env_settings(env, prefix="FORMBUILDER_")`, яка робить те, що `env_prefix` у pydantic-settings робить першим кроком:
+
+    - бере лише ключі, що починаються з `prefix`, і пропускає ключ, який дорівнює самому префіксу;
+    - відрізає префікс і переводить ключ у нижній регістр;
+    - значення лишає рядками без змін;
+    - повертає словник з ключами в алфавітному порядку.
+
+    ```python
+    env_settings({"FORMBUILDER_PORT": "8000", "HOME": "/app"})  # {'port': '8000'}
+    ```
+  starter: |
+    def env_settings(env: dict[str, str], prefix: str = "FORMBUILDER_") -> dict[str, str]:
+        ...
+  harness: |
+    env = {
+        "PATH": "/app/.venv/bin:/usr/bin",
+        "FORMBUILDER_PORT": "8000",
+        "FORMBUILDER_LOG_LEVEL": "INFO",
+        "HOSTNAME": "3f2a9c",
+        "FORMBUILDER_": "oops",
+        "FORMBUILDER_OUT_DIR": "/data/out",
+    }
+    print(env_settings(env))
+    print(env_settings({"APP_PORT": "1"}, prefix="APP_"))
+    print(env_settings({}))
+  expected: |
+    {'log_level': 'INFO', 'out_dir': '/data/out', 'port': '8000'}
+    {'port': '1'}
+    {}
+  hints:
+  - 'Dict comprehension з умовою: фільтр за `startswith`, перетворення ключа, `sorted(env.items())` дає порядок.'
+  - Для відрізання префікса є `str.removeprefix` (3.9+); порожній ключ після відрізання означає, що ключ дорівнював префіксу.
+  - '`{k.removeprefix(prefix).lower(): v for k, v in sorted(env.items()) if k.startswith(prefix) and k != prefix}`'
+  solution: |
+    def env_settings(env: dict[str, str], prefix: str = "FORMBUILDER_") -> dict[str, str]:
+        return {
+            key.removeprefix(prefix).lower(): value
+            for key, value in sorted(env.items())
+            if key.startswith(prefix) and key != prefix
+        }
+  requires: []
+  runtime: browser
+- id: t2
+  type: code
+  title: Валідація налаштувань сервера
+  prompt: |
+    Тут немає pydantic-settings, але є pydantic, і цього досить, щоб перевірити налаштування uvicorn до старту. Доповніть модель `ServerSettings` і напишіть `load_server_settings(env)`:
+
+    - `port` від 1 до 65535, `workers` не менше 1;
+    - `log_level` приймає будь-який регістр (`"WARNING"` стає `"warning"`), але лише чотири рівні з `Literal`;
+    - `reload=True` разом з `workers > 1` це помилка рівня моделі `ValueError("reload works with a single worker")`;
+    - `load_server_settings` бере зі словника `env` лише ключі `FORMBUILDER_*`, перетворює їх, як у t1, і валідує через `model_validate`; рядки `"8080"` і `"true"` pydantic перетворить сам.
+
+    Харнес друкує модель або список `(поле, тип помилки)`; для помилки рівня моделі поле `-`.
+  starter: |
+    from typing import Literal, Self
+
+    from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+
+
+    class ServerSettings(BaseModel):
+        host: str = "127.0.0.1"
+        port: int = 8000
+        workers: int = 1
+        reload: bool = False
+        log_level: Literal["debug", "info", "warning", "error"] = "info"
+
+
+    def load_server_settings(env: dict[str, str]) -> ServerSettings:
+        ...
+  harness: |
+    def show(env: dict[str, str]) -> None:
+        try:
+            print(load_server_settings(env))
+        except ValidationError as exc:
+            print([(".".join(map(str, e["loc"])) or "-", e["type"]) for e in exc.errors()])
+
+
+    show({})
+    show({"FORMBUILDER_HOST": "0.0.0.0", "FORMBUILDER_PORT": "8080", "FORMBUILDER_LOG_LEVEL": "WARNING", "HOME": "/app"})
+    show({"FORMBUILDER_RELOAD": "true", "FORMBUILDER_WORKERS": "1"})
+    show({"FORMBUILDER_PORT": "70000", "FORMBUILDER_WORKERS": "two"})
+    show({"FORMBUILDER_RELOAD": "1", "FORMBUILDER_WORKERS": "4"})
+    show({"FORMBUILDER_LOG_LEVEL": "verbose"})
+  expected: |
+    host='127.0.0.1' port=8000 workers=1 reload=False log_level='info'
+    host='0.0.0.0' port=8080 workers=1 reload=False log_level='warning'
+    host='127.0.0.1' port=8000 workers=1 reload=True log_level='info'
+    [('port', 'less_than_equal'), ('workers', 'int_parsing')]
+    [('-', 'value_error')]
+    [('log_level', 'literal_error')]
+  hints:
+  - Межі задаються через `Field(default=..., ge=..., le=...)`; регістр нормалізує `field_validator` з `mode="before"`, бо `Literal` перевіряється раніше за `after`.
+  - Перевірка двох полів разом це `@model_validator(mode="after")`, метод отримує вже готовий `self` і повертає його.
+  - |-
+    ```python
+    @model_validator(mode="after")
+    def reload_needs_one_worker(self) -> Self:
+        if self.reload and self.workers > 1:
+            raise ValueError("reload works with a single worker")
+        return self
+    ```
+  solution: |
+    from typing import Literal, Self
+
+    from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+
+
+    class ServerSettings(BaseModel):
+        host: str = "127.0.0.1"
+        port: int = Field(default=8000, ge=1, le=65535)
+        workers: int = Field(default=1, ge=1)
+        reload: bool = False
+        log_level: Literal["debug", "info", "warning", "error"] = "info"
+
+        @field_validator("log_level", mode="before")
+        @classmethod
+        def lower(cls, value: object) -> object:
+            return value.lower() if isinstance(value, str) else value
+
+        @model_validator(mode="after")
+        def reload_needs_one_worker(self) -> Self:
+            if self.reload and self.workers > 1:
+                raise ValueError("reload works with a single worker")
+            return self
+
+
+    def load_server_settings(env: dict[str, str]) -> ServerSettings:
+        prefix = "FORMBUILDER_"
+        data = {
+            key.removeprefix(prefix).lower(): value
+            for key, value in env.items()
+            if key.startswith(prefix)
+        }
+        return ServerSettings.model_validate(data)
+  requires:
+  - pydantic
+  runtime: browser
+- id: q2
+  type: quiz
+  question: |
+    Останній рядок Dockerfile:
+    ```dockerfile
+    CMD formbuilder serve
+    ```
+    Що станеться на `docker stop`, якщо `stop_grace_period` за замовчуванням?
+  options:
+  - uvicorn отримає SIGTERM, дочекається відкритих запитів і виконає shutdown lifespan
+  - '`/bin/sh` перешле SIGTERM дочірньому процесу, як це робить `npm start`'
+  - PID 1 буде `/bin/sh`, він не реагує на SIGTERM; через 10 секунд Docker надішле SIGKILL, і shutdown lifespan не виконається
+  - Docker надішле SIGINT, і в Python виникне `KeyboardInterrupt`
+  answer: 2
+  explain: |
+    Без квадратних дужок це shell-форма: Docker запускає `/bin/sh -c "formbuilder serve"`, і PID 1 стає shell. Ядро не застосовує дію за замовчуванням до сигналів для PID 1, а sh власного обробника не має, тож SIGTERM нікуди не дійде, і через stop timeout (10 с) прийде SIGKILL. Перший варіант правильний лише для exec-форми `CMD ["formbuilder", "serve"]`. Пересилання сигналів не є властивістю shell, а `npm` як обгортка теж відомий проблемами з цим. `docker stop` надсилає SIGTERM (або `STOPSIGNAL` з Dockerfile), а не SIGINT.
+- id: t3
+  type: code
+  title: Команда uvicorn для exec-форми
+  prompt: |
+    Напишіть дві функції.
+
+    `uvicorn_argv(app, settings)` будує список аргументів для запуску uvicorn зі словника налаштувань:
+    - завжди `["uvicorn", app, "--host", host, "--port", port]`, за замовчуванням `127.0.0.1` і `8000`, усі елементи рядки;
+    - `--workers N` лише коли `workers > 1`;
+    - `--reload` лише коли `reload` істинний;
+    - `--log-level L` лише коли рівень не `info`;
+    - `reload` разом з `workers > 1` дає `ValueError("uvicorn ignores --workers with --reload")`: сам uvicorn лише друкує попередження, а ми хочемо падіння.
+
+    `cmd_line(argv)` повертає рядок Dockerfile в exec-формі: `CMD` і JSON-масив. Exec-форма це саме JSON, тому лапки мають бути подвійними.
+  starter: |
+    import json
+
+
+    def uvicorn_argv(app: str, settings: dict[str, object]) -> list[str]:
+        ...
+
+
+    def cmd_line(argv: list[str]) -> str:
+        ...
+  harness: |
+    app = "formbuilder.api.app:app"
+    print(uvicorn_argv(app, {}))
+    print(cmd_line(uvicorn_argv(app, {"host": "0.0.0.0", "port": 8000})))
+    print(cmd_line(uvicorn_argv(app, {"host": "0.0.0.0", "workers": 2, "log_level": "warning"})))
+    print(uvicorn_argv(app, {"reload": True}))
+    try:
+        uvicorn_argv(app, {"reload": True, "workers": 4})
+    except ValueError as exc:
+        print("ValueError:", exc)
+  expected: |
+    ['uvicorn', 'formbuilder.api.app:app', '--host', '127.0.0.1', '--port', '8000']
+    CMD ["uvicorn", "formbuilder.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    CMD ["uvicorn", "formbuilder.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--log-level", "warning"]
+    ['uvicorn', 'formbuilder.api.app:app', '--host', '127.0.0.1', '--port', '8000', '--reload']
+    ValueError: uvicorn ignores --workers with --reload
+  hints:
+  - Почніть з обов'язкової частини і дописуйте прапорці через `argv += [...]`; `settings.get(key, default)` дає значення за замовчуванням.
+  - Числа перетворюйте в рядки через `str(...)`; `str(['a'])` дає одинарні лапки, а `json.dumps(['a'])` подвійні.
+  - '`return "CMD " + json.dumps(argv)`; перевірку `reload and workers > 1` зробіть першою, до побудови списку.'
+  solution: |
+    import json
+
+
+    def uvicorn_argv(app: str, settings: dict[str, object]) -> list[str]:
+        workers = int(settings.get("workers", 1))
+        reload = bool(settings.get("reload", False))
+        if reload and workers > 1:
+            raise ValueError("uvicorn ignores --workers with --reload")
+        argv = [
+            "uvicorn",
+            app,
+            "--host",
+            str(settings.get("host", "127.0.0.1")),
+            "--port",
+            str(settings.get("port", 8000)),
+        ]
+        if workers > 1:
+            argv += ["--workers", str(workers)]
+        if reload:
+            argv.append("--reload")
+        level = str(settings.get("log_level", "info"))
+        if level != "info":
+            argv += ["--log-level", level]
+        return argv
+
+
+    def cmd_line(argv: list[str]) -> str:
+        return "CMD " + json.dumps(argv)
+  requires: []
+  runtime: browser
+- id: q3
+  type: quiz
+  question: |
+    Фрагмент Dockerfile:
+    ```dockerfile
+    COPY pyproject.toml uv.lock ./
+    RUN uv sync --locked --no-dev --no-install-project
+    COPY README.md ./
+    COPY src ./src
+    RUN uv sync --locked --no-dev --no-editable
+    ```
+    Ви змінили один рядок у `src/formbuilder/api/app.py` і запустили `docker build` знову. Що виконається заново?
+  options:
+  - '`COPY src` і другий `uv sync`, який встановить лише пакет formbuilder'
+  - 'Обидва `uv sync`: `uv.lock` містить хеш вихідників проєкту, тому перший шар теж інвалідується'
+  - 'Нічого: Docker порівнює лише текст інструкцій, а він не змінився'
+  - 'Усе від `FROM`: змінився build context'
+  answer: 0
+  explain: |
+    Docker перевикористовує шар, якщо інструкція і файли, які вона копіює, не змінились, а після першої перебудови інвалідуються всі шари нижче. Перший `COPY` бачить лише `pyproject.toml` і `uv.lock`; lock описує проєкт метаданими (`source = { editable = "." }`, залежності), а не хешами `.py`-файлів, тож шар з 22 пакетами береться з кешу. Текст інструкції `COPY src ./src` справді той самий, але для `COPY` Docker порівнює ще й вміст файлів. Зміна build context сама по собі нічого не інвалідує: важить лише те, що потрапляє в конкретний `COPY`.
+- id: t4
+  type: code
+  title: Лінтер Dockerfile проти Node-звичок
+  prompt: |
+    Напишіть `lint_dockerfile(text) -> list[str]`, яка знаходить п'ять помилок з уроку і повертає їхні описи, відсортовані за кодом:
+
+    | Код | Рядок результату | Коли |
+    |---|---|---|
+    | DL1 | `DL1 alpine base image` | будь-який `FROM` містить `alpine` |
+    | DL2 | `DL2 CMD in shell form` | останній `CMD` не починається з `[` |
+    | DL3 | `DL3 code copied before dependencies` | `COPY` з джерелом `.`, `src` або `./src` стоїть раніше за перший `RUN` з `uv sync` |
+    | DL4 | `DL4 runs as root` | після останнього `FROM` немає `USER` |
+    | DL5 | `DL5 .env baked into image` | будь-який `COPY` має `.env` окремим аргументом |
+
+    Розбір: рядки, що закінчуються на `\`, склеюються з наступним; порожні рядки й коментарі `#` пропускаються; ключове слово інструкції це перше слово, регістр не важливий. Кожна помилка в результаті один раз.
+  starter: |
+    def instructions(text: str) -> list[tuple[str, str]]:
+        """[("FROM", "python:3.12-slim AS builder"), ("RUN", "uv sync ..."), ...]"""
+        ...
+
+
+    def lint_dockerfile(text: str) -> list[str]:
+        ...
+  harness: |
+    good = """\
+    FROM python:3.12-slim AS builder
+    COPY --from=ghcr.io/astral-sh/uv:0.9.28 /uv /bin/uv
+    WORKDIR /app
+    COPY pyproject.toml uv.lock ./
+    RUN uv sync --locked --no-dev --no-install-project
+    COPY src ./src
+    RUN uv sync --locked --no-dev --no-editable
+
+    FROM python:3.12-slim
+    COPY --from=builder /app/.venv /app/.venv
+    USER app
+    CMD ["formbuilder", "serve"]
+    """
+
+    node_habits = """\
+    FROM python:3.12-alpine
+    WORKDIR /app
+    COPY . .
+    COPY .env .env
+    RUN pip install uv && \\
+        uv sync --locked
+    CMD uv run formbuilder serve
+    """
+
+    root_in_final = """\
+    FROM python:3.12-slim AS builder
+    USER app
+    RUN uv sync --locked
+    FROM python:3.12-slim
+    # USER app
+    CMD ["formbuilder", "serve"]
+    """
+
+    print(lint_dockerfile(good))
+    for problem in lint_dockerfile(node_habits):
+        print(problem)
+    print(lint_dockerfile(root_in_final))
+  expected: |
+    []
+    DL1 alpine base image
+    DL2 CMD in shell form
+    DL3 code copied before dependencies
+    DL4 runs as root
+    DL5 .env baked into image
+    ['DL4 runs as root']
+  hints:
+  - 'Спершу зведіть текст до списку пар `(KEYWORD, rest)`: заміна `"\\\n"` на пробіл склеює продовження, `str.partition(" ")` відділяє ключове слово.'
+  - 'Для DL3 і DL4 потрібні індекси: `next((i for i, (kw, rest) in enumerate(steps) if ...), None)` і `max(i for ... if kw == "FROM")`. Збирайте помилки в `set`, а наприкінці `sorted`.'
+  - 'DL3: `rest.split()[0] in {".", "src", "./src"}` для `COPY`, і порівняти з індексом першого `RUN` з `"uv sync" in rest`. DL5: `".env" in rest.split()`. DL4: `any(kw == "USER" for kw, _ in steps[last_from:])`.'
+  solution: |
+    def instructions(text: str) -> list[tuple[str, str]]:
+        joined = text.replace("\\\n", " ")
+        result = []
+        for raw in joined.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            keyword, _, rest = line.partition(" ")
+            result.append((keyword.upper(), rest.strip()))
+        return result
+
+
+    def lint_dockerfile(text: str) -> list[str]:
+        steps = instructions(text)
+        problems = set()
+        last_from = max(i for i, (kw, _) in enumerate(steps) if kw == "FROM")
+        if any(kw == "FROM" and "alpine" in rest for kw, rest in steps):
+            problems.add("DL1 alpine base image")
+        cmds = [rest for kw, rest in steps if kw == "CMD"]
+        if cmds and not cmds[-1].startswith("["):
+            problems.add("DL2 CMD in shell form")
+        sync_at = next(
+            (i for i, (kw, rest) in enumerate(steps) if kw == "RUN" and "uv sync" in rest),
+            None,
+        )
+        code_at = next(
+            (
+                i
+                for i, (kw, rest) in enumerate(steps)
+                if kw == "COPY" and rest.split()[0] in {".", "src", "./src"}
+            ),
+            None,
+        )
+        if sync_at is not None and code_at is not None and code_at < sync_at:
+            problems.add("DL3 code copied before dependencies")
+        if not any(kw == "USER" for kw, _ in steps[last_from:]):
+            problems.add("DL4 runs as root")
+        if any(kw == "COPY" and ".env" in rest.split() for kw, rest in steps):
+            problems.add("DL5 .env baked into image")
+        return sorted(problems)
+  requires: []
+  runtime: browser
+- id: p1
+  type: project
+  title: '`formbuilder serve`: обгортка над uvicorn з `--check`'
+  prompt: |
+    Замініть заглушку `serve` з m6-l06 на справжній запуск, як у розділі "`formbuilder serve`: локальний запуск як еталон".
+
+    1. У `Settings` додайте `host` (`127.0.0.1`), `port` (`8000`, від 1 до 65535), `log_json` (`False`) і `uvicorn_workers: Literal[1] = 1` (не `workers`: це поле з m6-l06 уже означає воркерів генерації всередині процесу).
+    2. Створіть `src/formbuilder/logs.py` з `JsonFormatter` і `log_config(level, json_logs)` для `uvicorn.run(log_config=...)`.
+    3. Якщо в API ще немає `GET /health`, додайте його: відповідь `{"status": "ok"}` без звернень до SQLite і черги.
+    4. `serve` приймає `--host`, `--port`, `--reload`, `--check`; невалідні налаштування дають код виходу 2 і повідомлення в stderr; `--check` друкує `ok: <title> -> http://<host>:<port>` і виходить з кодом 0, не відкриваючи порт; без `--check` викликається `uvicorn.run("formbuilder.api.app:app", ...)`.
+    5. Додайте тест `tests/test_serve.py`:
+
+    ```python
+    import pytest
+
+    from formbuilder.cli import main
+
+
+    def test_serve_check_prints_bind_address(
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setenv("FORMBUILDER_PORT", "9000")
+        assert main(["serve", "--check"]) == 0
+        assert "http://127.0.0.1:9000" in capsys.readouterr().out
+
+
+    def test_serve_rejects_several_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("FORMBUILDER_UVICORN_WORKERS", "4")
+        assert main(["serve", "--check"]) == 2
+    ```
+
+    6. Перевірте вручну: `uv run formbuilder serve`, у другому терміналі `curl -s http://127.0.0.1:8000/health`, потім Ctrl-C і переконайтесь, що в логах є `Application shutdown complete.`
+  checklist:
+  - '`uv run formbuilder serve --check` друкує `ok: ...` і повертає 0'
+  - '`FORMBUILDER_UVICORN_WORKERS=4 uv run formbuilder serve --check` повертає 2'
+  - '`FORMBUILDER_LOG_JSON=1 uv run formbuilder serve` пише в stdout по одному JSON-об''єкту на рядок'
+  - '`curl /health` повертає `{"status":"ok"}`'
+  - '`uv run ruff check`, `uv run mypy src` і `uv run pytest -q` зелені'
+  verify: cd capstone && uv run formbuilder serve --check && uv run pytest tests/test_serve.py -q
+- id: p2
+  type: project
+  title: Dockerfile, .dockerignore і compose для капстоуну
+  prompt: |
+    Покладіть у корінь `capstone/` три файли з уроку: multi-stage `Dockerfile` (розділ "Multi-stage, non-root і що потрапляє в образ"), `.dockerignore` і `compose.yaml` з томом `/data` і `stop_grace_period`. FastAPI і uvicorn в основних залежностях капстоуну (m3-l02), тож `uv sync` без `--extra`. Версію uv в `COPY --from=ghcr.io/astral-sh/uv:<версія>` візьміть з `uv --version`.
+
+    Статичні перевірки, які працюють без Docker, додайте як `tests/test_container_files.py`:
+
+    ```python
+    """Static checks of the container files: run without Docker."""
+
+    import json
+    from pathlib import Path
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+
+    def steps(text: str) -> list[tuple[str, str]]:
+        result = []
+        for raw in text.replace("\\\n", " ").splitlines():
+            line = raw.strip()
+            if line and not line.startswith("#"):
+                keyword, _, rest = line.partition(" ")
+                result.append((keyword.upper(), rest.strip()))
+        return result
+
+
+    DOCKERFILE = steps((ROOT / "Dockerfile").read_text(encoding="utf-8"))
+    LAST_FROM = max(i for i, (kw, _) in enumerate(DOCKERFILE) if kw == "FROM")
+    FINAL = DOCKERFILE[LAST_FROM:]
+
+
+    def index_of(keyword: str, needle: str) -> int:
+        for i, (kw, rest) in enumerate(DOCKERFILE):
+            if kw == keyword and needle in rest:
+                return i
+        raise AssertionError(f"no {keyword} with {needle!r} in Dockerfile")
+
+
+    def test_dependencies_layer_comes_before_sources() -> None:
+        deps = index_of("RUN", "--no-install-project")
+        sources = index_of("COPY", "src")
+        assert "--locked" in DOCKERFILE[deps][1], "use uv sync --locked"
+        assert deps < sources, "install dependencies before copying src/"
+
+
+    def test_final_stage_is_slim_non_root_and_without_uv() -> None:
+        assert "python:3.12-slim" in DOCKERFILE[LAST_FROM][1]
+        assert any(kw == "USER" for kw, _ in FINAL), "final stage runs as root"
+        assert not any("astral-sh/uv" in rest for _, rest in FINAL), "uv in final stage"
+
+
+    def test_cmd_is_exec_form_without_uv_run() -> None:
+        raw = [rest for kw, rest in FINAL if kw == "CMD"][-1]
+        assert raw.startswith("["), f"CMD must be exec form (JSON array), got: {raw}"
+        cmd = json.loads(raw)
+        assert cmd[:2] != ["uv", "run"], "call the venv script directly"
+
+
+    def test_healthcheck_hits_health_endpoint() -> None:
+        checks = [rest for kw, rest in FINAL if kw == "HEALTHCHECK"]
+        assert checks and "/health" in checks[0], "HEALTHCHECK on /health is missing"
+
+
+    def test_dockerignore_and_compose() -> None:
+        ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").split()
+        for entry in (".venv", ".env", "tests", "dist"):
+            assert entry in ignored, f"{entry} must be in .dockerignore"
+        compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        assert "stop_grace_period" in compose, "set stop_grace_period in compose.yaml"
+    ```
+
+    Якщо Docker запущений, зберіть і перевірте образ:
+
+    ```bash
+    docker build -t formbuilder:dev .
+    docker run --rm -d --name fb -p 8000:8000 -v fb-data:/data formbuilder:dev
+    sleep 3 && curl -s http://127.0.0.1:8000/health
+    docker inspect --format '{{.State.Health.Status}}' fb   # healthy після start-period
+    docker stop fb                                         # має зайняти секунди, а не 10 s
+    docker images formbuilder                              # порівняйте з одностадійною версією
+    ```
+  checklist:
+  - Залежності встановлюються `uv sync --locked --no-dev --no-install-project` до `COPY src`
+  - Фінальна стадія `python:3.12-slim` без uv, з `USER` і `CMD ["formbuilder", "serve"]` в exec-формі
+  - '`HEALTHCHECK` через `python -c` на `/health`; `EXPOSE 8000`; дані в `/data`'
+  - '`.dockerignore` містить `.venv`, `.env`, `tests`, `dist`; `docker compose config` проходить'
+  - 'Якщо Docker є: `docker build` успішний, `curl /health` з контейнера відповідає, `docker stop` завершується швидко'
+  verify: cd capstone && uv run pytest tests/test_container_files.py -q

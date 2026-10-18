@@ -1,0 +1,672 @@
+- id: q1
+  type: quiz
+  question: |
+    Обробник ставить фоновий лист. Що отримає клієнт і що станеться з листом?
+    ```python
+    async def send_email(address: str) -> None:
+        print(f"email sent to {address}")
+
+    @app.post("/submit", status_code=202)
+    async def submit(background_tasks: BackgroundTasks) -> dict[str, str]:
+        background_tasks.add_task(send_email("owner@example.com"))
+        return {"status": "accepted"}
+    ```
+  options:
+    - "202, а лист відправиться після відповіді, як і задумано"
+    - "202, лист не відправиться: після відповіді фонова задача падає з TypeError, плюс RuntimeWarning про корутину, яку ніхто не чекав"
+    - "500: `add_task` одразу кидає TypeError, бо отримав не функцію"
+    - "202, а лист відправиться до відповіді, бо корутину вже створено в обробнику"
+  answer: 1
+  explain: |
+    `send_email("owner@example.com")` не відправляє лист, а лише створює об'єкт корутини, як `fetch()` без
+    `await` створює проміс, але на відміну від промісу корутина без `await` не виконає жодного рядка.
+    `add_task` нічого не перевіряє, тому обробник повертає 202 спокійно. Після відправки відповіді
+    Starlette бачить, що "функція" не є async-функцією, і пробує викликати її в threadpool:
+    `functools.partial(coroutine)` падає з `TypeError: the first argument must be callable`.
+    Клієнт цього не бачить, лист не йде, а в лог потрапляють трасування і
+    `RuntimeWarning: coroutine 'send_email' was never awaited`. Правильно передати функцію й аргументи окремо:
+    `add_task(send_email, "owner@example.com")`.
+
+- id: t1
+  type: code
+  title: "Один крок воркера: process_one"
+  prompt: |
+    Напишіть `process_one(queue, jobs, render)`: взяти з черги один `job_id`, перевести задачу в `running`,
+    дочекатися `await render(job.form_id)`, поставити `done`. Якщо `render` кинув будь-який `Exception`,
+    статус `failed`, а в `error` текст винятку (`str(e)`), і функція не падає. `queue.task_done()`
+    викликається завжди, інакше `queue.join()` зависне.
+
+    Це тіло циклу `while True` воркера, винесене в окрему функцію: тест викликає її стільки разів,
+    скільки задач поклав, і не мусить скасовувати нескінченний цикл.
+
+    ```python
+    await process_one(queue, jobs, render)   # jobs[1].status: 'queued' -> 'running' -> 'done'
+    ```
+  starter: |
+    import asyncio
+    from collections.abc import Awaitable, Callable
+    from dataclasses import dataclass
+
+
+    @dataclass
+    class Job:
+        id: int
+        form_id: int
+        status: str = "queued"
+        error: str | None = None
+
+
+    async def process_one(
+        queue: asyncio.Queue[int],
+        jobs: dict[int, Job],
+        render: Callable[[int], Awaitable[None]],
+    ) -> None:
+        ...
+  harness: |
+    async def _main() -> None:
+        jobs = {i: Job(i, f) for i, f in [(1, 7), (2, 13), (3, 8)]}
+        seen = []
+
+        async def render(form_id: int) -> None:
+            seen.append((form_id, [j.status for j in jobs.values()]))
+            await asyncio.sleep(0)
+            if form_id == 13:
+                raise ValueError("unknown element 'slider'")
+
+        queue: asyncio.Queue[int] = asyncio.Queue()
+        for job_id in jobs:
+            queue.put_nowait(job_id)
+        for _ in jobs:
+            await process_one(queue, jobs, render)
+        try:
+            await asyncio.wait_for(queue.join(), timeout=0.1)
+            print("queue joined")
+        except TimeoutError:
+            print("queue.join() hangs: task_done was not called for every job")
+        for form_id, statuses in seen:
+            print("rendering", form_id, statuses)
+        for job in jobs.values():
+            print(job)
+
+    asyncio.run(_main())
+  expected: |
+    queue joined
+    rendering 7 ['running', 'queued', 'queued']
+    rendering 13 ['done', 'running', 'queued']
+    rendering 8 ['done', 'failed', 'running']
+    Job(id=1, form_id=7, status='done', error=None)
+    Job(id=2, form_id=13, status='failed', error="unknown element 'slider'")
+    Job(id=3, form_id=8, status='done', error=None)
+  hints:
+    - "Структура try/except/finally: статус running ставиться до await, done після, failed у except Exception, task_done у finally."
+    - "job = jobs[await queue.get()], далі try: job.status = 'running'; await render(job.form_id); job.status = 'done' ... finally: queue.task_done()"
+  solution: |
+    import asyncio
+    from collections.abc import Awaitable, Callable
+    from dataclasses import dataclass
+
+
+    @dataclass
+    class Job:
+        id: int
+        form_id: int
+        status: str = "queued"
+        error: str | None = None
+
+
+    async def process_one(
+        queue: asyncio.Queue[int],
+        jobs: dict[int, Job],
+        render: Callable[[int], Awaitable[None]],
+    ) -> None:
+        job = jobs[await queue.get()]
+        try:
+            job.status = "running"
+            await render(job.form_id)
+            job.status = "done"
+        except Exception as e:
+            job.status, job.error = "failed", str(e)
+        finally:
+            queue.task_done()
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Воркер стоїть посеред рендера, і lifespan на зупинці робить `task.cancel()`. Який статус лишиться в `jobs`?
+    ```python
+    async def worker(queue: asyncio.Queue[int]) -> None:
+        while True:
+            job_id = await queue.get()
+            try:
+                jobs[job_id] = "running"
+                await render()                  # asyncio.sleep(10)
+                jobs[job_id] = "done"
+            except Exception as e:
+                jobs[job_id] = f"failed: {e!r}"
+            finally:
+                queue.task_done()
+    ```
+  options:
+    - "`'running'`"
+    - "`'failed: CancelledError()'`"
+    - "`'done'`: `cancel()` чекає завершення поточного `await`"
+    - "`'queued'`: asyncio повертає задачу в чергу сам"
+  answer: 0
+  explain: |
+    `asyncio.CancelledError` з 3.8 успадковує `BaseException`, а не `Exception`, тож `except Exception` його не
+    ловить: виняток пролітає крізь `except`, `finally` викликає `task_done()`, і воркер завершується. Рядок
+    `failed` не виконується, `done` теж, і в сховищі назавжди лишається `running`. Це не "м'яке" скасування
+    з дочеканням `await` (так поводиться `AbortController` лише якщо код сам його перевіряє), і черга нічого
+    сама не повертає. Тому воркер, якому важливий статус, ловить `CancelledError` окремо, повертає задачу в
+    `queued` і робить `raise`.
+
+- id: t2
+  type: code
+  title: "Відновлення після рестарту"
+  prompt: |
+    Процес упав, сховище задач пережило рестарт. Напишіть `requeue_running(jobs, max_attempts)`, яку lifespan
+    викликає перед стартом воркерів (у капстоуні це метод `JobStore` з m6-l08, тут над словником):
+
+    - задача в `running` з `attempts < max_attempts` повертається в `queued`, лічильник спроб не змінюється;
+    - задача в `running` з `attempts >= max_attempts` стає `failed` з `error = "worker crashed on attempt N"`:
+      це захист від задачі, яка щоразу кладе процес (poison job), інакше вона крутилася б вічно;
+    - функція повертає кількість задач, повернутих у `queued`, як `requeue_running` з m6-l08. Які задачі
+      брати далі, вирішить `next_pending`: воркерам досить сигналу, що робота є.
+
+    `done` і `failed` не чіпаються.
+  starter: |
+    from dataclasses import dataclass
+
+
+    @dataclass
+    class Job:
+        id: int
+        status: str
+        attempts: int = 0
+        error: str | None = None
+
+
+    def requeue_running(jobs: dict[int, Job], max_attempts: int) -> int:
+        ...
+  harness: |
+    jobs = {
+        5: Job(5, "queued"),
+        1: Job(1, "done", 1),
+        3: Job(3, "running", 1),
+        2: Job(2, "running", 3),
+        4: Job(4, "failed", 3, "ValueError: bad config"),
+    }
+    print(requeue_running(jobs, max_attempts=3))
+    for job_id in sorted(jobs):
+        print(jobs[job_id])
+    print(requeue_running({}, max_attempts=3))
+  expected: |
+    1
+    Job(id=1, status='done', attempts=1, error=None)
+    Job(id=2, status='failed', attempts=3, error='worker crashed on attempt 3')
+    Job(id=3, status='queued', attempts=1, error=None)
+    Job(id=4, status='failed', attempts=3, error='ValueError: bad config')
+    Job(id=5, status='queued', attempts=0, error=None)
+    0
+  hints:
+    - "Один прохід по `jobs.values()`: усе, що не `running`, пропустити; лічильник збільшується лише в гілці, яка повертає в `queued`."
+    - "for job in jobs.values(): if job.status != 'running': continue; if job.attempts >= max_attempts: job.status, job.error = 'failed', f'worker crashed on attempt {job.attempts}' else: job.status = 'queued'; count += 1"
+  solution: |
+    from dataclasses import dataclass
+
+
+    @dataclass
+    class Job:
+        id: int
+        status: str
+        attempts: int = 0
+        error: str | None = None
+
+
+    def requeue_running(jobs: dict[int, Job], max_attempts: int) -> int:
+        count = 0
+        for job in jobs.values():
+            if job.status != "running":
+                continue
+            if job.attempts >= max_attempts:
+                job.status = "failed"
+                job.error = f"worker crashed on attempt {job.attempts}"
+            else:
+                job.status = "queued"
+                count += 1
+        return count
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Ретрай без сну у воркері: відкладене повернення в чергу"
+  prompt: |
+    `run_job` з уроку спить між спробами всередині воркера, і поки він спить, слот воркера зайнятий.
+    Альтернатива: зробити одну спробу, а повтор запланувати, не чекаючи. Напишіть `attempt(job, render, schedule)`:
+
+    - збільшити `job.attempts`, статус `running`, `error = None`, викликати `job.url = await render(job)`;
+    - успіх: статус `done`;
+    - `ConnectionError` або `TimeoutError`: якщо `job.attempts < max_attempts`, статус `retrying`,
+      `error = str(e)` і виклик `schedule(delay, job.id)` з `delay = base_delay * 2 ** (attempts - 1)`;
+      інакше `failed` з `error = "<ТипВинятку>: <текст>"`;
+    - будь-який інший `Exception`: одразу `failed` з `error = "<ТипВинятку>: <текст>"`, без повторів.
+
+    У застосунку `schedule` це `lambda d, i: loop.call_later(d, queue.put_nowait, i)`; у харнесі fake, який
+    записує виклик і кладе id назад у чергу без паузи.
+  starter: |
+    import asyncio
+    from collections.abc import Awaitable, Callable
+    from dataclasses import dataclass
+
+
+    @dataclass
+    class Job:
+        id: int
+        status: str = "queued"
+        attempts: int = 0
+        error: str | None = None
+        url: str | None = None
+
+
+    async def attempt(
+        job: Job,
+        render: Callable[[Job], Awaitable[str]],
+        schedule: Callable[[float, int], None],
+        *,
+        max_attempts: int = 3,
+        base_delay: float = 0.5,
+    ) -> None:
+        ...
+  harness: |
+    async def _main() -> None:
+        failures = {1: [ConnectionError("renderer down")] * 2,
+                    2: [TimeoutError("render took too long")] * 5,
+                    3: [ValueError("unknown element 'slider'")]}
+
+        async def render(job: Job) -> str:
+            await asyncio.sleep(0)
+            if failures[job.id]:
+                raise failures[job.id].pop(0)
+            return f"/sites/{job.id}/"
+
+        jobs = {i: Job(i) for i in (1, 2, 3)}
+        queue: asyncio.Queue[int] = asyncio.Queue()
+        scheduled: list[tuple[float, int]] = []
+
+        def schedule(delay: float, job_id: int) -> None:
+            scheduled.append((delay, job_id))
+            queue.put_nowait(job_id)
+
+        for job_id in jobs:
+            queue.put_nowait(job_id)
+        while not queue.empty():
+            job = jobs[queue.get_nowait()]
+            await attempt(job, render, schedule)
+            print(f"job {job.id} #{job.attempts}: {job.status} {job.error or job.url}")
+        print("scheduled:", scheduled)
+
+    asyncio.run(_main())
+  expected: |
+    job 1 #1: retrying renderer down
+    job 2 #1: retrying render took too long
+    job 3 #1: failed ValueError: unknown element 'slider'
+    job 1 #2: retrying renderer down
+    job 2 #2: retrying render took too long
+    job 1 #3: done /sites/1/
+    job 2 #3: failed TimeoutError: render took too long
+    scheduled: [(0.5, 1), (0.5, 2), (1.0, 1), (1.0, 2)]
+  hints:
+    - "Три гілки: except (ConnectionError, TimeoutError), except Exception, else. Порядок except важливий: вузький перший."
+    - "У гілці ретраю: if job.attempts >= max_attempts: failed; else: job.status, job.error = 'retrying', str(e); schedule(base_delay * 2 ** (job.attempts - 1), job.id)"
+  solution: |
+    import asyncio
+    from collections.abc import Awaitable, Callable
+    from dataclasses import dataclass
+
+
+    @dataclass
+    class Job:
+        id: int
+        status: str = "queued"
+        attempts: int = 0
+        error: str | None = None
+        url: str | None = None
+
+
+    async def attempt(
+        job: Job,
+        render: Callable[[Job], Awaitable[str]],
+        schedule: Callable[[float, int], None],
+        *,
+        max_attempts: int = 3,
+        base_delay: float = 0.5,
+    ) -> None:
+        job.attempts += 1
+        job.status, job.error = "running", None
+        try:
+            job.url = await render(job)
+        except (ConnectionError, TimeoutError) as e:
+            if job.attempts >= max_attempts:
+                job.status, job.error = "failed", f"{type(e).__name__}: {e}"
+            else:
+                job.status, job.error = "retrying", str(e)
+                schedule(base_delay * 2 ** (job.attempts - 1), job.id)
+        except Exception as e:
+            job.status, job.error = "failed", f"{type(e).__name__}: {e}"
+        else:
+            job.status = "done"
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "watch: знімок для запізнілого і відписка"
+  prompt: |
+    У `JobEvents` зі стартера два дефекти з уроку: хто підписався пізно, не бачить поточного статусу (а
+    після `done` чекає вічно), і черги відписаних лишаються в `_subscribers`. Допишіть:
+
+    - `publish` запам'ятовує останній статус задачі в `self._last`;
+    - `async def watch(job_id)` це асинхронний генератор: створює свою чергу, першим кладе в неї останній
+      відомий статус (якщо він є), реєструє чергу, віддає статуси по одному й завершується сам після
+      `done` або `failed`. Черга прибирається з `_subscribers` у `finally`, і коли генератор дочитали, і коли
+      його закрили раніше.
+
+    ```python
+    events.publish(1, "done")
+    [s async for s in events.watch(1)]   # ['done'], без зависання
+    ```
+  starter: |
+    import asyncio
+    from collections import defaultdict
+    from collections.abc import AsyncIterator
+
+    TERMINAL = {"done", "failed"}
+
+
+    class JobEvents:
+        def __init__(self) -> None:
+            self._subscribers: defaultdict[int, list[asyncio.Queue[str]]] = defaultdict(list)
+            self._last: dict[int, str] = {}
+
+        def publish(self, job_id: int, status: str) -> None:
+            for queue in self._subscribers[job_id]:
+                queue.put_nowait(status)
+
+        async def watch(self, job_id: int) -> AsyncIterator[str]:
+            ...
+            yield ""
+  harness: |
+    from contextlib import aclosing
+
+
+    async def _collect(events: JobEvents, job_id: int, delay: float) -> list[str]:
+        await asyncio.sleep(delay)
+        return [s async for s in events.watch(job_id)]
+
+
+    async def _main() -> None:
+        events = JobEvents()
+        events.publish(1, "queued")
+
+        async def produce() -> None:
+            for status in ["running", "progress 1/2", "progress 2/2", "done"]:
+                await asyncio.sleep(0.01)
+                events.publish(1, status)
+
+        async with asyncio.TaskGroup() as tg:
+            early = tg.create_task(_collect(events, 1, 0))
+            late = tg.create_task(_collect(events, 1, 0.025))
+            tg.create_task(produce())
+        print("early:", early.result())
+        print("late:", late.result())
+
+        try:
+            async with asyncio.timeout(0.1):
+                print("after done:", await _collect(events, 1, 0))
+        except TimeoutError:
+            print("after done: hangs")
+
+        events.publish(2, "running")
+        async with aclosing(events.watch(2)) as stream:
+            async for status in stream:
+                print("job 2 first event:", status)
+                break
+        print("subscribers left:", sum(len(q) for q in events._subscribers.values()))
+
+    asyncio.run(_main())
+  expected: |
+    early: ['queued', 'running', 'progress 1/2', 'progress 2/2', 'done']
+    late: ['progress 1/2', 'progress 2/2', 'done']
+    after done: ['done']
+    job 2 first event: running
+    subscribers left: 0
+  hints:
+    - "Черга створюється в самому watch; знімок кладеться через put_nowait ще до першого await; цикл while True з yield і return на термінальному статусі."
+    - "Обгорніть цикл у try/finally: self._subscribers[job_id].remove(queue). У publish на початку self._last[job_id] = status."
+  solution: |
+    import asyncio
+    from collections import defaultdict
+    from collections.abc import AsyncIterator
+
+    TERMINAL = {"done", "failed"}
+
+
+    class JobEvents:
+        def __init__(self) -> None:
+            self._subscribers: defaultdict[int, list[asyncio.Queue[str]]] = defaultdict(list)
+            self._last: dict[int, str] = {}
+
+        def publish(self, job_id: int, status: str) -> None:
+            self._last[job_id] = status
+            for queue in self._subscribers[job_id]:
+                queue.put_nowait(status)
+
+        async def watch(self, job_id: int) -> AsyncIterator[str]:
+            queue: asyncio.Queue[str] = asyncio.Queue()
+            if job_id in self._last:
+                queue.put_nowait(self._last[job_id])
+            self._subscribers[job_id].append(queue)
+            try:
+                while True:
+                    status = await queue.get()
+                    yield status
+                    if status in TERMINAL:
+                        return
+            finally:
+                self._subscribers[job_id].remove(queue)
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Застосунок з розділу про lifespan (черга і `jobs: dict` в `app.state`) запущено як
+    `uvicorn formbuilder.api.app:app --workers 2`. Клієнт робить `POST /forms/7/build` і отримує `{"id": 1, ...}`,
+    потім `GET /jobs/1`. Що він побачить?
+  options:
+    - "Завжди статус задачі: `app` один, модуль імпортовано один раз"
+    - "Іноді 404: кожен процес має свою чергу й свій `jobs`, і GET міг потрапити в інший процес"
+    - "Завжди 404: `app.state` очищується між запитами"
+    - "Помилку на старті: два процеси не можуть мати по `asyncio.Queue`"
+  answer: 1
+  explain: |
+    `--workers 2` запускає два окремі процеси Python, кожен імпортує модуль і проходить lifespan сам: дві
+    черги, два набори воркерів, два словники `jobs`. Це той самий випадок, що два процеси `node server.js`
+    у `cluster` чи за балансувальником: пам'ять у них не спільна, спільний лише код. `app.state` живе весь
+    час роботи процесу, а не запит, тому стабільно 404 теж не буде: GET, що потрапив у той самий процес,
+    побачить задачу. Звідси правило уроку: стан задачі у SQLite, а для кількох процесів окремий воркер, що
+    забирає задачі зі сховища.
+
+- id: t5
+  type: code
+  title: "Пул воркерів з чесною зупинкою"
+  prompt: |
+    Зберіть пул: `WorkerPool(jobs, render)` з методами `start(n)`, `submit(job_id)` і `async stop() -> list[int]`.
+
+    - `start(n)` створює `n` задач-воркерів (`asyncio.create_task`), кожен у `while True` бере `job_id` з
+      `asyncio.Queue`, ставить `running`, чекає `await render(job_id)`, ставить `done`; `Exception` дає
+      `failed` з `error = str(e)`; `task_done()` у `finally`.
+    - Якщо воркера скасовано посеред рендера, задача повертається в `queued` (доробить наступний запуск), а
+      `CancelledError` летить далі.
+    - `stop()` скасовує всіх воркерів, чекає їх через `gather(..., return_exceptions=True)` і повертає
+      відсортовані id усіх задач, що лишились у `queued`: і повернутих, і тих, що не встигли стартувати.
+  starter: |
+    import asyncio
+    from collections.abc import Awaitable, Callable
+
+
+    class WorkerPool:
+        def __init__(self, jobs: dict[int, dict[str, str]],
+                     render: Callable[[int], Awaitable[None]]) -> None:
+            self.jobs = jobs
+            self.render = render
+            self.queue: asyncio.Queue[int] = asyncio.Queue()
+            self.tasks: list[asyncio.Task[None]] = []
+
+        def start(self, n: int) -> None:
+            ...
+
+        def submit(self, job_id: int) -> None:
+            self.jobs[job_id] = {"status": "queued"}
+            self.queue.put_nowait(job_id)
+
+        async def stop(self) -> list[int]:
+            ...
+  harness: |
+    async def _main() -> None:
+        durations = {1: 0.01, 2: 1.0, 3: 0.02, 4: 1.0, 5: 0.01}
+
+        async def render(job_id: int) -> None:
+            await asyncio.sleep(durations[job_id])
+            if job_id == 3:
+                raise ValueError("unknown element 'slider'")
+
+        pool = WorkerPool({}, render)
+        pool.start(2)
+        for job_id in durations:
+            pool.submit(job_id)
+        await asyncio.sleep(0.1)
+        print("before stop:", {i: j["status"] for i, j in pool.jobs.items()})
+        print("requeue:", await pool.stop())
+        for job_id, job in pool.jobs.items():
+            print(job_id, job)
+        print("workers done:", all(t.done() for t in pool.tasks))
+
+    asyncio.run(_main())
+  expected: |
+    before stop: {1: 'done', 2: 'running', 3: 'failed', 4: 'running', 5: 'queued'}
+    requeue: [2, 4, 5]
+    1 {'status': 'done'}
+    2 {'status': 'queued'}
+    3 {'status': 'failed', 'error': "unknown element 'slider'"}
+    4 {'status': 'queued'}
+    5 {'status': 'queued'}
+    workers done: True
+  hints:
+    - "У воркері два except: спершу asyncio.CancelledError (повернути queued і raise), потім Exception (failed). Порядок тут не критичний, бо CancelledError не Exception, але так читається явніше."
+    - "stop: for t in self.tasks: t.cancel(); await asyncio.gather(*self.tasks, return_exceptions=True); return sorted(i for i, j in self.jobs.items() if j['status'] == 'queued')"
+  solution: |
+    import asyncio
+    from collections.abc import Awaitable, Callable
+
+
+    class WorkerPool:
+        def __init__(self, jobs: dict[int, dict[str, str]],
+                     render: Callable[[int], Awaitable[None]]) -> None:
+            self.jobs = jobs
+            self.render = render
+            self.queue: asyncio.Queue[int] = asyncio.Queue()
+            self.tasks: list[asyncio.Task[None]] = []
+
+        async def _worker(self) -> None:
+            while True:
+                job_id = await self.queue.get()
+                job = self.jobs[job_id]
+                try:
+                    job["status"] = "running"
+                    await self.render(job_id)
+                    job["status"] = "done"
+                except asyncio.CancelledError:
+                    job["status"] = "queued"
+                    raise
+                except Exception as e:
+                    job["status"], job["error"] = "failed", str(e)
+                finally:
+                    self.queue.task_done()
+
+        def start(self, n: int) -> None:
+            self.tasks = [asyncio.create_task(self._worker()) for _ in range(n)]
+
+        def submit(self, job_id: int) -> None:
+            self.jobs[job_id] = {"status": "queued"}
+            self.queue.put_nowait(job_id)
+
+        async def stop(self) -> list[int]:
+            for task in self.tasks:
+                task.cancel()
+            await asyncio.gather(*self.tasks, return_exceptions=True)
+            return sorted(i for i, job in self.jobs.items() if job["status"] == "queued")
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "Воркер генерації на JobStore у капстоуні"
+  prompt: |
+    Розширте `src/formbuilder/worker.py` з m5-l05 і m5-l06 так, щоб воркер працював поверх `JobStore` з m6-l08
+    (`formbuilder/store.py`) з тими самими іменами методів, що там, і лише ними:
+
+    - клас `Worker(store, queue, events, renderer, publisher, *, sleep=asyncio.sleep, base_delay=0.5)` з двома
+      методами: `async run_once()` чекає один сигнал з `asyncio.Queue[int]` і обробляє задачі, поки
+      `store.next_pending()` їх віддає; `async run()` викликає `run_once()` у циклі. Тести m7-l05 викликатимуть
+      `run_once()` напряму, тому логіка спроби живе в ньому, а не в `run()`;
+    - спроба: `next_pending()` переводить задачу в `running` і рахує `attempts`; рендер через `Renderer` і
+      публікація через `Publisher` у `asyncio.to_thread`; успіх це `mark_done(job_id)`; тимчасова помилка
+      (`ConnectionError`, `TimeoutError`) це `mark_failed(job_id, "<Тип>: <повідомлення>")`, після якої сховище
+      саме вирішує, повтор це (`queued`, тоді подія `retrying` і пауза `base_delay * 2 ** (attempts - 1)`) чи
+      кінець (`failed`); постійна помилка це `mark_failed(..., retry=False)`;
+    - `mark_failed` отримує keyword-only параметр `retry: bool = True` в обох реалізаціях; поведінка за
+      замовчуванням і тести m6-l08 не змінюються;
+    - `requeue_running()` з m6-l08 доповніть правилом з t2: `running`-задача з `attempts >= MAX_ATTEMPTS`
+      стає `failed` з `"worker crashed on attempt N"`, решта `queued`;
+    - кожна зміна статусу йде і в сховище, і в `JobEvents.publish`; `JobEvents` з t4 поки живе в `worker.py`,
+      у m7-l04 він переїде в `formbuilder/hub.py`;
+    - скасування воркера перекидає `CancelledError` далі; задачу в `queued` повертає `requeue_running()`,
+      який викликає власник воркерів (`worker_pool` з m5-l06, а в p2 lifespan) після їх зупинки.
+  checklist:
+    - "Тест: рендерер, що двічі кидає `ConnectionError`, дає статуси `running, retrying, running, retrying, running, done`, а фейковий `sleep` отримав `[0.5, 1.0]`; реальних пауз у тестах немає"
+    - "Тест: `ValueError` з рендерера дає `failed` після однієї спроби, наступна задача з черги обробляється"
+    - "Тест: після скасування воркера посеред рендера і `requeue_running()` задача в сховищі `queued`, а не `running`"
+    - "Тест: `requeue_running()` на сховищі з `running`-задачами повертає їх у `queued`, задача з вичерпаними спробами стає `failed`; контрактні тести m6-l08 зелені на обох реалізаціях"
+    - "Воркер звертається до сховища лише через методи `JobStore`: `next_pending`, `get_job`, `mark_done`, `mark_failed`; `store.save`, `create`, `recover` у коді немає"
+    - "Тест: повторний прогін тієї самої задачі (симуляція рестарту) не дублює сторінку у фейковому `Publisher`: той самий ключ, той самий URL"
+    - "Тести асинхронні через `@pytest.mark.anyio` (anyio ставиться разом з FastAPI) або `asyncio.run` у тілі; `uv run mypy --strict src/formbuilder/worker.py` без помилок"
+  verify: "cd capstone && uv run pytest tests/test_worker.py -q"
+
+- id: p2
+  type: project
+  title: "POST /forms/{id}/build і GET /jobs/{id} з воркером у lifespan"
+  prompt: |
+    Підключіть воркер з p1 до `create_app(settings)` з m7-l01. У `lifespan`: відкрити сховище через
+    `connect(settings.db_path)`, викликати `requeue_running()`, створити `Worker` і покласти його в
+    `app.state.worker`, запустити `settings.workers` задач `worker.run()` і розбудити кожну сигналом у черзі
+    (при `workers=0`, як у тестах m7-l05, задач немає, а `run_once()` викликає тест). На виході скасувати
+    воркерів, дочекатись їх, ще раз викликати `requeue_running()` і закрити з'єднання. Сховище, черга й
+    `JobEvents` доступні обробникам через `Depends` (функції, що читають `request.app.state`), щоб тести могли
+    їх підмінити.
+
+    `POST /forms/{form_id}/build` бере `latest_config` (інакше 404 у форматі помилок з m7-l02), викликає
+    `enqueue(config_id, version)`, публікує `queued`, кладе id у чергу і повертає 202 з тілом задачі.
+    `GET /jobs/{job_id}` читає задачу лише зі сховища через `get_job`. `JobOut` отримує поле `url`: для
+    `done`-задачі це `/sites/<config_id>/<config_version>/`, той самий ключ, за яким публікує `StaticPublisher`
+    (m6-l01) і який роздає `/sites` з m7-l02; окремого стовпця в сховищі не потрібно.
+  checklist:
+    - "`POST /forms/{id}/build` відповідає 202 зі статусом `queued`, не чекаючи рендера; для неіснуючої форми 404"
+    - "Тест через `with TestClient(app) as client:` (інакше lifespan не запуститься): після build задача доходить до `done`, `url` заповнено, сторінка є у фейковому `Publisher`"
+    - "Тест рестарту: задачу, що була `running` у файлі SQLite з `tmp_path`, новий екземпляр застосунку доробляє до `done`"
+    - "Ендпоінти й lifespan не використовують `BackgroundTasks` для генерації; `BackgroundTasks` допустимий лише для дрібниць на зразок листа"
+    - "Обробники `async def`, з'єднання SQLite створене в lifespan і використовується лише з потоку циклу подій (або `check_same_thread=False` з поясненням у коментарі)"
+  verify: "cd capstone && uv run pytest tests/test_api.py -q"

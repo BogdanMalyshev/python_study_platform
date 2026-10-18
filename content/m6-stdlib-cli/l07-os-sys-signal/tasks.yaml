@@ -1,0 +1,510 @@
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    import sys
+
+    small = [[0] * 10]
+    big = [[0] * 100_000]
+    print(sys.getsizeof(small) == sys.getsizeof(big))
+    ```
+  options: ["True", "False", "TypeError: getsizeof не приймає вкладені списки", "Залежить від версії Python"]
+  answer: 0
+  explain: |
+    `sys.getsizeof` міряє лише сам об'єкт: зовнішній список з одним елементом зберігає одне посилання,
+    і йому байдуже, на що воно вказує. Обидва зовнішні списки однакові за розміром (64 байти на 64-бітному
+    CPython). `False` це інтуїція "розмір структури", яку в JS дає heap snapshot, а не `getsizeof`.
+    `TypeError` немає: `getsizeof` приймає будь-який об'єкт. Від версії залежать конкретні байти, але не рівність.
+
+- id: t1
+  type: code
+  title: "Код завершення в людському вигляді"
+  prompt: |
+    Оркестратор (CI, systemd, ваш власний `subprocess`) бачить лише число. Напишіть `describe_exit(code)`:
+
+    - `0` дає `"ok"`;
+    - від'ємний код (так `subprocess.Popen.returncode` позначає смерть від сигналу) дає `"killed by <NAME>"`,
+      де номер сигналу це `-code`;
+    - код від 129 до 159 включно (shell-конвенція `128 + номер сигналу`) теж смерть від сигналу, номер це `code - 128`;
+    - будь-який інший код дає `"error <code>"`.
+
+    Ім'я сигналу береться зі словника `SIGNAL_NAMES`; якщо номера там немає, пишіть `"signal <номер>"`.
+    Модуль `signal` не імпортуйте: у браузері сигналів немає.
+
+    ```python
+    describe_exit(143)   # 'killed by SIGTERM'
+    describe_exit(-6)    # 'killed by signal 6'
+    describe_exit(255)   # 'error 255'
+    ```
+  starter: |
+    SIGNAL_NAMES = {1: "SIGHUP", 2: "SIGINT", 9: "SIGKILL", 15: "SIGTERM"}
+
+
+    def describe_exit(code: int) -> str:
+        ...
+  harness: |
+    for code in [0, 1, 2, -15, 143, 137, 130, -2, -6, 255]:
+        print(code, describe_exit(code))
+  expected: |
+    0 ok
+    1 error 1
+    2 error 2
+    -15 killed by SIGTERM
+    143 killed by SIGTERM
+    137 killed by SIGKILL
+    130 killed by SIGINT
+    -2 killed by SIGINT
+    -6 killed by signal 6
+    255 error 255
+  hints:
+    - "Спершу визначте номер сигналу (або що його немає), а вже потім одним рядком збирайте текст."
+    - "`SIGNAL_NAMES.get(signum, f\"signal {signum}\")` закриває випадок невідомого номера."
+    - "if code == 0: ok; elif code < 0: signum = -code; elif 128 < code < 160: signum = code - 128; else: error."
+  solution: |
+    SIGNAL_NAMES = {1: "SIGHUP", 2: "SIGINT", 9: "SIGKILL", 15: "SIGTERM"}
+
+
+    def describe_exit(code: int) -> str:
+        if code == 0:
+            return "ok"
+        if code < 0:
+            signum = -code
+        elif 128 < code < 160:
+            signum = code - 128
+        else:
+            return f"error {code}"
+        return f"killed by {SIGNAL_NAMES.get(signum, f'signal {signum}')}"
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Скрипт запущено як `python app.py &`, через секунду виконано `kill -TERM $!`. Що буде у виводі?
+    ```python
+    import atexit
+    import time
+
+    atexit.register(lambda: print("atexit"))
+    try:
+        print("working", flush=True)
+        time.sleep(30)
+    finally:
+        print("finally")
+    ```
+  options:
+    - "Лише `working`"
+    - "`working`, `finally`, `atexit`"
+    - "`working`, `finally`, traceback з `SystemExit`, `atexit`"
+    - "`working`, `finally`, але без `atexit`"
+  answer: 0
+  explain: |
+    Python ставить власний обробник лише на `SIGINT`. `SIGTERM` лишається з дією ОС за замовчуванням, і ядро
+    завершує процес, не повертаючи керування інтерпретатору: ні `finally`, ні `atexit` не виконуються, shell бачить
+    код 143. Другий варіант це поведінка Ctrl-C (`KeyboardInterrupt`), яку часто переносять на `SIGTERM`.
+    Третій неможливий: `SystemExit` ніколи не друкує traceback, а без обробника його ніхто й не кидає.
+    Четвертий варіант неможливий у принципі: якщо `finally` виконався, інтерпретатор завершується штатно, і `atexit` теж спрацює.
+
+- id: q3
+  type: quiz
+  question: |
+    `SIGTERM` приходить через 1 секунду після старту. Коли процес надрукує `stopping`?
+    ```python
+    import signal
+    import time
+
+    stop_requested = False
+
+    def on_sigterm(signum, frame):
+        global stop_requested
+        stop_requested = True
+
+    signal.signal(signal.SIGTERM, on_sigterm)
+    while not stop_requested:
+        time.sleep(5)
+    print("stopping")
+    ```
+  options:
+    - "Приблизно через 5 секунд від старту"
+    - "Одразу після сигналу, приблизно на 1 секунді: `sleep` переривається"
+    - "Ніколи: обробник виконується в окремому потоці, і головний цикл не бачить зміни"
+    - "Одразу після сигналу, але з `InterruptedError` замість `stopping`"
+  answer: 0
+  explain: |
+    Обробник виконається майже одразу, у головному потоці, але з PEP 475 (Python 3.5) `time.sleep`, перерваний
+    сигналом, після обробника, який не кинув виняток, досипає залишок часу. Прапорець перевіриться лише після
+    повернення `sleep`, тобто на п'ятій секунді. `InterruptedError` це поведінка до 3.5 і досі звичка з C.
+    Окремого потоку для обробників немає: вони завжди в головному, тому `global` тут достатньо.
+    Щоб реагувати одразу, замініть `sleep` на `threading.Event().wait(5)` і робіть `event.set()` в обробнику.
+
+- id: t2
+  type: code
+  title: "Стан-машина завершення воркера"
+  prompt: |
+    Обробник сигналу лише фіксує подію, а рішення ухвалює головний цикл. Опишіть ці рішення як чисту функцію
+    `next_state(state, event)` і перевірте її без жодного сигналу.
+
+    Стани: `"running"`, `"draining"` (нові задачі не беремо, доробляємо поточні), `"stopped"` (вийшли чисто),
+    `"forced"` (поточні задачі перервано). Події: `"sigterm"`, `"sigint"`, `"idle"` (у роботі нічого немає),
+    `"timeout"` (вийшов час на дообробку).
+
+    - `running` + `sigterm` або `sigint` дає `draining`;
+    - `draining` + `idle` дає `stopped`;
+    - `draining` + `timeout` дає `forced`; другий Ctrl-C (`draining` + `sigint`) теж `forced`;
+    - повторний `sigterm` у `draining` нічого не змінює; `stopped` і `forced` кінцеві, будь-яка подія лишає їх як є;
+    - будь-яка інша пара лишає стан незмінним;
+    - невідома подія: `ValueError("unknown event: <event>")`, невідомий стан: `ValueError("unknown state: <state>")`.
+      Подію перевіряйте першою.
+
+    Використайте `match` по кортежу `(state, event)`.
+  starter: |
+    def next_state(state: str, event: str) -> str:
+        ...
+  harness: |
+    def run(events: list[str]) -> str:
+        state = "running"
+        for event in events:
+            state = next_state(state, event)
+        return state
+
+    print(run(["idle", "sigterm", "idle"]))
+    print(run(["sigterm", "sigterm", "timeout"]))
+    print(run(["sigint", "sigint"]))
+    print(run(["sigterm", "idle", "sigint"]))
+    print(run([]))
+    try:
+        next_state("running", "sighup")
+    except ValueError as e:
+        print("ValueError:", e)
+    try:
+        next_state("paused", "idle")
+    except ValueError as e:
+        print("ValueError:", e)
+  expected: |
+    stopped
+    forced
+    forced
+    stopped
+    running
+    ValueError: unknown event: sighup
+    ValueError: unknown state: paused
+  hints:
+    - "Три осмислені переходи, решта це \"лишити як є\" для відомих станів і помилка для невідомого."
+    - "Альтернативи в `case` пишуться через `|`: `case \"running\", \"sigterm\" | \"sigint\":`."
+    - "Після трьох переходів: `case \"running\" | \"draining\" | \"stopped\" | \"forced\", _: return state`, і `case _: raise ValueError(...)`."
+  solution: |
+    def next_state(state: str, event: str) -> str:
+        if event not in {"sigterm", "sigint", "idle", "timeout"}:
+            raise ValueError(f"unknown event: {event}")
+        match state, event:
+            case "running", "sigterm" | "sigint":
+                return "draining"
+            case "draining", "idle":
+                return "stopped"
+            case "draining", "timeout" | "sigint":
+                return "forced"
+            case "running" | "draining" | "stopped" | "forced", _:
+                return state
+            case _:
+                raise ValueError(f"unknown state: {state}")
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Синхронний воркер, що переживає docker stop"
+  prompt: |
+    Створіть у корені курсу `practice/m6-l07/sync_worker.py` зі стартового коду і додайте коректне завершення.
+    Запуск: `python sync_worker.py STATE_FILE JOB_SECONDS SHUTDOWN_TIMEOUT` з директорії `practice/m6-l07`.
+
+    - Воркер обробляє `job-1` ... `job-5` по черзі, кожна триває `JOB_SECONDS` секунд, друкує `start job-N` і `done job-N`.
+    - На `SIGTERM` або `SIGINT`: поточну задачу доробити, нову не брати, записати список необроблених задач
+      у `STATE_FILE` як JSON-список, вийти з кодом 0.
+    - Якщо поточна задача не вклалась у `SHUTDOWN_TIMEOUT` секунд після сигналу: перервати її, вона лишається
+      в списку необроблених, вихід з кодом 1.
+    - Обробники сигналів нічого не пишуть у файл і не викликають `sys.exit`: лише прапорець і будильник.
+    - Кожен `print` з `flush=True`: перевірка читає stdout через pipe і чекає рядка `start job-2`.
+
+    Спершу перевірте руками: `python sync_worker.py pending.json 1 3 & sleep 1.5; kill -TERM $!; wait $!; echo $?`.
+  starter: |
+    import json
+    import signal
+    import sys
+    import time
+    from pathlib import Path
+
+
+    def main(argv: list[str]) -> int:
+        state = Path(argv[1])
+        job_seconds = float(argv[2])
+        shutdown_timeout = int(argv[3])
+
+        pending = [f"job-{i}" for i in range(1, 6)]
+        while pending:
+            print(f"start {pending[0]}", flush=True)
+            time.sleep(job_seconds)  # справжня робота
+            print(f"done {pending.pop(0)}", flush=True)
+
+        state.write_text(json.dumps(pending))
+        print(f"saved {len(pending)} pending", flush=True)
+        return 0
+
+
+    if __name__ == "__main__":
+        sys.exit(main(sys.argv))
+  hints:
+    - "Без обробника `SIGTERM` вбиває процес до `state.write_text`. Потрібні модульний прапорець, перевірка його в умові циклу і `try/finally` навколо циклу для запису стану."
+    - "Таймаут у синхронному коді: `signal.alarm(n)` в обробнику `SIGTERM`, а обробник `SIGALRM` кидає власний виняток, який головний код ловить і перетворює на код 1. `signal.alarm(0)` у `finally` знімає будильник."
+    - "def on_stop(signum, frame): global stop_requested; stop_requested = True; signal.alarm(shutdown_timeout). Цикл: while pending and not stop_requested. except ShutdownTimeout: code = 1. finally: signal.alarm(0); state.write_text(json.dumps(pending))."
+  solution: |
+    import json
+    import signal
+    import sys
+    import time
+    from pathlib import Path
+
+    stop_requested = False
+    shutdown_timeout = 10
+
+
+    class ShutdownTimeout(Exception):
+        pass
+
+
+    def on_stop(signum: int, frame: object) -> None:
+        global stop_requested
+        if not stop_requested:
+            stop_requested = True
+            signal.alarm(shutdown_timeout)
+
+
+    def on_alarm(signum: int, frame: object) -> None:
+        raise ShutdownTimeout
+
+
+    def main(argv: list[str]) -> int:
+        global shutdown_timeout
+        state = Path(argv[1])
+        job_seconds = float(argv[2])
+        shutdown_timeout = int(argv[3])
+
+        signal.signal(signal.SIGTERM, on_stop)
+        signal.signal(signal.SIGINT, on_stop)
+        signal.signal(signal.SIGALRM, on_alarm)
+
+        pending = [f"job-{i}" for i in range(1, 6)]
+        code = 0
+        try:
+            while pending and not stop_requested:
+                print(f"start {pending[0]}", flush=True)
+                time.sleep(job_seconds)
+                print(f"done {pending.pop(0)}", flush=True)
+        except ShutdownTimeout:
+            print(f"timeout {pending[0]}", flush=True)
+            code = 1
+        finally:
+            signal.alarm(0)
+            state.write_text(json.dumps(pending))
+            print(f"saved {len(pending)} pending", flush=True)
+        return code
+
+
+    if __name__ == "__main__":
+        sys.exit(main(sys.argv))
+  requires: []
+  runtime: local
+  verify: |
+    .venv/bin/python - <<'EOF'
+    import json, pathlib, queue, signal, subprocess, sys, threading
+    d = pathlib.Path("practice/m6-l07")
+    state = d / "pending.json"
+    def run(job_s, timeout_s, wait_for):
+        state.unlink(missing_ok=True)
+        p = subprocess.Popen([sys.executable, "sync_worker.py", "pending.json", job_s, timeout_s],
+                             cwd=d, stdout=subprocess.PIPE, text=True)
+        lines = queue.Queue()
+        threading.Thread(target=lambda: [lines.put(l.rstrip()) for l in p.stdout], daemon=True).start()
+        while lines.get(timeout=10) != wait_for:
+            pass
+        p.send_signal(signal.SIGTERM)
+        code = p.wait(timeout=15)
+        pending = json.loads(state.read_text()) if state.exists() else None
+        state.unlink(missing_ok=True)
+        return code, pending
+    code, pending = run("1", "3", "start job-2")
+    assert code == 0, f"graceful shutdown: exit code {code}, expected 0"
+    assert pending == ["job-3", "job-4", "job-5"], f"after job-2 expected job-3..job-5 pending, got {pending}"
+    code, pending = run("10", "1", "start job-1")
+    assert code == 1, f"shutdown timeout: exit code {code}, expected 1"
+    assert pending == ["job-1", "job-2", "job-3", "job-4", "job-5"], f"interrupted job-1 must stay pending, got {pending}"
+    print("OK")
+    EOF
+
+- id: t4
+  type: code
+  title: "Drain черги з таймаутом в asyncio"
+  prompt: |
+    Сигналів у браузері немає, тож "SIGTERM" тут імітує `asyncio.sleep(stop_at)` у головній корутині.
+    Напишіть `async def drain(jobs, stop_at, timeout, n_workers=2) -> tuple[list[str], list[str]]`,
+    що повертає `(done, requeued)`.
+
+    - `jobs` це список `(job_id, seconds)`; усі кладуться в `asyncio.Queue`, `n_workers` воркерів у `TaskGroup` беруть
+      їх і "рендерять" через `asyncio.sleep(seconds)`, після успіху `job_id` іде в `done`.
+    - Через `stop_at` секунд головна корутина ставить `stop` (`asyncio.Event`). Після цього воркери нових задач не беруть;
+      ті, що простоюють на `queue.get()`, скасовуються одразу.
+    - Задачі в роботі мають `timeout` секунд, щоб завершитися; хто не встиг, скасовується, і його `job_id` іде
+      в `requeued` (у `except CancelledError` воркера, з `raise` далі).
+    - Після виходу з `TaskGroup` усе, що лишилось у черзі, по порядку додається в `requeued`.
+
+    Порядок однозначний, бо всі моменти завершення різні. Перший виклик харнеса: воркер 0 робить `a` (0–50 мс)
+    і `c` (50–150 мс), воркер 1 узяв `b` на 500 мс; `stop` на 80 мс, таймаут до 280 мс: `c` встигає, `b` ні,
+    `d` і `e` ніхто не брав.
+  starter: |
+    import asyncio
+
+
+    async def drain(
+        jobs: list[tuple[str, float]], stop_at: float, timeout: float, n_workers: int = 2
+    ) -> tuple[list[str], list[str]]:
+        ...
+  harness: |
+    jobs = [("a", 0.05), ("b", 0.5), ("c", 0.1), ("d", 0.05), ("e", 0.05)]
+    print(asyncio.run(drain(jobs, stop_at=0.08, timeout=0.2)))
+    print(asyncio.run(drain(jobs, stop_at=0.08, timeout=0.6)))
+    print(asyncio.run(drain([("x", 0.02)], stop_at=0.1, timeout=0.2)))
+    print(asyncio.run(drain(jobs, stop_at=0.01, timeout=0.2, n_workers=1)))
+  expected: |
+    (['a', 'c'], ['b', 'd', 'e'])
+    (['a', 'c', 'b'], ['d', 'e'])
+    (['x'], [])
+    (['a'], ['b', 'c', 'd', 'e'])
+  hints:
+    - "Щоб знати, хто простоює, ведіть словник `current: dict[str, str | None]`: воркер пише туди `job_id` після `get()` і `None` у `finally`."
+    - "`asyncio.wait(tasks, timeout=timeout)` повертає `(done, pending)`; `pending` це ті, хто не вклався, їм `cancel()`. `TaskGroup` сам дочекається скасованих."
+    - "Воркер: `while not stop.is_set(): job_id, s = await queue.get(); current[name] = job_id; try: await asyncio.sleep(s); done.append(job_id) except asyncio.CancelledError: requeued.append(job_id); raise finally: current[name] = None; queue.task_done()`."
+  solution: |
+    import asyncio
+
+
+    async def drain(
+        jobs: list[tuple[str, float]], stop_at: float, timeout: float, n_workers: int = 2
+    ) -> tuple[list[str], list[str]]:
+        queue: asyncio.Queue[tuple[str, float]] = asyncio.Queue()
+        for job in jobs:
+            queue.put_nowait(job)
+        stop = asyncio.Event()
+        done: list[str] = []
+        requeued: list[str] = []
+        names = [f"w{i}" for i in range(n_workers)]
+        current: dict[str, str | None] = dict.fromkeys(names)
+
+        async def worker(name: str) -> None:
+            while not stop.is_set():
+                job_id, seconds = await queue.get()
+                current[name] = job_id
+                try:
+                    await asyncio.sleep(seconds)
+                    done.append(job_id)
+                except asyncio.CancelledError:
+                    requeued.append(job_id)
+                    raise
+                finally:
+                    current[name] = None
+                    queue.task_done()
+
+        async with asyncio.TaskGroup() as tg:
+            tasks = {name: tg.create_task(worker(name)) for name in names}
+            await asyncio.sleep(stop_at)       # тут у справжньому воркері SIGTERM
+            stop.set()
+            for name, task in tasks.items():
+                if current[name] is None:
+                    task.cancel()
+            _, late = await asyncio.wait(tasks.values(), timeout=timeout)
+            for task in late:
+                task.cancel()
+        while not queue.empty():
+            requeued.append(queue.get_nowait()[0])
+        return done, requeued
+  requires: []
+  runtime: browser
+
+- id: q4
+  type: quiz
+  question: |
+    У скрипті зареєстровано `atexit.register(cleanup)`. Після якого із завершень `cleanup` НЕ виконається?
+  options:
+    - "`os._exit(0)`"
+    - "`sys.exit(1)` усередині `try` з `finally`"
+    - "Необроблений `RuntimeError`"
+    - "Ctrl-C (`KeyboardInterrupt`), якого ніхто не перехопив"
+  answer: 0
+  explain: |
+    `os._exit` завершує процес негайно на рівні ОС: ні `finally`, ні `atexit`, ні скидання буферів stdout.
+    Його викликають у дочірньому процесі після `fork`, а не як "швидкий `sys.exit`". Решта варіантів це штатне
+    завершення інтерпретатора: `sys.exit` кидає `SystemExit`, необроблений виняток і `KeyboardInterrupt` долітають
+    до верхнього рівня, і в усіх трьох випадках `atexit` спрацьовує. Ще два випадки, коли він мовчить, це `SIGKILL`
+    і `SIGTERM` без обробника, і саме тому очищення воркера пишеться через `with`/`finally` плюс обробник `SIGTERM`.
+
+- id: p1
+  type: project
+  title: "Воркер генерації з graceful shutdown"
+  prompt: |
+    Створіть `practice/m6-l07/gen_worker.py`: асинхронний воркер генерації за зразком розділу "Для капстоуну".
+    Запуск з директорії `practice/m6-l07`: `python gen_worker.py JOBS_JSON STATE_JSON SHUTDOWN_TIMEOUT`.
+
+    - `JOBS_JSON` містить список пар `[job_id, seconds]`; "рендер" це `asyncio.sleep(seconds)`.
+    - Два воркери в `asyncio.TaskGroup` беруть задачі з `asyncio.Queue`, кожен друкує `start <id>` і `done <id>`
+      з `flush=True`.
+    - `SIGTERM` і `SIGINT` реєструються через `loop.add_signal_handler`, обробник лише ставить `asyncio.Event`.
+    - Після сигналу: нових задач не брати; простоюючих воркерів скасувати одразу; задачам у роботі дати
+      `SHUTDOWN_TIMEOUT` секунд; ті, що не встигли, скасувати й повернути в чергу; невзяті теж повернути.
+    - Сховище це клас з методами `mark_done`, `requeue`, `save`; `save` пише в `STATE_JSON`
+      `{"done": [...], "requeued": [...]}` і викликається у `finally`. У m6-l08 той самий інтерфейс отримає SQLite.
+    - Процес виходить з кодом 0. Воркер без сигналу не завершується, навіть коли черга порожня: він сервіс.
+
+    У капстоуні таймаут буде 10 секунд; перевірка передає 1.0, щоб не чекати.
+  checklist:
+    - "Задача, що вкладається в таймаут, доробляється й потрапляє в `done`"
+    - "Задача, довша за таймаут, скасовується рівно через `SHUTDOWN_TIMEOUT` після сигналу і потрапляє в `requeued`"
+    - "Невзяті задачі потрапляють у `requeued`, жодна не губиться і не дублюється"
+    - "Воркер, що простоює на порожній черзі, зупиняється за частки секунди після `SIGTERM`"
+    - "Обробник сигналу лише ставить подію; `CancelledError` ніде не ковтається"
+    - "Код завершення 0, `state.json` записано навіть якщо щось пішло не так"
+  verify: |
+    .venv/bin/python - <<'EOF'
+    import json, pathlib, queue, signal, subprocess, sys, threading, time
+    d = pathlib.Path("practice/m6-l07")
+    def run(jobs, wait_for):
+        (d / "jobs.json").write_text(json.dumps(jobs))
+        (d / "state.json").unlink(missing_ok=True)
+        p = subprocess.Popen([sys.executable, "gen_worker.py", "jobs.json", "state.json", "1.0"],
+                             cwd=d, stdout=subprocess.PIPE, text=True)
+        lines = queue.Queue()
+        threading.Thread(target=lambda: [lines.put(l.rstrip()) for l in p.stdout], daemon=True).start()
+        while lines.get(timeout=10) != wait_for:
+            pass
+        t0 = time.monotonic()
+        p.send_signal(signal.SIGTERM)
+        try:
+            code = p.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            raise AssertionError("worker did not stop within 5 s after SIGTERM (timeout is 1.0 s)")
+        state_file = d / "state.json"
+        state = json.loads(state_file.read_text()) if state_file.exists() else None
+        for f in ("jobs.json", "state.json"):
+            (d / f).unlink(missing_ok=True)
+        return code, state, time.monotonic() - t0
+    jobs = [["j1", 0.2], ["j2", 30], ["j3", 0.5], ["j4", 0.2], ["j5", 0.2]]
+    code, state, took = run(jobs, "start j3")
+    assert code == 0, f"exit code {code}, expected 0"
+    assert state is not None, "state.json was not written"
+    assert sorted(state["done"]) == ["j1", "j3"], f"j3 was in flight and fits the timeout, done={state['done']}"
+    assert sorted(state["requeued"]) == ["j2", "j4", "j5"], f"requeued={state['requeued']}"
+    assert took > 0.8, f"stopped after {took:.1f}s: j2 should get the full 1.0 s before cancel"
+    code, state, took = run([["a", 0.1]], "done a")
+    assert code == 0 and state == {"done": ["a"], "requeued": []}, f"idle shutdown: code={code}, state={state}"
+    assert took < 0.5, f"idle worker took {took:.1f}s to stop"
+    print("OK")
+    EOF

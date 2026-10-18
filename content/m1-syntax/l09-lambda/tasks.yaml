@@ -1,0 +1,414 @@
+- id: t1
+  type: code
+  title: "Сортування без урахування регістру"
+  prompt: |
+    Напишіть `sort_labels(labels)`, яка повертає **новий** список підписів, відсортований без урахування регістру.
+    Вхідний список не змінювати. Підписи, що відрізняються лише регістром, лишаються в порядку з вхідних даних.
+    Без lambda: потрібна key-функція вже існує як метод `str`.
+
+    ```python
+    sort_labels(["beta", "Alpha", "gamma", "Delta"])   # ['Alpha', 'beta', 'Delta', 'gamma']
+    sort_labels(["b", "B", "a"])                       # ['a', 'b', 'B']
+    ```
+  starter: |
+    def sort_labels(labels: list[str]) -> list[str]:
+        ...
+  harness: |
+    original = ["beta", "Alpha", "gamma", "Delta"]
+    print(sort_labels(original))
+    print(original)
+    print(sort_labels(["b", "B", "a"]))
+    print(sort_labels(["B", "b", "a"]))
+    print(sort_labels([]))
+  expected: |
+    ['Alpha', 'beta', 'Delta', 'gamma']
+    ['beta', 'Alpha', 'gamma', 'Delta']
+    ['a', 'b', 'B']
+    ['a', 'B', 'b']
+    []
+  hints:
+    - "sorted повертає новий список, а list.sort мутує вхідний. Порядок рівних елементів зберігає стабільність сортування, нічого додатково робити не треба."
+    - "return sorted(labels, key=str.lower)"
+  solution: |
+    def sort_labels(labels: list[str]) -> list[str]:
+        return sorted(labels, key=str.lower)
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Рейтинг полів за кількома ключами"
+  prompt: |
+    Поле форми це словник з ключами `"id"`, `"label"` і необов'язковим `"priority"` (ціле число, за замовчуванням `0`).
+    Напишіть `rank_fields(fields)`, яка повертає список `id` у такому порядку:
+
+    1. за `priority` **за спаданням**;
+    2. при рівному пріоритеті за `label` за зростанням без урахування регістру.
+
+    Одним викликом `sorted` з key-функцією, що повертає кортеж.
+
+    ```python
+    rank_fields([
+        {"id": "a", "label": "zip"},
+        {"id": "b", "label": "Email", "priority": 2},
+        {"id": "c", "label": "age", "priority": 2},
+    ])
+    # ['c', 'b', 'a']
+    ```
+  starter: |
+    def rank_fields(fields: list[dict]) -> list[str]:
+        ...
+  harness: |
+    fields = [
+        {"id": "zip", "label": "Zip code"},
+        {"id": "email", "label": "email", "priority": 5},
+        {"id": "phone", "label": "Phone", "priority": 1},
+        {"id": "age", "label": "Age", "priority": 5},
+        {"id": "note", "label": "note", "priority": -1},
+    ]
+    print(rank_fields(fields))
+    print(rank_fields([{"id": "x", "label": "B"}, {"id": "y", "label": "a"}]))
+    print(rank_fields([]))
+  expected: |
+    ['age', 'email', 'phone', 'zip', 'note']
+    ['y', 'x']
+    []
+  hints:
+    - "Кортежі порівнюються поелементно. Щоб одне числове поле йшло за спаданням, а інше за зростанням, обертають знак числа. Відсутній ключ дає dict.get з другим аргументом."
+    - "key=lambda f: (-f.get(\"priority\", 0), f[\"label\"].lower()), потім витягнути id з кожного словника."
+  solution: |
+    def rank_fields(fields: list[dict]) -> list[str]:
+        ordered = sorted(fields, key=lambda f: (-f.get("priority", 0), f["label"].lower()))
+        return [f["id"] for f in ordered]
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Реєстр конвертерів замість if/elif"
+  prompt: |
+    Значення полів форми приходять рядками, а тип поля задано в конфігу. Напишіть:
+
+    - словник `CONVERTERS` з ключами `"int"`, `"float"`, `"bool"`, `"str"`, де значення це функції `(raw: str) -> значення`;
+    - функцію `parse_value(raw, kind)`, яка бере конвертер із `CONVERTERS` і викликає його.
+
+    Правила конвертерів:
+
+    - `"int"` і `"float"`: вбудовані `int` і `float` (вони самі кидають `ValueError` на сміття);
+    - `"str"`: рядок без пробілів по краях (метод `str` як функція, без lambda);
+    - `"bool"`: після `strip()` і `lower()` значення `"true"`, `"yes"`, `"1"` дають `True`, `"false"`, `"no"`, `"0"` дають `False`,
+      усе інше кидає `ValueError(f"not a bool: {raw!r}")`;
+    - невідомий `kind`: `ValueError(f"unknown kind: {kind!r}")`.
+
+    Ланцюжок `if kind == ...` не підходить: вибір конвертера це читання зі словника.
+    Подумайте, чи можна `"bool"` записати через lambda.
+
+    ```python
+    parse_value("42", "int")       # 42
+    parse_value(" Yes ", "bool")   # True
+    parse_value("x", "date")       # ValueError: unknown kind: 'date'
+    ```
+  starter: |
+    def parse_value(raw: str, kind: str):
+        ...
+  harness: |
+    print(sorted(CONVERTERS))
+    print(parse_value("42", "int"), parse_value("2.5", "float"))
+    print(parse_value(" Yes ", "bool"), parse_value("0", "bool"), parse_value("TRUE", "bool"))
+    print(repr(parse_value("  Email  ", "str")))
+    for raw, kind in [("maybe", "bool"), ("x", "date"), ("abc", "int")]:
+        try:
+            parse_value(raw, kind)
+        except ValueError as e:
+            print("ValueError:", e)
+  expected: |
+    ['bool', 'float', 'int', 'str']
+    42 2.5
+    True False True
+    'Email'
+    ValueError: not a bool: 'maybe'
+    ValueError: unknown kind: 'date'
+    ValueError: invalid literal for int() with base 10: 'abc'
+  hints:
+    - "Значеннями словника можуть бути будь-які callable: вбудовані int і float, метод str.strip. Для bool потрібен raise, а raise це інструкція, тому lambda тут не підійде."
+    - "Окрема def parse_bool(raw) з двома множинами {\"true\", \"yes\", \"1\"} і {\"false\", \"no\", \"0\"}. У parse_value: converter = CONVERTERS.get(kind); якщо None, raise ValueError."
+    - "CONVERTERS = {\"int\": int, \"float\": float, \"bool\": parse_bool, \"str\": str.strip}; parse_value повертає converter(raw)."
+  solution: |
+    def parse_bool(raw: str) -> bool:
+        value = raw.strip().lower()
+        if value in {"true", "yes", "1"}:
+            return True
+        if value in {"false", "no", "0"}:
+            return False
+        raise ValueError(f"not a bool: {raw!r}")
+
+
+    CONVERTERS = {
+        "int": int,
+        "float": float,
+        "bool": parse_bool,
+        "str": str.strip,
+    }
+
+
+    def parse_value(raw: str, kind: str):
+        converter = CONVERTERS.get(kind)
+        if converter is None:
+            raise ValueError(f"unknown kind: {kind!r}")
+        return converter(raw)
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Правила валідації через partial"
+  prompt: |
+    Правила валідації вже написані (див. starter). У кожного параметр правила стоїть **першим**, а значення другим,
+    тож їх зручно частково застосовувати. Реєстр `RULES` зіставляє назву правила з функцією.
+
+    Напишіть:
+
+    - `build_checks(rules)`: приймає список пар `(назва, параметр)` і повертає список `functools.partial`,
+      кожен з яких чекає лише значення;
+    - `failed_rules(value, checks)`: повертає список описів правил, які значення не пройшло, у вигляді
+      `"<назва функції>(<repr параметра>)"`, наприклад `"min_length(3)"` чи `"contains('@')"`.
+      Назву й параметр брати з атрибутів самого partial-об'єкта, а не зберігати окремо.
+
+    ```python
+    checks = build_checks([("min_length", 3), ("contains", "@")])
+    failed_rules("ab", checks)   # ['min_length(3)', "contains('@')"]
+    ```
+  starter: |
+    from functools import partial
+
+
+    def min_length(limit: int, value: str) -> bool:
+        return len(value) >= limit
+
+
+    def max_length(limit: int, value: str) -> bool:
+        return len(value) <= limit
+
+
+    def contains(needle: str, value: str) -> bool:
+        return needle in value
+
+
+    RULES = {"min_length": min_length, "max_length": max_length, "contains": contains}
+
+
+    def build_checks(rules: list[tuple[str, object]]) -> list[partial]:
+        ...
+
+
+    def failed_rules(value: str, checks: list[partial]) -> list[str]:
+        ...
+  harness: |
+    checks = build_checks([("min_length", 3), ("max_length", 8), ("contains", "@")])
+    print([type(c).__name__ for c in checks])
+    print([c("a@b.co") for c in checks])
+    print(failed_rules("a@b.co", checks))
+    print(failed_rules("ab", checks))
+    print(failed_rules("very-long-email@example.com", checks))
+    print(failed_rules("anything", []))
+  expected: |
+    ['partial', 'partial', 'partial']
+    [True, True, True]
+    []
+    ['min_length(3)', "contains('@')"]
+    ['max_length(8)']
+    []
+  hints:
+    - "partial(func, arg) фіксує перший позиційний параметр, а тут перший якраз параметр правила. Partial-об'єкт зберігає func і args, а в func є __name__."
+    - "build_checks: [partial(RULES[name], arg) for name, arg in rules]. Опис: f\"{check.func.__name__}({check.args[0]!r})\"."
+  solution: |
+    from functools import partial
+
+
+    def min_length(limit: int, value: str) -> bool:
+        return len(value) >= limit
+
+
+    def max_length(limit: int, value: str) -> bool:
+        return len(value) <= limit
+
+
+    def contains(needle: str, value: str) -> bool:
+        return needle in value
+
+
+    RULES = {"min_length": min_length, "max_length": max_length, "contains": contains}
+
+
+    def build_checks(rules: list[tuple[str, object]]) -> list[partial]:
+        return [partial(RULES[name], arg) for name, arg in rules]
+
+
+    def failed_rules(value: str, checks: list[partial]) -> list[str]:
+        failed = []
+        for check in checks:
+            if not check(value):
+                failed.append(f"{check.func.__name__}({check.args[0]!r})")
+        return failed
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Рендер форми: реєстр, порядок, перевірка заздалегідь"
+  prompt: |
+    Елемент форми це словник з ключами `"type"`, `"page"`, `"order"`, необов'язковим `"hidden"` і даними для рендера.
+    Рендерери вже написані (див. starter) і приймають тему keyword-only аргументом. Напишіть:
+
+    - словник `RENDERERS`: `"input"` → `render_input`, `"text"` → `render_text`;
+    - `render_form(elements, theme="light")`, яка повертає список рядків HTML.
+
+    Вимоги до `render_form`:
+
+    1. елементи з `"hidden": True` пропускаються повністю, включно з перевіркою типу;
+    2. **до** рендерингу перевіряється, що для всіх видимих елементів є рендерер; якщо ні,
+       `ValueError(f"unknown types: {...}")` з відсортованими унікальними невідомими типами через кому й пробіл,
+       і жоден елемент не рендериться;
+    3. порядок: за `page`, потім за `order`; елементи з однаковими `page` і `order` лишаються в порядку з вхідного списку.
+       Key-функцію взяти з модуля `operator`, без lambda;
+    4. кожен елемент рендериться функцією з `RENDERERS` за його `type` з переданою темою.
+
+    ```python
+    render_form([
+        {"type": "input", "name": "email", "page": 1, "order": 2},
+        {"type": "text", "text": "Hi", "page": 1, "order": 1},
+    ], theme="dark")
+    # ['<p class="dark">Hi</p>', '<input class="dark" name="email">']
+    ```
+  starter: |
+    from functools import partial
+    from operator import itemgetter
+
+
+    def render_input(el: dict, *, theme: str) -> str:
+        return f'<input class="{theme}" name="{el["name"]}">'
+
+
+    def render_text(el: dict, *, theme: str) -> str:
+        return f'<p class="{theme}">{el["text"]}</p>'
+
+
+    def render_form(elements: list[dict], theme: str = "light") -> list[str]:
+        ...
+  harness: |
+    elements = [
+        {"type": "input", "name": "phone", "page": 2, "order": 1},
+        {"type": "input", "name": "email", "page": 1, "order": 2},
+        {"type": "text", "text": "Contact", "page": 1, "order": 1},
+        {"type": "video", "page": 1, "order": 3, "hidden": True},
+        {"type": "text", "text": "Step 2", "page": 2, "order": 1},
+        {"type": "input", "name": "name", "page": 1, "order": 2},
+    ]
+    for line in render_form(elements):
+        print(line)
+    print(render_form(elements[:2], theme="dark"))
+    print(render_form([]))
+    bad = elements + [{"type": "video", "page": 1, "order": 9}, {"type": "map", "page": 3, "order": 1}, {"type": "map", "page": 3, "order": 2}]
+    try:
+        render_form(bad)
+    except ValueError as e:
+        print("ValueError:", e)
+    print(sorted(RENDERERS))
+  expected: |
+    <p class="light">Contact</p>
+    <input class="light" name="email">
+    <input class="light" name="name">
+    <input class="light" name="phone">
+    <p class="light">Step 2</p>
+    ['<input class="dark" name="email">', '<input class="dark" name="phone">']
+    []
+    ValueError: unknown types: map, video
+    ['input', 'text']
+  hints:
+    - "Спершу відфільтруйте видимі елементи в окремий список, потім перевірте типи, потім відсортуйте. Стабільність sorted сама збереже порядок рівних елементів."
+    - "Невідомі типи: sorted({el[\"type\"] for el in visible if el[\"type\"] not in RENDERERS}). Ключ сортування: itemgetter(\"page\", \"order\")."
+    - "Тему можна передати при кожному виклику RENDERERS[el[\"type\"]](el, theme=theme) або один раз зафіксувати через partial(RENDERERS[...], theme=theme)."
+  solution: |
+    from functools import partial
+    from operator import itemgetter
+
+
+    def render_input(el: dict, *, theme: str) -> str:
+        return f'<input class="{theme}" name="{el["name"]}">'
+
+
+    def render_text(el: dict, *, theme: str) -> str:
+        return f'<p class="{theme}">{el["text"]}</p>'
+
+
+    RENDERERS = {"input": render_input, "text": render_text}
+
+
+    def render_form(elements: list[dict], theme: str = "light") -> list[str]:
+        visible = [el for el in elements if not el.get("hidden", False)]
+        unknown = sorted({el["type"] for el in visible if el["type"] not in RENDERERS})
+        if unknown:
+            raise ValueError(f"unknown types: {', '.join(unknown)}")
+        themed = {kind: partial(render, theme=theme) for kind, render in RENDERERS.items()}
+        return [themed[el["type"]](el) for el in sorted(visible, key=itemgetter("page", "order"))]
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    ids = map(str.upper, ["email", "phone"])
+    print("EMAIL" in ids)
+    print(list(ids))
+    ```
+  options:
+    - "True, потім ['EMAIL', 'PHONE']"
+    - "True, потім ['PHONE']"
+    - "False, потім ['EMAIL', 'PHONE']"
+    - "TypeError: 'map' object is not iterable"
+  answer: 1
+  explain: |
+    `map` повертає одноразовий ітератор. Перевірка `in` на ітераторі перебирає його, поки не знайде збіг,
+    і забирає `"EMAIL"`; `list(ids)` отримує лише те, що лишилося, тобто `['PHONE']`.
+    Варіант з повним списком це інтуїція JS, де `.map` повертає масив, який можна читати скільки завгодно разів.
+    `False` спокусливий з думки, що `in` порівнює з об'єктом `map` цілком, але `in` для iterable означає пошук серед елементів.
+    `TypeError` ні: ітератор iterable, саме тому `in` і `list` з ним працюють.
+
+- id: q2
+  type: quiz
+  question: |
+    Який рядок компілюється без `SyntaxError`?
+  options:
+    - "`f = lambda x: return x * 2`"
+    - "`key = lambda f: f[\"order\"] if \"order\" in f else 0`"
+    - "`g = lambda x: if x: x else 0`"
+    - "`h = lambda x: (y = x * 2)`"
+  answer: 1
+  explain: |
+    Тіло lambda це рівно один вираз. Тернарний `a if cond else b` (conditional expression) вираз, тому другий рядок коректний.
+    `return` це інструкція, як і `if` у формі `if x: ...`, тож перший і третій рядки падають з `invalid syntax`;
+    це звичка з arrow function з блоком тіла. Присвоєння `=` теж інструкція, і дужки цього не змінюють:
+    Python навіть підказує `Maybe you meant '==' or ':=' instead of '='?`.
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    rows = [("b", 2), ("a", 1), ("c", 2), ("d", 1)]
+    print([name for name, _ in sorted(rows, key=lambda r: r[1], reverse=True)])
+    ```
+  options:
+    - "['b', 'c', 'a', 'd']"
+    - "['c', 'b', 'd', 'a']"
+    - "['c', 'b', 'a', 'd']"
+    - "Порядок 'b' і 'c' не визначений"
+  answer: 0
+  explain: |
+    Сортування в Python стабільне, і `reverse=True` цю стабільність зберігає: обертається порядок ключів,
+    а елементи з рівним ключем лишаються в порядку з вхідних даних (`b` перед `c`, `a` перед `d`).
+    `['c', 'b', 'd', 'a']` це результат `sorted(...)[::-1]`, який перевертає й рівні елементи.
+    `['c', 'b', 'a', 'd']` змішує обидві ідеї. "Не визначений" це інтуїція зі старих рушіїв JS, де `Array.prototype.sort`
+    до ES2019 не гарантував стабільності; у Python стабільність гарантована документацією.

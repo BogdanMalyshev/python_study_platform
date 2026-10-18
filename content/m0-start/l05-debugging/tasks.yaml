@@ -1,0 +1,495 @@
+- id: q1
+  type: quiz
+  question: |
+    Функція `build` упала з таким traceback. Який кадр останній із вашого коду, тобто з якого рядка починати читати?
+    ```text
+    Traceback (most recent call last):
+      File "config.py", line 14, in <module>
+        build('{"title": "Signup", "fields": [],}')
+      File "config.py", line 10, in build
+        config = load_config(raw)
+                 ^^^^^^^^^^^^^^^^
+      File "config.py", line 5, in load_config
+        config = json.loads(raw)
+                 ^^^^^^^^^^^^^^^
+      File ".../lib/python3.12/json/__init__.py", line 346, in loads
+        return _default_decoder.decode(s)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File ".../lib/python3.12/json/decoder.py", line 338, in decode
+        obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File ".../lib/python3.12/json/decoder.py", line 354, in raw_decode
+        obj, end = self.scan_once(s, idx)
+                   ^^^^^^^^^^^^^^^^^^^^^^
+    json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 34 (char 33)
+    ```
+  options:
+    - "`decoder.py`, рядок 354, у `raw_decode`"
+    - "`config.py`, рядок 5, у `load_config`"
+    - "`config.py`, рядок 14, у `<module>`"
+    - "`json/__init__.py`, рядок 346, у `loads`"
+  answer: 1
+  explain: |
+    Кадри йдуть від точки входу вниз до місця, де виникла помилка. Три нижні кадри лежать у `.../lib/python3.12/json/`,
+    це стандартна бібліотека: вона виконала свою роботу правильно й повідомила, що вхід поганий. Останній кадр з вашого
+    файлу `config.py` це рядок 5, де ви передали рядок у `json.loads`. Варіант з `decoder.py` спокусливий звичкою
+    "дивитися на самий низ", але правити stdlib ви не будете. Рядок 14 це точка входу, з нього стек лише починається;
+    хоча саме там лежить зіпсований JSON з комою перед `}` (символ 33), до цього висновку ви доходите, прочитавши
+    повідомлення і піднявшись від рядка 5 вгору.
+
+- id: q2
+  type: quiz
+  question: |
+    Перший виклик надрукував `100.0`, другий упав. У якому рядку баг?
+    ```python
+    def percent(part: int, total: int) -> float:
+        return round(part / total * 100, 1)
+
+
+    def completion(fields: list[str], answers: dict) -> float:
+        filled = sum(1 for f in fields if answers.get(f))
+        return percent(len(fields), filled)
+
+
+    print(completion(["email", "age"], {"email": "a@b.c", "age": 30}))
+    print(completion(["email", "age"], {}))
+    ```
+    ```text
+    100.0
+    Traceback (most recent call last):
+      File "report.py", line 11, in <module>
+        print(completion(["email", "age"], {}))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "report.py", line 7, in completion
+        return percent(len(fields), filled)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "report.py", line 2, in percent
+        return round(part / total * 100, 1)
+                     ~~~~~^~~~~~~
+    ZeroDivisionError: division by zero
+    ```
+  options:
+    - "Рядок 2: потрібна перевірка `total == 0` у `percent`"
+    - "Рядок 7: аргументи `percent` переставлені місцями"
+    - "Рядок 11: не можна передавати порожній словник"
+    - "Рядок 6: `sum` з генератором повертає 0 замість кількості"
+  answer: 1
+  explain: |
+    Останній кадр показує, де програма впала, а не де помилка. `percent(part, total)` отримує `len(fields)` як `part`
+    і `filled` як `total`, тобто ділить 2 на 0. Перший виклик "працював" лише тому, що там `filled == len(fields)`
+    і перестановка не змінює результат. Перевірка `total == 0` у рядку 2 сховала б симптом і повертала б неправильні
+    відсотки для всіх інших випадків. Порожній словник це легальний вхід: жодне поле не заповнене, очікується `0.0`.
+    `sum(1 for ...)` рахує правильно, тут він дав чесний нуль.
+
+- id: q3
+  type: quiz
+  question: |
+    Програма впала з таким виводом. Який виняток виник першим і з яким програма завершилась?
+    ```text
+    Traceback (most recent call last):
+      File "chain.py", line 6, in load_config
+        return json.loads(raw)
+               ^^^^^^^^^^^^^^^
+      File ".../lib/python3.12/json/decoder.py", line 354, in raw_decode
+        obj, end = self.scan_once(s, idx)
+                   ^^^^^^^^^^^^^^^^^^^^^^
+    json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 20 (char 19)
+
+    The above exception was the direct cause of the following exception:
+
+    Traceback (most recent call last):
+      File "chain.py", line 11, in <module>
+        load_config('{"title": "Signup",}')
+      File "chain.py", line 8, in load_config
+        raise ValueError("config is not valid JSON") from e
+    ValueError: config is not valid JSON
+    ```
+  options:
+    - "Першим `JSONDecodeError`, завершилась на `ValueError`"
+    - "Першим `ValueError`, завершилась на `JSONDecodeError`"
+    - "Це два незалежні збої в різних місцях програми"
+    - "Завершилась на `JSONDecodeError`, а `ValueError` лише примітка до нього"
+  answer: 0
+  explain: |
+    Ланцюжок друкується в хронологічному порядку: спершу причина, потім фраза-зв'язка, потім виняток, який долетів до
+    верху і зупинив програму. Тому самий нижній рядок усього виводу, `ValueError`, і є фінальним винятком, а
+    `JSONDecodeError` лежить у його `__cause__`. Звичка JS читати першим верхній рядок підказує другий варіант,
+    але тут верх це початок історії. "The above exception was the direct cause" означає навмисне `raise ... from e`,
+    тож збої не незалежні: другий кинуто свідомо через перший.
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    value = "30"
+    print(f"{value=}")
+    ```
+  options: ["value=30", "value='30'", "30", "value=\"30\""]
+  answer: 1
+  explain: |
+    Специфікатор `=` у f-рядку друкує сам вираз, знак `=` і `repr` значення, тому рядок отримує лапки: `value='30'`.
+    Саме це робить його корисним для дебагу: число `30` і рядок `"30"` у виводі розрізняються. `value=30` це те, що дав би
+    `print("value=", value)` або `f"value={value}"`, які використовують `str`. Подвійних лапок не буде, бо `repr` рядка
+    віддає одинарні, якщо всередині немає одинарної лапки.
+
+- id: t1
+  type: code
+  title: "Останній рядок traceback: тип і повідомлення"
+  prompt: |
+    Напишіть `exception_summary(tb)`, яка приймає текст traceback і повертає кортеж `(тип, повідомлення)`
+    з останнього непорожнього рядка. Тип це все до першого `": "`, повідомлення все після нього.
+    Якщо `": "` у рядку немає (виняток без повідомлення), повідомлення порожнє.
+
+    Пам'ятайте, що в ланцюжку винятків фінальний виняток стоїть у самому низу, а в повідомленні
+    може бути власне двокрапка.
+
+    ```python
+    exception_summary("Traceback (most recent call last):\n  ...\nKeyError: 'age'\n")
+    # ('KeyError', "'age'")
+    exception_summary("...\nbdb.BdbQuit")
+    # ('bdb.BdbQuit', '')
+    ```
+  starter: |
+    def exception_summary(tb: str) -> tuple[str, str]:
+        ...
+  harness: |
+    simple = '''Traceback (most recent call last):
+      File "main.py", line 9, in age_of
+        return int(answers["age"])
+                   ~~~~~~~^^^^^^^
+    KeyError: 'age'
+    '''
+    chained = '''Traceback (most recent call last):
+      File "chain.py", line 6, in load_config
+        return json.loads(raw)
+    json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 20 (char 19)
+
+    The above exception was the direct cause of the following exception:
+
+    Traceback (most recent call last):
+      File "chain.py", line 8, in load_config
+        raise ValueError("config is not valid JSON") from e
+    ValueError: config is not valid JSON
+
+
+    '''
+    quit_tb = '''Traceback (most recent call last):
+      File ".../lib/python3.12/bdb.py", line 125, in dispatch_line
+        if self.quitting: raise BdbQuit
+    bdb.BdbQuit'''
+    json_tb = '''  File ".../lib/python3.12/json/decoder.py", line 356, in raw_decode
+        raise JSONDecodeError("Expecting value", s, err.value) from None
+    json.decoder.JSONDecodeError: Expecting value: line 1 column 11 (char 10)'''
+    print(exception_summary(simple))
+    print(exception_summary(chained))
+    print(exception_summary(quit_tb))
+    print(exception_summary(json_tb))
+  expected: |
+    ('KeyError', "'age'")
+    ('ValueError', 'config is not valid JSON')
+    ('bdb.BdbQuit', '')
+    ('json.decoder.JSONDecodeError', 'Expecting value: line 1 column 11 (char 10)')
+  hints:
+    - "Порожні рядки в кінці треба відкинути до того, як брати останній; далі рядок ділиться лише по першому входженню роздільника."
+    - "tb.strip().splitlines()[-1] дає останній змістовний рядок, а str.partition(\": \") повертає три частини і не падає, коли роздільника немає."
+  solution: |
+    def exception_summary(tb: str) -> tuple[str, str]:
+        last = tb.strip().splitlines()[-1]
+        exc_type, _, message = last.partition(": ")
+        return exc_type, message
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Кадри з вашого коду"
+  prompt: |
+    Напишіть `own_frames(tb, root)`, яка повертає кадри traceback, що належать вашому проєкту: список кортежів
+    `(path, line, func)`, де `path` це шлях відносно `root`, `line` це `int`.
+
+    Правила:
+    - кадр це рядок виду `  File "<шлях>", line <N>, in <функція>`;
+    - ваш кадр це той, чий шлях починається з `root + "/"`; кадри stdlib і сторонніх пакетів відкидаються;
+    - якщо traceback це ланцюжок, беруться кадри лише останнього блоку, того, що після останнього
+      `Traceback (most recent call last):`, бо саме він описує виняток, який зупинив програму;
+    - порядок той самий, що в traceback: від точки входу до найглибшого кадру.
+
+    ```python
+    own_frames(tb, "/app")
+    # [('main.py', 3, '<module>'), ('formbuilder/loader.py', 12, 'load_config')]
+    ```
+  starter: |
+    import re
+
+
+    def own_frames(tb: str, root: str) -> list[tuple[str, int, str]]:
+        ...
+  harness: |
+    tb = '''Traceback (most recent call last):
+      File "/app/main.py", line 3, in <module>
+        load_config(path)
+      File "/app/formbuilder/loader.py", line 12, in load_config
+        return json.loads(text)
+               ^^^^^^^^^^^^^^^^
+      File "/usr/lib/python3.12/json/__init__.py", line 346, in loads
+        return _default_decoder.decode(s)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/usr/lib/python3.12/json/decoder.py", line 356, in raw_decode
+        raise JSONDecodeError("Expecting value", s, err.value) from None
+    json.decoder.JSONDecodeError: Expecting value: line 1 column 11 (char 10)
+    '''
+    chained = '''Traceback (most recent call last):
+      File "/app/formbuilder/widgets.py", line 6, in widget_for
+        return WIDGETS[field["type"]]
+               ~~~~~~~^^^^^^^^^^^^^^^
+    KeyError: 'date'
+
+    During handling of the above exception, another exception occurred:
+
+    Traceback (most recent call last):
+      File "/app/main.py", line 11, in <module>
+        widget_for({"id": "dob", "type": "date"})
+      File "/app/formbuilder/widgets.py", line 8, in widget_for
+        return WIDGETS[field["fallback"]]
+                       ~~~~~^^^^^^^^^^^^
+    KeyError: 'fallback'
+    '''
+    lib_only = '''Traceback (most recent call last):
+      File "/usr/lib/python3.12/runpy.py", line 198, in _run_module_as_main
+        return _run_code(code, main_globals, None,
+    ModuleNotFoundError: No module named 'formbuilder'
+    '''
+    print(own_frames(tb, "/app"))
+    print(own_frames(chained, "/app"))
+    print(own_frames(lib_only, "/app"))
+    print(own_frames(tb, "/app/formbuilder"))
+    print(own_frames(tb, "/ap"))
+  expected: |
+    [('main.py', 3, '<module>'), ('formbuilder/loader.py', 12, 'load_config')]
+    [('main.py', 11, '<module>'), ('formbuilder/widgets.py', 8, 'widget_for')]
+    []
+    [('loader.py', 12, 'load_config')]
+    []
+  hints:
+    - "Спершу відріжте все до останнього заголовка Traceback, потім знайдіть рядки кадрів регулярним виразом із трьома групами, а префікс перевіряйте разом зі слешем, щоб /ap не збігався з /app."
+    - "block = tb.rsplit(\"Traceback (most recent call last):\", 1)[-1]; re.finditer(r'^  File \"(.+?)\", line (\\d+), in (.+)$', block, re.M); далі path.startswith(root + \"/\") і path[len(root) + 1:]."
+  solution: |
+    import re
+
+
+    def own_frames(tb: str, root: str) -> list[tuple[str, int, str]]:
+        block = tb.rsplit("Traceback (most recent call last):", 1)[-1]
+        prefix = root + "/"
+        frames = []
+        for m in re.finditer(r'^  File "(.+?)", line (\d+), in (.+)$', block, re.M):
+            path, line, func = m.groups()
+            if path.startswith(prefix):
+                frames.append((path[len(prefix):], int(line), func))
+        return frames
+  requires: []
+  runtime: browser
+
+- id: t3
+  type: code
+  title: "Баг вище за стек"
+  prompt: |
+    Цей код упав на одній із реальних відповідей форми:
+
+    ```text
+    Traceback (most recent call last):
+      File "main.py", line 17, in <module>
+        print(summary({"Email": "bob@y.dev", " Age": " 27"}))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "main.py", line 14, in summary
+        return f"{answers['email']} ({age_of(answers)})"
+                                      ^^^^^^^^^^^^^^^
+      File "main.py", line 9, in age_of
+        return int(answers["age"])
+                   ~~~~~~~^^^^^^^
+    KeyError: 'age'
+    ```
+
+    Знайдіть причину й виправте її там, де вона виникає, а не там, де програма впала. Ключі відповідей мають
+    нормалізуватися так, щоб регістр і пробіли навколо ключа не мали значення. Підказка до методу: `KeyError` каже,
+    чого немає; щоб побачити, що є, додайте `print(f"{answers=}")` у `summary` і запустіть.
+
+    Харнес перевіряє і `summary`, і саму `parse_answers`, тож обхід через `answers.get(...)` в `age_of` не пройде.
+  starter: |
+    def parse_answers(raw: dict[str, str]) -> dict[str, str]:
+        answers = {}
+        for key, value in raw.items():
+            answers[key.lower()] = value.strip()
+        return answers
+
+
+    def age_of(answers: dict[str, str]) -> int:
+        return int(answers["age"])
+
+
+    def summary(raw: dict[str, str]) -> str:
+        answers = parse_answers(raw)
+        return f"{answers['email']} ({age_of(answers)})"
+  harness: |
+    print(summary({"email": "a@b.c", "age": "30"}))
+    print(summary({"Email": "bob@y.dev", " Age": " 27"}))
+    print(summary({" EMAIL ": " ann@x.io ", "age\t": "41"}))
+    print(parse_answers({" Age ": " 27 ", "Name": "Bob"}))
+  expected: |
+    a@b.c (30)
+    bob@y.dev (27)
+    ann@x.io (41)
+    {'age': '27', 'name': 'Bob'}
+  hints:
+    - "Функції parse_answers у traceback немає: вона вже повернула результат до того, як age_of упала. Подивіться, які ключі вона повернула для ' Age'."
+    - "print(f\"{answers=}\") покаже {'email': 'bob@y.dev', ' age': '27'}: ключ з пробілом. У parse_answers ключ треба не лише перевести в нижній регістр, а й обрізати: key.strip().lower()."
+  solution: |
+    def parse_answers(raw: dict[str, str]) -> dict[str, str]:
+        answers = {}
+        for key, value in raw.items():
+            answers[key.strip().lower()] = value.strip()
+        return answers
+
+
+    def age_of(answers: dict[str, str]) -> int:
+        return int(answers["age"])
+
+
+    def summary(raw: dict[str, str]) -> str:
+        answers = parse_answers(raw)
+        return f"{answers['email']} ({age_of(answers)})"
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Звіт перевірок без падіння"
+  prompt: |
+    Напишіть `run_checks(checks)`: словник `{назва: функція без аргументів}`. Функція викликає кожну перевірку
+    по черзі й повертає список рядків звіту. Програма не падає, навіть якщо всі перевірки кидають винятки.
+
+    - перевірка пройшла: `"<назва>: ok"`;
+    - перевірка кинула виняток (нащадок `Exception`): `"<назва>: FAIL <останній рядок traceback> (in <функція>)"`,
+      де останній рядок це те, що Python надрукував би внизу traceback (тип з модулем і повідомлення),
+      а `<функція>` це ім'я найглибшого кадру, в якому виник виняток.
+
+    Текст traceback руками не розбирати: модуль `traceback` уміє віддати і останній рядок, і кадри як об'єкти.
+
+    ```python
+    run_checks({"zero": lambda: 1 / 0})
+    # ['zero: FAIL ZeroDivisionError: division by zero (in <lambda>)']
+    ```
+  starter: |
+    import traceback
+    from collections.abc import Callable
+
+
+    def run_checks(checks: dict[str, Callable[[], object]]) -> list[str]:
+        ...
+  harness: |
+    import json
+
+
+    def parse_age(raw: str) -> int:
+        return int(raw)
+
+
+    def load_title(raw: str) -> str:
+        return json.loads(raw)["title"]
+
+
+    checks = {
+        "age": lambda: parse_age("30"),
+        "bad age": lambda: parse_age("thirty"),
+        "title": lambda: load_title('{"title": "Signup"}'),
+        "no title": lambda: load_title('{"name": "Signup"}'),
+        "broken json": lambda: load_title('{"title": }'),
+        "zero": lambda: 1 / 0,
+    }
+    for line in run_checks(checks):
+        print(line)
+    print(run_checks({}))
+  expected: |
+    age: ok
+    bad age: FAIL ValueError: invalid literal for int() with base 10: 'thirty' (in parse_age)
+    title: ok
+    no title: FAIL KeyError: 'title' (in load_title)
+    broken json: FAIL json.decoder.JSONDecodeError: Expecting value: line 1 column 11 (char 10) (in raw_decode)
+    zero: FAIL ZeroDivisionError: division by zero (in <lambda>)
+    []
+  hints:
+    - "try / except Exception as e навколо виклику; рядок і кадр дістаються з самого об'єкта винятку, без print_exc."
+    - "traceback.format_exception_only(e)[-1].strip() дає останній рядок; traceback.extract_tb(e.__traceback__)[-1].name дає ім'я найглибшої функції."
+  solution: |
+    import traceback
+    from collections.abc import Callable
+
+
+    def run_checks(checks: dict[str, Callable[[], object]]) -> list[str]:
+        report = []
+        for name, check in checks.items():
+            try:
+                check()
+            except Exception as e:
+                last_line = traceback.format_exception_only(e)[-1].strip()
+                where = traceback.extract_tb(e.__traceback__)[-1].name
+                report.append(f"{name}: FAIL {last_line} (in {where})")
+            else:
+                report.append(f"{name}: ok")
+        return report
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "pdb-сесія як файл: знайти два баги в розрахунку замовлення"
+  prompt: |
+    У корені курсу (поруч із `.venv`) створіть папку `practice/m0-l05/` і файл `practice/m0-l05/discount.py` з таким кодом:
+
+    ```python
+    PROMOS = {"SPRING": 10, "VIP": 25}
+
+
+    def discount_percent(codes: list[str]) -> int:
+        best = 0
+        for code in codes:
+            percent = PROMOS.get(code.upper(), 0)
+            if percent > best:
+                best = percent
+        return best
+
+
+    def line_total(price: float, qty: int, percent: int) -> float:
+        return price * qty * (100 - percent) / 100
+
+
+    def order_total(items: list[dict], codes: list[str]) -> float:
+        percent = discount_percent(codes)
+        total = 0.0
+        for item in items:
+            total = line_total(item["price"], item["qty"], percent)
+        return round(total, 2)
+
+
+    items = [{"price": 40.0, "qty": 2}, {"price": 15.5, "qty": 4}]
+    codes = [" vip", "spring"]
+    print(order_total(items, codes))
+    ```
+
+    Скрипт друкує `55.8`. Правильна відповідь `106.5`: сума 80 + 62 = 142, найкращий код `VIP` дає 25%.
+    Помилки не видно в traceback, бо винятку немає; знайдіть обидва баги через pdb.
+
+    1. Інтерактивно: `.venv/bin/python -m pdb practice/m0-l05/discount.py`, поставте breakpoint у циклі `order_total`,
+       подивіться `percent`, `item` і `total` на кожній ітерації, зайдіть через `s` у `discount_percent`.
+    2. Запишіть команди, якими ви дійшли до проблеми, у `practice/m0-l05/session.pdb`, по одній на рядок, так, щоб
+       `.venv/bin/python -m pdb practice/m0-l05/discount.py < practice/m0-l05/session.pdb` відтворював вашу сесію без участі людини.
+    3. Виправте обидва баги в `discount.py`.
+
+    Шлях у `b` pdb шукає відносно `sys.path`, а не поточної папки: `b practice/m0-l05/discount.py:21` не спрацює,
+    пишіть `b discount.py:21` або просто `b 21`.
+  checklist:
+    - "`session.pdb` ставить breakpoint усередині `order_total` і доходить до нього через `c`"
+    - "У сесії видно значення `percent` (до виправлення `10`, а не `25`) і `total` на двох ітераціях"
+    - "Обидва баги виправлено в місці виникнення: пробіли в коді промокоду і перезапис `total` замість накопичення"
+    - "`.venv/bin/python practice/m0-l05/discount.py` друкує `106.5`"
+  verify: ".venv/bin/python practice/m0-l05/discount.py | grep -qx '106.5' && .venv/bin/python -m pdb practice/m0-l05/discount.py < practice/m0-l05/session.pdb | grep -c 'discount.py([0-9]*)order_total()' >/dev/null"

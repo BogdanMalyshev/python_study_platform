@@ -1,0 +1,703 @@
+- id: t1
+  type: code
+  title: "Публікація через залежність-параметр"
+  prompt: |
+    Напишіть `publish_all(pages, publisher) -> int`. `pages` це словник `slug -> html`. Для кожної
+    сторінки в порядку словника викличте `publisher.publish(slug, html)` **позиційно**, але пропустіть
+    сторінки, де `html` порожній або складається лише з пробілів. Поверніть кількість опублікованих.
+
+    Справжнього публікатора немає: харнес передає `Mock` і друкує, що той записав.
+
+    ```python
+    pub = Mock()
+    publish_all({"signup": "<form>", "draft": "  "}, pub)   # -> 1
+    pub.publish.call_args_list                               # [call('signup', '<form>')]
+    ```
+  starter: |
+    def publish_all(pages: dict[str, str], publisher) -> int:
+        ...
+  harness: |
+    from unittest.mock import Mock
+
+    pub = Mock()
+    pub.publish.return_value = "https://cdn.test/page.html"
+    print(publish_all({"signup": "<form>", "draft": "  ", "thanks": "<p>Thanks</p>"}, pub))
+    print(pub.publish.call_args_list)
+    print(publish_all({}, pub), pub.publish.call_count)
+    print(publish_all({"empty": ""}, Mock(spec=[])))
+  expected: |
+    2
+    [call('signup', '<form>'), call('thanks', '<p>Thanks</p>')]
+    0 2
+    0
+  hints:
+    - "Звичайний `for slug, html in pages.items()` і лічильник. Порожній після `strip()` рядок хибний."
+    - "`call_args_list` розрізняє позиційні й іменовані аргументи: `publish(slug, html=html)` дасть інший вивід."
+    - |
+      ```python
+      count = 0
+      for slug, html in pages.items():
+          if html.strip():
+              publisher.publish(slug, html)
+              count += 1
+      return count
+      ```
+  solution: |
+    def publish_all(pages: dict[str, str], publisher) -> int:
+        count = 0
+        for slug, html in pages.items():
+            if not html.strip():
+                continue
+            publisher.publish(slug, html)
+            count += 1
+        return count
+  requires: []
+  runtime: browser
+
+- id: t2
+  type: code
+  title: "Тест для retry через side_effect"
+  prompt: |
+    Цього разу ви пишете не функцію, а тест. Специфікація `retry(fn, attempts)`:
+
+    - викликає `fn()` без аргументів до `attempts` разів;
+    - на `ConnectionError` пробує ще раз; повертає перший успішний результат;
+    - якщо всі спроби впали з `ConnectionError`, кидає останній `ConnectionError` далі;
+    - будь-який інший виняток пропускає одразу, без повторів.
+
+    Напишіть `check_retry(retry) -> None`, яка перевіряє будь-яку реалізацію `retry` проти цієї
+    специфікації за допомогою `Mock` з `side_effect` і `call_count` і падає, якщо реалізація неправильна.
+    Як і в pytest, тест вважається впалим від будь-якого винятку, але навмисно перевіряйте через
+    `assert` і `try/except`: `pytest.raises` у браузері немає.
+
+    Харнес запускає вашу перевірку на правильній реалізації і на трьох зламаних. Правильна має пройти,
+    кожна зламана має бути спіймана.
+  starter: |
+    from unittest.mock import Mock
+
+
+    def check_retry(retry) -> None:
+        ...
+  harness: |
+    def correct(fn, attempts):
+        for i in range(attempts):
+            try:
+                return fn()
+            except ConnectionError:
+                if i == attempts - 1:
+                    raise
+
+    def swallow(fn, attempts):
+        for _ in range(attempts):
+            try:
+                return fn()
+            except ConnectionError:
+                pass
+        return None
+
+    def greedy(fn, attempts):
+        for i in range(attempts):
+            try:
+                return fn()
+            except Exception:
+                if i == attempts - 1:
+                    raise
+
+    def off_by_one(fn, attempts):
+        for i in range(attempts - 1):
+            try:
+                return fn()
+            except ConnectionError:
+                if i == attempts - 2:
+                    raise
+
+    for name, impl in [("correct", correct), ("swallow", swallow), ("greedy", greedy), ("off_by_one", off_by_one)]:
+        try:
+            check_retry(impl)
+            print(f"{name}: passed")
+        except Exception:
+            print(f"{name}: caught")
+  expected: |
+    correct: passed
+    swallow: caught
+    greedy: caught
+    off_by_one: caught
+  hints:
+    - "Три сценарії, кожен зі свіжим `Mock`: дві невдачі й успіх; усі невдачі; інший виняток. У кожному перевіряйте і результат, і `call_count`."
+    - "`side_effect=[ConnectionError(), ConnectionError(), \"ok\"]` для першого, `side_effect=ConnectionError(\"down\")` для другого, `side_effect=ValueError(\"bad\")` для третього. Що реалізація кинула, ловіть через `try/except ... else: raise AssertionError(...)`."
+    - |
+      ```python
+      fn = Mock(side_effect=ValueError("bad"))
+      try:
+          retry(fn, 3)
+      except ValueError:
+          pass
+      else:
+          raise AssertionError("ValueError must propagate")
+      assert fn.call_count == 1, f"no retries on ValueError, got {fn.call_count} calls"
+      ```
+  solution: |
+    from unittest.mock import Mock
+
+
+    def check_retry(retry) -> None:
+        fn = Mock(side_effect=[ConnectionError("reset"), ConnectionError("reset"), "ok"])
+        assert retry(fn, 3) == "ok", "must return the first successful result"
+        assert fn.call_count == 3, f"expected 3 calls, got {fn.call_count}"
+
+        fn = Mock(side_effect=ConnectionError("down"))
+        try:
+            retry(fn, 2)
+        except ConnectionError:
+            pass
+        else:
+            raise AssertionError("last ConnectionError must propagate")
+        assert fn.call_count == 2, f"expected 2 attempts, got {fn.call_count}"
+
+        fn = Mock(side_effect=ValueError("bad"))
+        try:
+            retry(fn, 3)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("ValueError must propagate")
+        assert fn.call_count == 1, f"no retries on ValueError, got {fn.call_count} calls"
+  requires: []
+  runtime: browser
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    from unittest.mock import Mock
+
+    def notify(mailer, email):
+        mailer.send(email, "Welcome")
+
+    mailer = Mock()
+    notify(mailer, "a@b.c")
+    mailer.send.toHaveBeenCalledWith("x@y.z", "Bye")
+    print("done")
+    ```
+  options:
+    - "done"
+    - "AttributeError: 'toHaveBeenCalledWith' is not a valid assertion"
+    - "AssertionError: expected call not found"
+    - "TypeError: 'Mock' object is not callable"
+  answer: 0
+  explain: |
+    `toHaveBeenCalledWith` для `Mock` це просто ще один атрибут: він створюється як дочірній мок
+    і викликається, нічого не перевіряючи, тож друкується `done`. Захист Python 3.12 спрацьовує лише на
+    іменах, що починаються з `assert`, `assret`, `asert`, `aseert`, `assrt`, і на іменах асертів без
+    префікса `assert_` (`called_once_with`), тому `AttributeError` тут немає. `AssertionError` дав би
+    лише справжній `assert_called_once_with("x@y.z", "Bye")`. `TypeError` неможливий: `Mock` і всі його
+    атрибути викликаються. З `create_autospec(Mailer, instance=True)` той самий рядок упав би з
+    `AttributeError`.
+
+- id: t3
+  type: code
+  title: "autospec із spec_set замість голого Mock"
+  prompt: |
+    Напишіть `make_publisher(url: str)`, яка повертає мок екземпляра `Publisher` з такими властивостями:
+
+    - `publish(...)` повертає `url`;
+    - виклик неіснуючого методу (`pubish`) дає `AttributeError`;
+    - виклик `publish` з неправильною кількістю аргументів дає `TypeError`;
+    - `assert_called_once_with` вважає `publish("signup", "<form>")` і `publish("signup", html="<form>")`
+      однаковими викликами;
+    - присвоєння атрибута, якого немає в класі (`pub.root = ...`), дає `AttributeError`;
+    - `isinstance(pub, Publisher)` істинне.
+  starter: |
+    from unittest.mock import Mock, create_autospec
+
+
+    class Publisher:
+        def publish(self, slug: str, html: str) -> str:
+            raise NotImplementedError
+
+        def unpublish(self, slug: str) -> None:
+            raise NotImplementedError
+
+
+    def make_publisher(url: str):
+        ...
+  harness: |
+    pub = make_publisher("https://cdn.test/signup.html")
+    print(pub.publish("signup", html="<form>"))
+    pub.publish.assert_called_once_with("signup", "<form>")
+    print("keyword == positional")
+    for bad in [
+        lambda: pub.pubish("signup", "<form>"),
+        lambda: pub.publish("signup"),
+        lambda: pub.publish("a", "b", "c"),
+    ]:
+        try:
+            bad()
+            print("accepted")
+        except (AttributeError, TypeError) as e:
+            print(type(e).__name__)
+    try:
+        pub.root = "/tmp/dist"
+        print("assigned")
+    except AttributeError:
+        print("AttributeError on assign")
+    print(isinstance(pub, Publisher))
+    pub.unpublish("signup")
+    print(pub.mock_calls[-1])
+  expected: |
+    https://cdn.test/signup.html
+    keyword == positional
+    AttributeError
+    TypeError
+    TypeError
+    AttributeError on assign
+    True
+    call.unpublish('signup')
+  hints:
+    - "`Mock(spec=Publisher)` закриває лише опечатку в імені. Сигнатуру й порівняння через неї дає autospec."
+    - "У `create_autospec` є параметри `instance=True` (мок екземпляра, а не класу) і `spec_set=True` (заборона присвоювати невідомі атрибути)."
+    - |
+      ```python
+      pub = create_autospec(Publisher, instance=True, spec_set=True)
+      pub.publish.return_value = url
+      return pub
+      ```
+  solution: |
+    from unittest.mock import Mock, create_autospec
+
+
+    class Publisher:
+        def publish(self, slug: str, html: str) -> str:
+            raise NotImplementedError
+
+        def unpublish(self, slug: str) -> None:
+            raise NotImplementedError
+
+
+    def make_publisher(url: str):
+        pub = create_autospec(Publisher, instance=True, spec_set=True)
+        pub.publish.return_value = url
+        return pub
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Два модулі пакета і тест. Що станеться в тесті?
+    ```python
+    # formbuilder/mail.py
+    def send(email: str, subject: str) -> str:
+        return f"sent {subject} to {email}"
+
+    # formbuilder/notify.py
+    from formbuilder.mail import send
+
+    def welcome(email: str) -> str:
+        return send(email, "Welcome")
+
+    # tests/test_notify.py
+    from unittest.mock import patch
+    from formbuilder.notify import welcome
+
+    def test_welcome():
+        with patch("formbuilder.mail.send", return_value="fake") as fake:
+            result = welcome("a@b.c")
+        print(result, fake.call_count)
+    ```
+  options:
+    - "`fake 1`: `patch` підміняє функцію всюди, де її імпортовано"
+    - "`sent Welcome to a@b.c 0`: викликано справжній `send`, мок не викликали жодного разу"
+    - "`ImportError`: модуль `formbuilder.mail` уже імпортовано, патчити його пізно"
+    - "`fake 1`, але лише якщо тест імпортує `welcome` після `patch`, а тут імпорт вище, тому `sent Welcome to a@b.c 1`"
+  answer: 1
+  explain: |
+    `from formbuilder.mail import send` у `notify.py` при імпорті створив у `notify` власне ім'я `send`.
+    `patch("formbuilder.mail.send")` переприв'язує ім'я в модулі `mail`, а `welcome` шукає `send` у
+    просторі імен `notify` і знаходить справжню функцію; мок ніхто не викликав. Перша відповідь це
+    інтуїція з `jest.mock` і живих ESM-прив'язок: у Python підміняється один атрибут одного об'єкта, а не
+    всі посилання. `ImportError` немає: `patch` якраз розраховує на вже імпортований модуль. Четвертий
+    варіант плутає порядок: важливо, коли імпортується `notify` (і копіює `send`), а не тест; і навіть
+    тоді лічильник мока не може бути 1, якщо викликали справжню функцію. Правильно:
+    `patch("formbuilder.notify.send")`.
+
+- id: t4
+  type: code
+  title: "patch там, де шукають"
+  prompt: |
+    Два модулі, `clock` і `report`, створюються блоком setup на початку коду (у браузері немає файлів,
+    тому модулі зібрано через `types.ModuleType` і зареєстровано в `sys.modules`; для `patch` це
+    звичайні модулі). Їхній вміст:
+
+    ```python
+    # clock.py
+    from datetime import UTC, datetime
+
+    def now() -> datetime:
+        return datetime.now(UTC)
+
+    # report.py
+    from clock import now
+
+    def stamp(slug: str) -> str:
+        return f"{slug}-{now():%Y%m%d}"
+    ```
+
+    Напишіть `stamp_on(slug, day) -> str`, яка повертає `report.stamp(slug)` так, ніби зараз `day`.
+    Використайте `patch` як контекстний менеджер з рядковою ціллю. Після виклику все має бути
+    повернуто на місце: `report.now` знову той самий об'єкт, що `clock.now`.
+  starter: |
+    import sys
+    import types
+    from datetime import UTC, datetime
+    from unittest.mock import patch
+
+    # ---- setup: модулі clock і report, не змінювати ----
+    clock = types.ModuleType("clock")
+    exec(
+        "from datetime import UTC, datetime\n"
+        "def now() -> datetime:\n"
+        "    return datetime.now(UTC)\n",
+        clock.__dict__,
+    )
+    sys.modules["clock"] = clock
+    report = types.ModuleType("report")
+    exec(
+        "from clock import now\n"
+        "def stamp(slug: str) -> str:\n"
+        "    return f'{slug}-{now():%Y%m%d}'\n",
+        report.__dict__,
+    )
+    sys.modules["report"] = report
+    # ---- кінець setup ----
+
+
+    def stamp_on(slug: str, day: datetime) -> str:
+        ...
+  harness: |
+    print(stamp_on("signup", datetime(2026, 1, 2, tzinfo=UTC)))
+    print(stamp_on("thanks", datetime(2030, 12, 31, 23, 59, tzinfo=UTC)))
+    print(report.now is clock.now)
+  expected: |
+    signup-20260102
+    thanks-20301231
+    True
+  hints:
+    - "Питання одне: в якому модулі `stamp` шукає ім'я `now` у момент виклику?"
+    - "`report.py` зробив `from clock import now`, тож у нього своє ім'я `now`. Патч `clock.now` його не зачепить."
+    - |
+      ```python
+      with patch("report.now", return_value=day):
+          return report.stamp(slug)
+      ```
+  solution: |
+    import sys
+    import types
+    from datetime import UTC, datetime
+    from unittest.mock import patch
+
+    # ---- setup: модулі clock і report, не змінювати ----
+    clock = types.ModuleType("clock")
+    exec(
+        "from datetime import UTC, datetime\n"
+        "def now() -> datetime:\n"
+        "    return datetime.now(UTC)\n",
+        clock.__dict__,
+    )
+    sys.modules["clock"] = clock
+    report = types.ModuleType("report")
+    exec(
+        "from clock import now\n"
+        "def stamp(slug: str) -> str:\n"
+        "    return f'{slug}-{now():%Y%m%d}'\n",
+        report.__dict__,
+    )
+    sys.modules["report"] = report
+    # ---- кінець setup ----
+
+
+    def stamp_on(slug: str, day: datetime) -> str:
+        with patch("report.now", return_value=day):
+            return report.stamp(slug)
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код у stdout?
+    ```python
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+
+    async def release(publisher) -> str:
+        publisher.publish("signup")
+        return "done"
+
+    pub = Mock()
+    pub.publish = AsyncMock(return_value="https://cdn.test/signup.html")
+    print(asyncio.run(release(pub)))
+    pub.publish.assert_called_once_with("signup")
+    print("A")
+    pub.publish.assert_awaited_once_with("signup")
+    print("B")
+    ```
+  options:
+    - "`done`, `A`, `B`"
+    - "`TypeError: object AsyncMock can't be used in 'await' expression`"
+    - "`done`, `A`, потім `AssertionError: Expected publish to have been awaited once. Awaited 0 times.`"
+    - "`done`, потім `AssertionError` на `assert_called_once_with`, бо корутину не виконано"
+  answer: 2
+  explain: |
+    Виклик `AsyncMock` записується одразу, ще до `await`: він повертає корутину, і в цей момент мок уже
+    вважається викликаним, тому `assert_called_once_with` проходить і друкується `A`. Корутину ніхто не
+    дочекався, тож `await_count` дорівнює 0 і `assert_awaited_once_with` падає; у stderr ще з'являється
+    `RuntimeWarning: coroutine ... was never awaited`. Перший варіант це очікування, що `called` і
+    `awaited` одне й те саме. `TypeError` дає звичайний `Mock`, а не `AsyncMock`, і лише якщо його
+    результат справді `await`-нути; тут `await` немає взагалі. Четвертий варіант плутає запис виклику з
+    виконанням тіла корутини. Висновок: для асинхронних залежностей перевіряйте `assert_awaited_*`.
+
+- id: t5
+  type: code
+  title: "Тест кроку генерації: fake-рендерер і AsyncMock"
+  prompt: |
+    Специфікація асинхронної `generate(slug, elements, renderer, publisher)`:
+
+    - порожній `elements` дає `ValueError`, і публікатор не викликається;
+    - HTML це `"\n".join(renderer.render(el) for el in elements)`;
+    - результат це `await publisher.publish(slug, html)`;
+    - виняток публікатора проходить назовні без змін.
+
+    Напишіть `async def check_generate(generate) -> None`, яка перевіряє будь-яку реалізацію проти
+    специфікації і падає, якщо щось не так. Рендерер зробіть fake-класом у пам'яті з методом
+    `render(self, element: dict) -> str`, публікатор візьміть з `create_autospec(Publisher, instance=True)`
+    або `AsyncMock`. Перевіряйте `await`, а не лише виклик.
+
+    Харнес запускає перевірку на правильній реалізації і на чотирьох зламаних: без `await`, з публікацією
+    порожньої форми, з іншим роздільником і з проковтнутою помилкою публікатора.
+  starter: |
+    from typing import Protocol
+    from unittest.mock import AsyncMock, create_autospec
+
+
+    class Publisher(Protocol):
+        async def publish(self, slug: str, html: str) -> str: ...
+
+
+    async def check_generate(generate) -> None:
+        ...
+  harness: |
+    import asyncio
+    import warnings
+
+    warnings.simplefilter("ignore", RuntimeWarning)
+
+    async def correct(slug, elements, renderer, publisher):
+        if not elements:
+            raise ValueError(f"form {slug!r} has no elements")
+        html = "\n".join(renderer.render(el) for el in elements)
+        return await publisher.publish(slug, html)
+
+    async def no_await(slug, elements, renderer, publisher):
+        if not elements:
+            raise ValueError(f"form {slug!r} has no elements")
+        html = "\n".join(renderer.render(el) for el in elements)
+        publisher.publish(slug, html)
+        return f"https://cdn.test/{slug}.html"
+
+    async def publishes_empty(slug, elements, renderer, publisher):
+        html = "\n".join(renderer.render(el) for el in elements)
+        return await publisher.publish(slug, html)
+
+    async def wrong_join(slug, elements, renderer, publisher):
+        if not elements:
+            raise ValueError(f"form {slug!r} has no elements")
+        html = "".join(renderer.render(el) for el in elements)
+        return await publisher.publish(slug, html)
+
+    async def swallow_errors(slug, elements, renderer, publisher):
+        if not elements:
+            raise ValueError(f"form {slug!r} has no elements")
+        html = "\n".join(renderer.render(el) for el in elements)
+        try:
+            return await publisher.publish(slug, html)
+        except Exception:
+            return ""
+
+    async def main() -> None:
+        for name, impl in [
+            ("correct", correct),
+            ("no_await", no_await),
+            ("publishes_empty", publishes_empty),
+            ("wrong_join", wrong_join),
+            ("swallow_errors", swallow_errors),
+        ]:
+            try:
+                await check_generate(impl)
+                print(f"{name}: passed")
+            except Exception:
+                print(f"{name}: caught")
+
+    asyncio.run(main())
+  expected: |
+    correct: passed
+    no_await: caught
+    publishes_empty: caught
+    wrong_join: caught
+    swallow_errors: caught
+  hints:
+    - "Три сценарії, кожен зі свіжим публікатором: щасливий шлях (результат і `assert_awaited_once_with` з точним HTML), порожня форма (`ValueError` і `assert_not_awaited`), помилка публікатора (`side_effect=OSError(...)` і перевірка, що вона вилетіла)."
+    - "Fake-рендерер може повертати `f\"{el['kind']}:{el['id']}\"`. Тоді для двох елементів очікуваний HTML відомий заздалегідь, і роздільник перевіряється сам собою."
+    - |
+      ```python
+      pub = create_autospec(Publisher, instance=True)
+      pub.publish.return_value = "https://cdn.test/signup.html"
+      url = await generate("signup", form, TextRenderer(), pub)
+      assert url == "https://cdn.test/signup.html", url
+      pub.publish.assert_awaited_once_with("signup", "input:email\nbutton:send")
+      ```
+  solution: |
+    from typing import Protocol
+    from unittest.mock import AsyncMock, create_autospec
+
+
+    class Publisher(Protocol):
+        async def publish(self, slug: str, html: str) -> str: ...
+
+
+    class TextRenderer:
+        def render(self, element: dict[str, str]) -> str:
+            return f"{element['kind']}:{element['id']}"
+
+
+    FORM = [{"kind": "input", "id": "email"}, {"kind": "button", "id": "send"}]
+
+
+    async def check_generate(generate) -> None:
+        pub = create_autospec(Publisher, instance=True)
+        pub.publish.return_value = "https://cdn.test/signup.html"
+        url = await generate("signup", FORM, TextRenderer(), pub)
+        assert url == "https://cdn.test/signup.html", f"unexpected url {url!r}"
+        pub.publish.assert_awaited_once_with("signup", "input:email\nbutton:send")
+
+        pub = create_autospec(Publisher, instance=True)
+        try:
+            await generate("empty", [], TextRenderer(), pub)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("empty form must raise ValueError")
+        pub.publish.assert_not_awaited()
+
+        pub = create_autospec(Publisher, instance=True)
+        pub.publish.side_effect = OSError("disk full")
+        try:
+            await generate("signup", FORM, TextRenderer(), pub)
+        except OSError as e:
+            assert str(e) == "disk full", f"unexpected error {e!r}"
+        else:
+            raise AssertionError("publisher error must propagate")
+        pub.publish.assert_awaited_once()
+  requires: []
+  runtime: browser
+
+- id: q4
+  type: quiz
+  question: |
+    Модуль `formbuilder/labels.py` (номери рядків зліва) і єдиний тест до нього:
+    ```python
+    1  def label(field: dict[str, object]) -> str:
+    2      text = str(field["label"])
+    3      if field.get("required"):
+    4          text += " *"
+    5      return text
+    ```
+    ```python
+    def test_required_label() -> None:
+        assert label({"label": "Email", "required": True}) == "Email *"
+    ```
+    Що буде в колонках `Cover` і `Missing` для `labels.py` після
+    `pytest --cov=formbuilder --cov-branch --cov-report=term-missing`?
+  options:
+    - "`100%` і порожньо: усі рядки виконано"
+    - "`86%` і `3->5`"
+    - "`80%` і `4`"
+    - "`86%` і `5`"
+  answer: 1
+  explain: |
+    Усі п'ять інструкцій виконано (рядок `def` теж інструкція: він виконується при імпорті модуля), тож
+    без `--cov-branch` було б `100%`, і це спокуслива відповідь. З гілками coverage рахує два переходи з
+    рядка 3: у тіло `if` (на 4) і повз нього (на 5). Тест пройшов лише перший, тому `Missing` показує
+    `3->5`, а `Cover` рахується з інструкцій і гілок разом: (5 + 1) / (5 + 2) ≈ 86%. Рядок 4 виконано,
+    тому варіант з `4` хибний; рядок 5 виконується завжди, тому варіант з `5` теж. Istanbul у Jest показав би непокриту гілку одразу, бо
+    рахує гілки за замовчуванням; coverage.py лише з `--cov-branch` або `branch = true`.
+
+- id: p1
+  type: project
+  title: "pytest-mock, pytest-cov і тести CLI капстоуну"
+  prompt: |
+    Додайте в капстоун дві dev-залежності й тести для `formbuilder.cli` з m0-l06.
+
+    ```bash
+    uv add --dev pytest-mock pytest-cov
+    ```
+
+    Створіть `tests/test_cli.py` з чотирма тестами:
+
+    1. `--help` повертає 0 і друкує в stdout рівно `USAGE` і перенос рядка (через `capsys`).
+    2. `--version` друкує версію, підмінену через `mocker.patch` у правильному місці.
+    3. Тест-документація правила "патчити там, де шукають": патч `formbuilder.__version__` до `main`
+       не доходить, і друкується справжня версія з `importlib.metadata`.
+    4. Невідомі аргументи: код 2, stdout порожній, stderr починається з
+       `formbuilder: unknown arguments: ...`.
+
+    Не мокайте `print` і `sys.stdout`: для цього є `capsys`.
+  checklist:
+    - "`pytest-mock` і `pytest-cov` у `[dependency-groups] dev` і в `uv.lock`, а не в `[project] dependencies`"
+    - "Версія підміняється через `mocker.patch(\"formbuilder.cli.__version__\", ...)`, без `with` і без `unittest.mock.patch`"
+    - "Тест 3 порівнює з `importlib.metadata.version(\"formbuilder\")` або з фактичною версією, а не з підміненою"
+    - "Жодного `Mock` для `print`, `sys.stdout` чи `sys.stderr`: лише `capsys.readouterr()`"
+    - "Тимчасово замініть ціль у тесті 2 на `formbuilder.__version__` і переконайтеся, що він падає; поверніть"
+    - "`uv run pytest -q` зелений"
+  verify: "cd capstone && uv run pytest tests/test_cli.py -q"
+
+- id: p2
+  type: project
+  title: "Крок генерації: Publisher, fake-рендерер, AsyncMock, tmp_path"
+  prompt: |
+    Додайте два модулі з розділу "Для капстоуну": `src/formbuilder/publisher.py` з `Publisher` (Protocol з
+    `async def publish(self, slug, html) -> str`) і `DirPublisher(root)`, і `src/formbuilder/generate.py`
+    з `async def generate(...)`. `Element` і `Theme` беріть з `formbuilder.domain` (m2-l05), `Renderer`
+    з `formbuilder.renderers` (m2-l07).
+
+    Тести в `tests/test_generate.py`. Асинхронний код запускайте через `asyncio.run(...)` у звичайних
+    тестах: `pytest-asyncio` з'явиться пізніше (m7-l05) і тут не потрібен.
+  checklist:
+    - "Fake-рендерер (`FakeRenderer`) це клас у `tests/` без наслідування від `Renderer`; `uv run mypy src tests` його приймає"
+    - "Публікатор у тестах `generate` створено через `create_autospec(Publisher, instance=True)` або `mocker.create_autospec`; перевірка через `assert_awaited_once_with` з точним HTML"
+    - "Порожня форма: `pytest.raises(ValueError, match=...)` і `publish.assert_not_awaited()`"
+    - "Помилка публікатора (`side_effect = OSError(...)`) проходить назовні: `pytest.raises(OSError, match=...)` і `assert_awaited_once()`"
+    - "`DirPublisher` тестується через `tmp_path` без жодного мока: перевірено вміст файлу, вкладену директорію і `url == path.as_uri()`"
+    - "Кожен новий тест хоча б раз побачено червоним: тимчасово приберіть `await` у `generate` і переконайтеся, що падає саме тест з `assert_awaited_once_with`"
+    - "`uv run mypy src` без помилок"
+  verify: "cd capstone && uv run pytest tests/test_generate.py -q"
+
+- id: p3
+  type: project
+  title: "coverage з гілками і порогом у pyproject"
+  prompt: |
+    Налаштуйте coverage капстоуну в `pyproject.toml` так, щоб `uv run pytest --cov` без додаткових
+    аргументів міряв пакет `formbuilder` з гілками, друкував непокриті рядки й переходи і падав, якщо
+    покриття впаде нижче поточного.
+
+    Потім прочитайте звіт. Для кожного рядка в `Missing` вирішіть одне з трьох: дописати тест, позначити
+    свідомо (`# pragma: no cover` чи `# pragma: no branch` з коментарем чому) або залишити як є і записати
+    в `README.md` у розділ "Checks", чому.
+  checklist:
+    - "`[tool.coverage.run]`: `branch = true`, `source = [\"formbuilder\"]`, `__main__.py` виключено через `omit` або `exclude_also`"
+    - "`[tool.coverage.report]`: `show_missing = true`, `skip_covered = true`, `fail_under` дорівнює поточному цілому значенню, округленому вниз"
+    - "Кожен `->exit` чи `N->M` у звіті розібраний: тест, pragma з поясненням або запис у README"
+    - "`uv run pytest --cov --cov-report=html` створює `htmlcov/`, і `htmlcov/` додано в `.gitignore`"
+    - "README у розділі \"Checks\" має команду `uv run pytest --cov`"
+  verify: "cd capstone && uv run pytest -q --cov"

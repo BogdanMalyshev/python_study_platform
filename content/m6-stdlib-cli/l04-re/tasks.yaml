@@ -1,0 +1,405 @@
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    import re
+
+    print(re.findall("\bform\b", "form formbuilder"))
+    ```
+  options:
+    - "[]"
+    - "['form']"
+    - "SyntaxWarning: invalid escape sequence '\\b', потім ['form']"
+    - "['form', 'form']"
+  answer: 0
+  explain: |
+    Рядок без `r`, тому `\b` обробляє ще парсер рядкового літерала, і це валідна escape-послідовність:
+    символ backspace з кодом 8. До `re` доходить шаблон `'\x08form\x08'`, якого в тексті немає, тому
+    результат порожній. `['form']` дав би `r"\bform\b"`, як дав би літерал `/\bform\b/g` у JS.
+    Попередження `SyntaxWarning` Python видає лише для невідомих послідовностей на кшталт `\d`, а `\b`
+    відома, тому поломка повністю тиха. `['form', 'form']` було б без меж слова взагалі.
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    import re
+
+    print(re.match(r"\d+", "id: 42"))
+    ```
+  options:
+    - "None"
+    - "<re.Match object; span=(4, 6), match='42'>"
+    - "['42']"
+    - "42"
+  answer: 0
+  explain: |
+    `re.match` прив'язаний до початку рядка, а рядок починається з `i`, тож збігу немає і результат `None`.
+    Інтуїція з `"id: 42".match(/\d+/)` у JS веде до `Match` на позиції 4, але це поведінка `re.search`.
+    `['42']` це форма результату `findall` (або JS-ного `match` з `g`), а `42` без обгортки не повертає
+    жодна функція пошуку: збіг завжди або `None`, або об'єкт `Match`.
+
+- id: t1
+  type: code
+  title: "Розмір з одиницею через fullmatch"
+  prompt: |
+    Напишіть `parse_size(value)`, яка розбирає CSS-розмір з цілим числом і одиницею `px`, `rem`, `em`
+    або `%` і повертає кортеж `(число, одиниця)`. Якщо рядок не є таким розміром цілком, повернути `None`.
+    Пробіли, дробові числа й хвостовий `\n` роблять значення невалідним.
+
+    Використайте скомпільований шаблон з іменованими групами, `fullmatch` і walrus, щоб тип звузився
+    з `re.Match[str] | None` до `re.Match[str]`.
+
+    ```python
+    parse_size("16px")     # (16, 'px')
+    parse_size("100%")     # (100, '%')
+    parse_size("1.5rem")   # None
+    parse_size("16px\n")   # None
+    ```
+  starter: |
+    import re
+
+
+    def parse_size(value: str) -> tuple[int, str] | None:
+        ...
+  harness: |
+    print(parse_size("16px"))
+    print(parse_size("100%"))
+    print(parse_size("2rem"))
+    print(parse_size("1.5rem"))
+    print(parse_size("16 px"))
+    print(parse_size(" 16px"))
+    print(parse_size("16px\n"))
+    print(parse_size("px"))
+  expected: |
+    (16, 'px')
+    (100, '%')
+    (2, 'rem')
+    None
+    None
+    None
+    None
+    None
+  hints:
+    - "Потрібна перевірка всього рядка, а не пошук усередині й не прив'язка лише до початку. І пам'ятайте, що `$` у Python пропускає завершальний перенос рядка."
+    - "Шаблон `(?P<value>[0-9]+)(?P<unit>px|rem|em|%)` з `re.compile`, а в функції `if (m := SIZE_RE.fullmatch(value)) is None: return None`."
+  solution: |
+    import re
+
+    SIZE_RE = re.compile(r"(?P<value>[0-9]+)(?P<unit>px|rem|em|%)")
+
+
+    def parse_size(value: str) -> tuple[int, str] | None:
+        if (m := SIZE_RE.fullmatch(value)) is None:
+            return None
+        return int(m["value"]), m["unit"]
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    import re
+
+    print(re.findall(r"(\d+)(px|rem)", "16px 2rem"))
+    ```
+  options:
+    - "[('16', 'px'), ('2', 'rem')]"
+    - "['16px', '2rem']"
+    - "['16', '2']"
+    - "[['16px', '16', 'px'], ['2rem', '2', 'rem']]"
+  answer: 0
+  explain: |
+    Форма результату `findall` залежить від кількості груп: без груп це повні збіги, з однією групою її
+    вміст, з двома й більше кортежі груп. Тут груп дві, тому кортежі, а повного збігу `'16px'` у
+    результаті немає. `['16px', '2rem']` це інтуїція з JS-ного `match` з `g`, який групи ігнорує.
+    `['16', '2']` було б з однією групою. Список зі збігом і групами нагадує масиви з `matchAll`;
+    у Python таке дає `finditer`, і там елементи це об'єкти `Match`, а не списки.
+
+- id: t2
+  type: code
+  title: "Токенізатор виразу через split з групою"
+  prompt: |
+    Напишіть `tokenize(expr)`, яка розбиває арифметичний вираз на токени: оператори `+ - * /`, дужки
+    `( )` і все, що між ними (імена й числа). Пробіли навколо операторів і по краях виразу відкидаються,
+    порожніх токенів у результаті немає.
+
+    Зробіть це одним `re.split`, у шаблоні якого оператори захоплюються групою, щоб потрапити в результат.
+
+    ```python
+    tokenize("a + b*(c - 1)")   # ['a', '+', 'b', '*', '(', 'c', '-', '1', ')']
+    tokenize("(x)")             # ['(', 'x', ')']
+    tokenize("")                # []
+    ```
+  starter: |
+    import re
+
+
+    def tokenize(expr: str) -> list[str]:
+        ...
+  harness: |
+    print(tokenize("a + b*(c - 1)"))
+    print(tokenize("(x)"))
+    print(tokenize("  price*qty  "))
+    print(tokenize("total"))
+    print(tokenize(""))
+  expected: |
+    ['a', '+', 'b', '*', '(', 'c', '-', '1', ')']
+    ['(', 'x', ')']
+    ['price', '*', 'qty']
+    ['total']
+    []
+  hints:
+    - "`re.split` з групою в шаблоні вставляє захоплені роздільники між частинами. Порожні рядки з'являються там, де два роздільники стоять поруч або роздільник на краю, їх треба відфільтрувати."
+    - "Шаблон `\\s*([-+*/()])\\s*`: пробіли навколо оператора поза групою, тож вони зникають. Дефіс першим у класі, щоб не став діапазоном."
+    - "`[token for token in re.split(r\"\\s*([-+*/()])\\s*\", expr.strip()) if token]`"
+  solution: |
+    import re
+
+    OPERATOR_RE = re.compile(r"\s*([-+*/()])\s*")
+
+
+    def tokenize(expr: str) -> list[str]:
+        return [token for token in OPERATOR_RE.split(expr.strip()) if token]
+  requires: []
+  runtime: browser
+
+- id: q4
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    import re
+
+    print(re.sub(r"(\d+)px", "$1rem", "16px 24px"))
+    ```
+  options:
+    - "$1rem $1rem"
+    - "16rem 24rem"
+    - "16rem 24px"
+    - "re.error: invalid group reference"
+  answer: 0
+  explain: |
+    `$1` у рядку заміни Python не розуміє і вставляє буквально, тому обидва збіги стали `$1rem`. Посилання
+    на групу пишуть `\1` або `\g<1>`, і тоді вийшло б `16rem 24rem`. Варіант `16rem 24px` це подвійна
+    JS-інтуїція: `$1` як посилання і `replace` без `g`, що замінює лише перший збіг; `re.sub` замінює всі.
+    `re.error` виникає для зворотної риски з невідомою послідовністю, а `$` для шаблону заміни звичайний символ.
+
+- id: t3
+  type: code
+  title: "px у rem через функцію заміни"
+  prompt: |
+    Напишіть `px_to_rem(css, base=16)`, яка замінює в рядку CSS кожне значення в `px` на `rem`,
+    поділивши на `base`. Число може бути цілим або дробовим. Результат форматується через `:g`
+    (`0.5`, `1`, `0.0625`), тобто `f"{value:g}rem"`. Інші одиниці не чіпати. `px`, після якого
+    одразу йде літера чи цифра (`12pxl`), це не одиниця.
+
+    Обчислення в рядку заміни не зробити, тому замість рядка передайте в `re.sub` функцію.
+
+    ```python
+    px_to_rem("padding: 8px 24px; width: 100%")   # 'padding: 0.5rem 1.5rem; width: 100%'
+    px_to_rem("font-size: 20px", base=10)         # 'font-size: 2rem'
+    ```
+  starter: |
+    import re
+
+
+    def px_to_rem(css: str, base: int = 16) -> str:
+        ...
+  harness: |
+    print(px_to_rem("padding: 8px 24px; border: 1px solid; width: 100%"))
+    print(px_to_rem("margin: 0px 12.8px", base=16))
+    print(px_to_rem("font-size: 20px", base=10))
+    print(px_to_rem("class: icon-12pxl; gap: 16px"))
+    print(px_to_rem("no units here"))
+  expected: |
+    padding: 0.5rem 1.5rem; border: 0.0625rem solid; width: 100%
+    margin: 0rem 0.8rem
+    font-size: 2rem
+    class: icon-12pxl; gap: 1rem
+    no units here
+  hints:
+    - "Функція заміни отримує один об'єкт `Match` і має повернути `str`; число з групи треба перетворити на `float`, поділити й відформатувати назад у рядок."
+    - "Шаблон `(?P<value>\\d+(?:\\.\\d+)?)px\\b`: дробова частина необов'язкова й не захоплюється, `\\b` після `px` відсікає `12pxl`."
+    - "`PX_RE.sub(lambda m: f\"{float(m['value']) / base:g}rem\", css)`"
+  solution: |
+    import re
+
+    PX_RE = re.compile(r"(?P<value>\d+(?:\.\d+)?)px\b")
+
+
+    def px_to_rem(css: str, base: int = 16) -> str:
+        def convert(m: re.Match[str]) -> str:
+            return f"{float(m['value']) / base:g}rem"
+
+        return PX_RE.sub(convert, css)
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Тривалість через verbose-шаблон"
+  prompt: |
+    Напишіть `parse_duration(text)`, яка перетворює тривалість на кшталт `"1h 30m 15s"` на кількість секунд.
+
+    - Частини `h`, `m`, `s` необов'язкові, але йдуть саме в такому порядку і кожна не більше одного разу.
+    - Пробіли між числом і літерою та між частинами необов'язкові, пробіли по краях ігноруються.
+    - Регістр літер не важливий: `2H` це дві години.
+    - Числа лише з ASCII-цифр.
+    - Якщо рядок не тривалість цілком (неправильний порядок, повтор, число без одиниці, порожній рядок), повернути `None`.
+
+    Шаблон напишіть у режимі `re.VERBOSE`, по рядку на частину, з коментарями.
+
+    ```python
+    parse_duration("1h30m")        # 5400
+    parse_duration("1h 30m 15s")   # 5415
+    parse_duration("30m1h")        # None
+    parse_duration("")             # None
+    ```
+  starter: |
+    import re
+
+
+    def parse_duration(text: str) -> int | None:
+        ...
+  harness: |
+    print(parse_duration("1h30m"))
+    print(parse_duration("1h 30m 15s"))
+    print(parse_duration("45s"))
+    print(parse_duration("2H"))
+    print(parse_duration(" 10 m "))
+    print(parse_duration("30m1h"))
+    print(parse_duration("90"))
+    print(parse_duration(""))
+    print(parse_duration("1h 1h"))
+  expected: |
+    5400
+    5415
+    45
+    7200
+    600
+    None
+    None
+    None
+    None
+  hints:
+    - "Кожна частина це необов'язкова незахоплююча група з іменованою групою числа всередині. Порядок і \"не більше одного разу\" дає сама послідовність трьох груп у шаблоні, а \"рядок цілком\" дає `fullmatch`. Окремо подумайте, що повертає `fullmatch` для порожнього рядка."
+    - "У verbose-режимі пробіли в шаблоні ігноруються, тому пробіли в тексті треба описати явно через `\\s*`. Прапорці комбінуються: `re.VERBOSE | re.IGNORECASE`."
+    - "Шаблон: `(?: (?P<h>[0-9]+) \\s* h )? \\s* (?: (?P<m>[0-9]+) \\s* m )? \\s* (?: (?P<s>[0-9]+) \\s* s )?`. Після `fullmatch(text.strip())` перевірте `m is None or not any(m.groups())`."
+  solution: |
+    import re
+
+    DURATION_RE = re.compile(
+        r"""
+        (?: (?P<h>[0-9]+) \s* h )? \s*   # години
+        (?: (?P<m>[0-9]+) \s* m )? \s*   # хвилини
+        (?: (?P<s>[0-9]+) \s* s )?       # секунди
+        """,
+        re.VERBOSE | re.IGNORECASE,
+    )
+
+
+    def parse_duration(text: str) -> int | None:
+        m = DURATION_RE.fullmatch(text.strip())
+        if m is None or not any(m.groups()):
+            return None
+        hours, minutes, seconds = (int(g) if g else 0 for g in m.groups())
+        return hours * 3600 + minutes * 60 + seconds
+  requires: []
+  runtime: browser
+
+- id: t5
+  type: code
+  title: "Лінтер плейсхолдерів у тексті форми"
+  prompt: |
+    У текстах форми FormBuilder є плейсхолдери `{{ name }}` (пробіли всередині дужок необов'язкові).
+    Напишіть `lint_template(template, known)`, яка повертає список проблем у порядку появи в тексті:
+
+    - `"<рядок>:<колонка>: invalid name '<ім'я>'"`, якщо ім'я не відповідає `[a-z][a-z0-9_]*` цілком
+      (зокрема порожнє ім'я в `{{}}` чи ім'я з пробілом усередині);
+    - `"<рядок>:<колонка>: unknown field '<ім'я>'"`, якщо ім'я валідне, але його немає в `known`.
+
+    Рядок і колонка рахуються з 1 і вказують на перший символ `{{`. Ім'я в повідомленні без пробілів
+    по краях, у лапках як у `repr`. Поодинокі фігурні дужки `{x}` плейсхолдерами не є.
+
+    ```python
+    lint_template("Hi {{ name }},\nyour {{Email}}", {"name", "email"})
+    # ["2:6: invalid name 'Email'"]
+    ```
+  starter: |
+    import re
+
+
+    def lint_template(template: str, known: set[str]) -> list[str]:
+        ...
+  harness: |
+    template = "Hi {{ name }},\nyour {{Email}} and {{ phone }}.\n{{}} {{ name}} {{ first name }}"
+    for problem in lint_template(template, {"name", "email"}):
+        print(problem)
+    print(lint_template("{{ a }}{{b}}", {"a", "b"}))
+    print(lint_template("no placeholders, {single} braces", set()))
+    print(lint_template("{{ email }} {{ x }}", {"email"}))
+  expected: |
+    2:6: invalid name 'Email'
+    2:20: unknown field 'phone'
+    3:1: invalid name ''
+    3:16: invalid name 'first name'
+    []
+    []
+    ["1:13: unknown field 'x'"]
+  hints:
+    - "Два шаблони: один знаходить плейсхолдери з позиціями (тут потрібні об'єкти `Match`, а не рядки), другий перевіряє ім'я цілком. Позицію в рядок і колонку перетворюють методи `str` `count` і `rfind` з межами пошуку."
+    - "Плейсхолдер: `\\{\\{\\s*(?P<name>[^{}]*?)\\s*\\}\\}` з `finditer`; лінивий `*?` віддає кінцеві пробіли групі `\\s*`, а `[^{}]` не дає вийти за межі плейсхолдера. Ім'я: `NAME_RE.fullmatch(name)`."
+    - "`line = template.count(\"\\n\", 0, start) + 1`, `column = start - (template.rfind(\"\\n\", 0, start) + 1) + 1`, де `start = m.start()`."
+  solution: |
+    import re
+
+    PLACEHOLDER_RE = re.compile(r"\{\{\s*(?P<name>[^{}]*?)\s*\}\}")
+    NAME_RE = re.compile(r"[a-z][a-z0-9_]*")
+
+
+    def lint_template(template: str, known: set[str]) -> list[str]:
+        problems: list[str] = []
+        for m in PLACEHOLDER_RE.finditer(template):
+            start = m.start()
+            line = template.count("\n", 0, start) + 1
+            column = start - (template.rfind("\n", 0, start) + 1) + 1
+            name = m["name"]
+            if NAME_RE.fullmatch(name) is None:
+                problems.append(f"{line}:{column}: invalid name {name!r}")
+            elif name not in known:
+                problems.append(f"{line}:{column}: unknown field {name!r}")
+        return problems
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "Модуль text.py у капстоуні: імена, плейсхолдери, slug"
+  prompt: |
+    У репозиторії капстоуну створіть `src/formbuilder/text.py` з трьома шаблонами-константами модуля
+    і функціями над ними, і тести `tests/test_text.py`.
+
+    - `NAME_RE` і `is_valid_name(name: str) -> bool`: ім'я елемента форми за правилом `[a-z][a-z0-9_]*`,
+      перевірка через `fullmatch`, без `^...$`.
+    - `PLACEHOLDER_RE` і `find_placeholders(text: str) -> list[Placeholder]`, де `Placeholder` це
+      `NamedTuple` або frozen dataclass з полями `name`, `start`, `end` (позиції всього `{{ ... }}` у тексті).
+      Пошук через `finditer`, пробіли всередині дужок необов'язкові, невалідні імена теж повертаються,
+      щоб валідатор конфігу міг про них повідомити.
+    - `SLUG_SEPARATOR_RE` і `slugify(title: str) -> str`: нижній регістр, будь-які послідовності
+      не-словесних символів і підкреслень стають одним `-`, без `-` по краях; кирилиця лишається.
+
+    Константи анотуйте як `Final` (тип `re.Pattern[str]` виводиться сам). Якщо в капстоуні вже є
+    Pydantic-модель елемента з полем `name` (m2-l09), підключіть до неї `is_valid_name` через
+    `field_validator`, а не через `Field(pattern=...)`, і поясніть у docstring чому.
+  checklist:
+    - "Параметризований тест `is_valid_name`: `first_name`, `a1` валідні; `email\\n`, `Email`, `1st`, `first-name`, порожній рядок, `ім_я` невалідні"
+    - "Тест `find_placeholders` на тексті з двома плейсхолдерами в одному рядку (жадібний шаблон тут зламався б), з `{{name}}` без пробілів і з поодинокими `{x}`, які не знаходяться; `start`/`end` перевірено зрізом `text[start:end]`"
+    - "Тест `slugify`: `\"Форма реєстрації: Крок 2 / 3\"` дає `форма-реєстрації-крок-2-3`, `\"  Contact_us -- NOW  \"` дає `contact-us-now`, порожній рядок дає порожній рядок"
+    - "У `text.py` немає `^` і `$` у шаблонах і немає позиційних прапорців у `sub`/`split`"
+    - "`mypy --strict src/formbuilder/text.py` проходить без `type: ignore`"
+  verify: "cd capstone && uv run pytest tests/test_text.py -q"

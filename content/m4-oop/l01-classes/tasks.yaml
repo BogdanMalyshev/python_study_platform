@@ -1,0 +1,529 @@
+- id: t1
+  type: code
+  title: "Клас Field з __init__ і __repr__"
+  prompt: |
+    Напишіть звичайний клас (без `@dataclass`) `Field` для поля форми.
+
+    - `Field(name, label=None, required=False)`. Якщо `label` не передано, він будується з `name`:
+      підкреслення стають пробілами, перша літера велика (`"first_name"` → `"First name"`).
+    - Метод `describe()` повертає `label`, а для обов'язкового поля `label` із зірочкою в кінці.
+    - `__repr__` повертає рядок у формі виразу створення: `Field(name='email', label='Email', required=False)`.
+
+    ```python
+    Field("first_name")                       # Field(name='first_name', label='First name', required=False)
+    Field("email", "E-mail", required=True).describe()   # 'E-mail*'
+    ```
+  starter: |
+    class Field:
+        def __init__(self, name: str, label: str | None = None, required: bool = False) -> None:
+            ...
+  harness: |
+    f = Field("first_name")
+    print(f)
+    print(f.describe())
+    g = Field("email", "E-mail", required=True)
+    print(g.describe(), g.name, g.required)
+    print([Field("age")])
+    print(Field("x", label=""))
+  expected: |
+    Field(name='first_name', label='First name', required=False)
+    First name
+    E-mail* email True
+    [Field(name='age', label='Age', required=False)]
+    Field(name='x', label='', required=False)
+  hints:
+    - "У `__init__` присвойте `self.name`, `self.label` і `self.required`; значення `label` за замовчуванням обчисліть там же, перевіряючи саме `is None`, щоб порожній рядок лишився порожнім."
+    - "`name.replace(\"_\", \" \").capitalize()` дає `First name`; у `__repr__` використайте `!r`: `f\"Field(name={self.name!r}, label={self.label!r}, required={self.required!r})\"`."
+  solution: |
+    class Field:
+        def __init__(self, name: str, label: str | None = None, required: bool = False) -> None:
+            self.name = name
+            self.label = label if label is not None else name.replace("_", " ").capitalize()
+            self.required = required
+
+        def describe(self) -> str:
+            return f"{self.label}*" if self.required else self.label
+
+        def __repr__(self) -> str:
+            return f"Field(name={self.name!r}, label={self.label!r}, required={self.required!r})"
+  requires: []
+  runtime: browser
+
+- id: q4
+  type: quiz
+  question: |
+    Шина подій зберігає callback-и у списку. Що надрукує код?
+    ```python
+    class Bus:
+        def __init__(self):
+            self.handlers = []
+
+        def on(self, handler):
+            self.handlers.append(handler)
+
+        def off(self, handler):
+            self.handlers.remove(handler)
+
+    class Widget:
+        def refresh(self):
+            pass
+
+    bus, w = Bus(), Widget()
+    bus.on(w.refresh)
+    bus.off(w.refresh)
+    print(len(bus.handlers), w.refresh is w.refresh)
+    ```
+  options: ["0 False", "1 False", "0 True", "ValueError: list.remove(x): x not in list"]
+  answer: 0
+  explain: |
+    Кожне читання `w.refresh` викликає `__get__` функції й створює новий об'єкт зв'язаного методу, тому
+    `w.refresh is w.refresh` дає `False`. Але `list.remove` шукає елемент через `==`, а зв'язані методи рівні,
+    коли збігаються `__func__` і `__self__`, тож відписка спрацьовує і список порожній.
+    `0 True` це очікування, що метод це один об'єкт, як функція в прототипі JS. `1 False` і `ValueError`
+    виходять, якщо вважати, що `remove` порівнює через `is`; так поводилась би відписка через `id()` чи `is`,
+    і саме тому порівнювати callback-и треба через `==`.
+
+- id: q1
+  type: quiz
+  question: |
+    Що надрукує код?
+    ```python
+    class Form:
+        views = 0
+
+        def open(self):
+            self.views += 1
+
+    a, b = Form(), Form()
+    a.open()
+    a.open()
+    b.open()
+    print(Form.views, a.views, b.views)
+    ```
+  options: ["0 2 1", "3 3 3", "3 2 1", "AttributeError: 'Form' object has no attribute 'views'"]
+  answer: 0
+  explain: |
+    `self.views += 1` це `self.views = self.views + 1`. Читання не знаходить `views` в екземплярі й бере `0`
+    з класу, а запис завжди йде в екземпляр. Тому в `a` і `b` з'являються власні лічильники, а `Form.views`
+    лишається нулем.
+    `3 3 3` це інтуїція `static` поля, яке оновлюється через `this`; `3 2 1` змішує обидві моделі.
+    `AttributeError` очікує той, хто думає, що атрибут класу недоступний через екземпляр, як `static` у TS:
+    у Python читання через екземпляр знаходить атрибут класу.
+
+- id: t2
+  type: code
+  title: "Виправити клас, написаний за TS-звичкою"
+  prompt: |
+    Клас нижче написано так, як пишуть у TS: поле зі значенням у тілі класу і лічильник через `self`.
+    Він запускається, але поводиться неправильно. Виправте його, не змінюючи інтерфейсу:
+
+    - `Element.count` рахує всі створені елементи;
+    - `index` кожного елемента це його порядковий номер серед створених, починаючи з 1;
+    - у кожного елемента власний список `classes`;
+    - в екземплярі немає атрибута `count`, лише `kind`, `index` і `classes`.
+
+    ```python
+    a, b = Element("input"), Element("button")
+    a.add_class("wide")
+    a.index, b.index, Element.count   # (1, 2, 2)
+    b.classes                         # []
+    ```
+  starter: |
+    class Element:
+        count = 0
+        classes: list[str] = []
+
+        def __init__(self, kind: str) -> None:
+            self.kind = kind
+            self.count += 1
+            self.index = self.count
+
+        def add_class(self, name: str) -> None:
+            self.classes.append(name)
+  harness: |
+    a = Element("input")
+    b = Element("button")
+    a.add_class("wide")
+    a.add_class("dark")
+    print(a.index, b.index, Element.count)
+    print(a.classes, b.classes)
+    print(sorted(vars(a)))
+    print(Element("text").index, Element.count)
+  expected: |
+    1 2 2
+    ['wide', 'dark'] []
+    ['classes', 'index', 'kind']
+    3 3
+  hints:
+    - "Дві різні проблеми: запис через `self` створює атрибут екземпляра, а список у тілі класу один на всіх."
+    - "Лічильник збільшуйте через `Element.count += 1`, а `self.classes: list[str] = []` перенесіть у `__init__`."
+  solution: |
+    class Element:
+        count = 0
+
+        def __init__(self, kind: str) -> None:
+            self.kind = kind
+            Element.count += 1
+            self.index = Element.count
+            self.classes: list[str] = []
+
+        def add_class(self, name: str) -> None:
+            self.classes.append(name)
+  requires: []
+  runtime: browser
+
+- id: q2
+  type: quiz
+  question: |
+    Що надрукує код? Зверніть увагу: декоратора `@dataclass` немає.
+    ```python
+    class Element:
+        id: str
+        label: str = ""
+
+    e = Element()
+    print(hasattr(e, "label"), hasattr(e, "id"))
+    ```
+  options: ["True True", "True False", "False False", "TypeError: Element() missing 1 required positional argument: 'id'"]
+  answer: 1
+  explain: |
+    Для звичайного класу `label: str = ""` це атрибут класу (з анотацією), і екземпляр знаходить його через
+    клас. `id: str` без значення лише записується в `Element.__annotations__`, атрибута не створює, тому
+    `hasattr(e, "id")` дає `False`.
+    `True True` це TS-інтуїція, де оголошене поле "існує" в типі. `TypeError` був би з `@dataclass`, де обидва
+    рядки стають параметрами `__init__`; без декоратора у класу `__init__` від `object`, який аргументів не
+    приймає і тому без аргументів спрацьовує. `False False` виходить, якщо вважати, що атрибути класу не видно
+    через екземпляр.
+
+- id: t3
+  type: code
+  title: "Альтернативний конструктор через classmethod"
+  prompt: |
+    Напишіть клас `Condition` для умови видимості поля.
+
+    - Атрибут класу `OPERATORS = ("eq", "neq", "in")`.
+    - `Condition(field, operator, value)`. Якщо `operator` не входить в `OPERATORS`, кинути
+      `ValueError(f"unknown operator {operator!r} for {ім'я класу}")`.
+    - `@classmethod from_dict(data)` бере `field`, `op` (за замовчуванням `"eq"`) і `value` зі словника.
+    - `__repr__`: `Condition(field='country', operator='eq', value='UA')`.
+
+    Харнес оголошує підклас `NumericCondition` з власним `OPERATORS = ("gt", "lt")`. Без жодного коду в
+    підкласі `NumericCondition.from_dict(...)` має повертати `NumericCondition`, перевіряти саме його оператори,
+    а `repr` і повідомлення про помилку мають показувати його ім'я. Тому ім'я класу ніде не пишіть руками.
+  starter: |
+    class Condition:
+        OPERATORS = ("eq", "neq", "in")
+
+        def __init__(self, field: str, operator: str, value: object) -> None:
+            ...
+  harness: |
+    print(Condition.from_dict({"field": "country", "value": "UA"}))
+    print(Condition.from_dict({"field": "plan", "op": "in", "value": ["pro", "team"]}))
+
+    class NumericCondition(Condition):
+        OPERATORS = ("gt", "lt")
+
+    n = NumericCondition.from_dict({"field": "age", "op": "gt", "value": 18})
+    print(n, type(n).__name__)
+    cases = [
+        (Condition, {"field": "age", "op": "gt", "value": 18}),
+        (NumericCondition, {"field": "age", "value": 1}),
+    ]
+    for cls, data in cases:
+        try:
+            cls.from_dict(data)
+        except ValueError as e:
+            print("ValueError:", e)
+  expected: |
+    Condition(field='country', operator='eq', value='UA')
+    Condition(field='plan', operator='in', value=['pro', 'team'])
+    NumericCondition(field='age', operator='gt', value=18) NumericCondition
+    ValueError: unknown operator 'gt' for Condition
+    ValueError: unknown operator 'eq' for NumericCondition
+  hints:
+    - "Оператори читайте через `self.OPERATORS`, а не `Condition.OPERATORS`: тоді пошук атрибута знайде версію підкласу. Ім'я класу дає `type(self).__name__`."
+    - "`@classmethod def from_dict(cls, data): return cls(data[\"field\"], data.get(\"op\", \"eq\"), data[\"value\"])`."
+  solution: |
+    class Condition:
+        OPERATORS = ("eq", "neq", "in")
+
+        def __init__(self, field: str, operator: str, value: object) -> None:
+            if operator not in self.OPERATORS:
+                raise ValueError(f"unknown operator {operator!r} for {type(self).__name__}")
+            self.field = field
+            self.operator = operator
+            self.value = value
+
+        @classmethod
+        def from_dict(cls, data: dict) -> "Condition":
+            return cls(data["field"], data.get("op", "eq"), data["value"])
+
+        def __repr__(self) -> str:
+            return (
+                f"{type(self).__name__}(field={self.field!r}, "
+                f"operator={self.operator!r}, value={self.value!r})"
+            )
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
+  title: "Патч об'єкта через getattr і setattr"
+  prompt: |
+    Редактор FormBuilder надсилає зміни поля як словник `{атрибут: нове значення}`. Напишіть
+    `apply_patch(obj, patch)`, яка застосовує патч до будь-якого об'єкта через `setattr` і повертає
+    відсортований список імен атрибутів, значення яких справді змінилось.
+
+    Перед будь-якою зміною перевірте всі ключі; якщо хоч один невалідний, об'єкт лишається недоторканим,
+    а функція кидає `AttributeError`:
+
+    - ключ з `_` на початку: `cannot patch private attribute '<key>'`;
+    - атрибута немає ні в екземплярі, ні в класі: `unknown attribute '<key>'`;
+    - атрибут є, але це метод (callable): `cannot patch method '<key>'`.
+
+    ```python
+    apply_patch(field, {"label": "Email", "name": "email"})   # ['label'], якщо name вже був 'email'
+    ```
+  starter: |
+    def apply_patch(obj: object, patch: dict[str, object]) -> list[str]:
+        ...
+  harness: |
+    class Field:
+        kind = "input"
+
+        def __init__(self, name: str, label: str = "") -> None:
+            self.name = name
+            self.label = label
+            self._dirty = False
+
+        def describe(self) -> str:
+            return f"{self.kind} {self.name}: {self.label}"
+
+    f = Field("email")
+    print(apply_patch(f, {"label": "Email", "name": "email"}))
+    print(f.describe())
+    print(apply_patch(f, {"kind": "hidden"}), f.kind, Field.kind)
+    for bad in ({"label": "X", "placeholder": "..."}, {"_dirty": True}, {"describe": None}):
+        try:
+            apply_patch(f, bad)
+        except AttributeError as e:
+            print("AttributeError:", e)
+    print(f.label, sorted(vars(f)))
+    print(apply_patch(f, {}))
+  expected: |
+    ['label']
+    input email: Email
+    ['kind'] hidden input
+    AttributeError: unknown attribute 'placeholder'
+    AttributeError: cannot patch private attribute '_dirty'
+    AttributeError: cannot patch method 'describe'
+    Email ['_dirty', 'kind', 'label', 'name']
+    []
+  hints:
+    - "Два проходи: спершу перевірка всіх ключів (`startswith(\"_\")`, `hasattr`, `callable(getattr(...))`), потім присвоєння. `hasattr` шукає і в класі, тому атрибути класу проходять перевірку."
+    - "У другому проході порівнюйте `getattr(obj, key) != value` перед `setattr(obj, key, value)` і збирайте змінені ключі; наприкінці `sorted(changed)`."
+  solution: |
+    def apply_patch(obj: object, patch: dict[str, object]) -> list[str]:
+        for key in patch:
+            if key.startswith("_"):
+                raise AttributeError(f"cannot patch private attribute {key!r}")
+            if not hasattr(obj, key):
+                raise AttributeError(f"unknown attribute {key!r}")
+            if callable(getattr(obj, key)):
+                raise AttributeError(f"cannot patch method {key!r}")
+        changed = []
+        for key, value in patch.items():
+            if getattr(obj, key) != value:
+                setattr(obj, key, value)
+                changed.append(key)
+        return sorted(changed)
+  requires: []
+  runtime: browser
+
+- id: q3
+  type: quiz
+  question: |
+    Що надрукує код?
+    ```python
+    class Job:
+        def __init__(self):
+            self.__token = "abc"
+
+        def token(self):
+            return self.__token
+
+    job = Job()
+    job.__token = "hacked"
+    print(job.token(), sorted(vars(job)))
+    ```
+  options:
+    - "hacked ['__token']"
+    - "abc ['_Job__token', '__token']"
+    - "AttributeError: cannot set private attribute '__token'"
+    - "hacked ['_Job__token']"
+  answer: 1
+  explain: |
+    Name mangling робить компілятор лише всередині тіла класу: там `self.__token` записано як
+    `self._Job__token`. Рядок `job.__token = "hacked"` стоїть поза класом, ім'я не переписується, і в
+    екземплярі з'являється окремий атрибут `__token`. Метод читає свій `_Job__token`, тому повертає `abc`.
+    `AttributeError` це очікування справжнього приватного поля, як `#token` у JS, але захисту доступу в Python
+    немає. Варіанти з `hacked` виходять, якщо вважати, що `__token` всередині і зовні класу це одне ім'я.
+
+- id: t5
+  type: code
+  title: "GenerationJob зі станами й повторами"
+  prompt: |
+    Допишіть клас задачі генерації з розділу "Для капстоуну".
+
+    - Атрибути класу: `MAX_ATTEMPTS = 3` і лічильник `created = 0`, який рахує всі створені задачі.
+    - `GenerationJob(job_id, config)`: атрибути `id`, `config`, `status = "queued"`, `attempts = 0`,
+      `error = None`, `result = None`; збільшує лічильник класу.
+    - `@classmethod from_config(config)`: якщо в конфігу немає непорожнього `"id"`, кидає
+      `ValueError("config has no id")`; інакше створює задачу з id `"<id конфігу>-<N>"`, де `N` це номер
+      цієї задачі серед усіх створених.
+    - `start()`: лише зі статусу `queued`; статус `running`, `attempts` +1.
+    - `succeed(url)`: лише з `running`; статус `done`, `result = url`.
+    - `fail(error)`: лише з `running`; записує `error`; якщо `attempts` менше за ліміт, статус знову `queued`
+      (повтор), інакше `failed`. Ліміт читайте через екземпляр, щоб для окремої задачі його можна було
+      перевизначити присвоєнням `job.MAX_ATTEMPTS = 1`.
+    - Недозволений перехід кидає `ValueError(f"cannot {дія} job in status {status!r}")`, де дія це `start`,
+      `succeed` або `fail`.
+    - `__repr__`: `GenerationJob(id='signup-1', status='queued', attempts=0)`.
+  starter: |
+    class GenerationJob:
+        MAX_ATTEMPTS = 3
+        created = 0
+
+        def __init__(self, job_id: str, config: dict) -> None:
+            ...
+
+        @classmethod
+        def from_config(cls, config: dict) -> "GenerationJob":
+            ...
+
+        def start(self) -> None:
+            ...
+
+        def succeed(self, url: str) -> None:
+            ...
+
+        def fail(self, error: str) -> None:
+            ...
+
+        def __repr__(self) -> str:
+            ...
+  harness: |
+    a = GenerationJob.from_config({"id": "signup", "elements": []})
+    b = GenerationJob.from_config({"id": "contact", "elements": []})
+    print(a, b)
+    a.start()
+    a.fail("timeout")
+    print(a, a.error)
+    a.start()
+    a.succeed("/sites/signup/index.html")
+    print(a, a.result)
+
+    b.MAX_ATTEMPTS = 1
+    b.start()
+    b.fail("render error")
+    print(b, b.error, GenerationJob.MAX_ATTEMPTS)
+
+    d = GenerationJob("manual", {})
+    for _ in range(3):
+        d.start()
+        d.fail("boom")
+    print(d)
+
+    for call in (b.start, lambda: a.fail("late"), lambda: d.succeed("/")):
+        try:
+            call()
+        except ValueError as e:
+            print("ValueError:", e)
+    try:
+        GenerationJob.from_config({"title": "no id"})
+    except ValueError as e:
+        print("ValueError:", e)
+    print(GenerationJob.created, sorted(vars(a)))
+    print(GenerationJob.from_config({"id": "survey"}).id)
+  expected: |
+    GenerationJob(id='signup-1', status='queued', attempts=0) GenerationJob(id='contact-2', status='queued', attempts=0)
+    GenerationJob(id='signup-1', status='queued', attempts=1) timeout
+    GenerationJob(id='signup-1', status='done', attempts=2) /sites/signup/index.html
+    GenerationJob(id='contact-2', status='failed', attempts=1) render error 3
+    GenerationJob(id='manual', status='failed', attempts=3)
+    ValueError: cannot start job in status 'failed'
+    ValueError: cannot fail job in status 'done'
+    ValueError: cannot succeed job in status 'failed'
+    ValueError: config has no id
+    3 ['attempts', 'config', 'error', 'id', 'result', 'status']
+    survey-4
+  hints:
+    - "Лічильник пишіть через ім'я класу, а не через `self`; id у `from_config` будуйте з `cls.created + 1` до виклику `cls(...)`. Ліміт читайте як `self.MAX_ATTEMPTS`."
+    - "Перевірку статусу винесіть у допоміжний метод `_require(self, status, action)`, який кидає `ValueError(f\"cannot {action} job in status {self.status!r}\")`, і викликайте його першим рядком `start`, `succeed` і `fail`."
+    - "`fail`: `self._require(\"running\", \"fail\")`, `self.error = error`, `self.status = \"queued\" if self.attempts < self.MAX_ATTEMPTS else \"failed\"`."
+  solution: |
+    class GenerationJob:
+        MAX_ATTEMPTS = 3
+        created = 0
+
+        def __init__(self, job_id: str, config: dict) -> None:
+            self.id = job_id
+            self.config = config
+            self.status = "queued"
+            self.attempts = 0
+            self.error: str | None = None
+            self.result: str | None = None
+            GenerationJob.created += 1
+
+        @classmethod
+        def from_config(cls, config: dict) -> "GenerationJob":
+            form_id = config.get("id")
+            if not form_id:
+                raise ValueError("config has no id")
+            return cls(f"{form_id}-{cls.created + 1}", config)
+
+        def _require(self, status: str, action: str) -> None:
+            if self.status != status:
+                raise ValueError(f"cannot {action} job in status {self.status!r}")
+
+        def start(self) -> None:
+            self._require("queued", "start")
+            self.status = "running"
+            self.attempts += 1
+
+        def succeed(self, url: str) -> None:
+            self._require("running", "succeed")
+            self.status = "done"
+            self.result = url
+
+        def fail(self, error: str) -> None:
+            self._require("running", "fail")
+            self.error = error
+            self.status = "queued" if self.attempts < self.MAX_ATTEMPTS else "failed"
+
+        def __repr__(self) -> str:
+            return f"GenerationJob(id={self.id!r}, status={self.status!r}, attempts={self.attempts})"
+  requires: []
+  runtime: browser
+
+- id: p1
+  type: project
+  title: "GenerationJob у капстоуні"
+  prompt: |
+    У репозиторії капстоуну створіть модуль `src/formbuilder/jobs.py` з класом `GenerationJob` з завдання t5:
+    звичайний клас (не dataclass), лічильник створених задач як атрибут класу, `from_config` як classmethod,
+    методи `start`, `succeed`, `fail` з перевіркою переходів і повторами до `MAX_ATTEMPTS`, `__repr__`.
+    На цей модуль спиратимуться m4-l03 (`status` стане `property`) і воркер з m5-l05.
+
+    Додайте `tests/test_jobs.py`: функції `test_*` з голим `assert`, очікуваний виняток через
+    `with pytest.raises(ValueError):` (m3-l03). Тести не повинні залежати від порядку запуску, тому не
+    перевіряйте абсолютне значення лічильника, лише його приріст (`before = GenerationJob.created`).
+  checklist:
+    - "`GenerationJob.created` збільшується на 1 при кожному створенні і через `__init__`, і через `from_config`; в екземплярі атрибута `created` немає (`\"created\" not in vars(job)`)"
+    - "Змінювані атрибути (`config`, а також `error` і `result`) створюються лише в `__init__`; у тілі класу тільки `MAX_ATTEMPTS` і `created`"
+    - "Тест повного циклу: `queued → running → queued` після першої невдачі, `running → done` з `result`"
+    - "Тест: після `MAX_ATTEMPTS` невдач статус `failed`; присвоєння `job.MAX_ATTEMPTS = 1` змінює ліміт лише для цієї задачі"
+    - "Тест: кожен недозволений перехід (`start` з `running`, `succeed` з `queued`, `fail` з `done`) кидає `ValueError`"
+    - "Тест: `from_config` без `id` кидає `ValueError`; підклас `class UrgentJob(GenerationJob): MAX_ATTEMPTS = 5` через `UrgentJob.from_config(...)` повертає `UrgentJob`"
+    - "Анотації типів на всіх методах; `uv run mypy src` і `uv run ruff check` проходять"
+  verify: "cd capstone && uv run pytest tests/test_jobs.py -q"
