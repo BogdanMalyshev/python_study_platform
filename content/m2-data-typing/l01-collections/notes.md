@@ -63,3 +63,18 @@
   m2-l04 (`setdefault` як попередник `defaultdict`, `dict.fromkeys`, namedtuple), m2-l06 (`tuple[int, int]` проти
   `list[int]`), m2-l09 (індекс за `name`, перевірка унікальності, рядкові `page`/`order` з фронтенду), m4-l02
   (`__hash__`/`__eq__`), m6-l02 (`json.load`/`json.dump` з файлами).
+
+## Редакторська правка: відповідність завдань пройденому
+
+Правило: завдання використовує лише конструкції, пояснені в попередніх уроках або в цьому уроці до свого маркера.
+
+Що змінено: t1-t5 без змін. Додано t6 `patch_field`, перенесене з m1-l03 (там це було t4; воно вимагало keyword-only `*` з m1-l07, циклу з m1-l06 і `dict.pop(key, default)` з цього уроку). Маркер стоїть одразу після t5 у "Для капстоуну". В умову додано речення про `pop(key, default)` з цього уроку, підказок тепер три; рішення, харнес і expected без змін.
+
+Завдання уроку:
+- t1 `move_to`: m1-l07 (def), `remove`/`insert` з розділу про list до маркера.
+- t2 `group_by_type`: m1-l06 (for), m1-l02 (`get` з default), `setdefault` з розділу про dict до маркера.
+- t3 `check_answers`: m1-l10 (set comprehension), m1-l04 (`sorted`), m1-l01 (кортеж у return), операції множин і `keys()`-view з цього уроку до маркера.
+- t4 `dedupe_options`: m1-l06, m1-l10 (generator expression), m1-l02 (`isinstance`), `frozenset` і hashability з розділу "Хеш-таблиця".
+- t5 `layout`: m1-l06, m1-l11 (`raise ValueError`), m1-l04 (f-string з `!r`), m1-l10; `setdefault`, різниця множини й `keys()`, кортежі-ключі, `json.loads`/`json.dumps(ensure_ascii=False)` з цього уроку до маркера.
+- t6 `patch_field` (перенесене з m1-l03): m1-l03 (sentinel `object()` і `is`), m1-l06 (for з розпакуванням пар, `continue`), m1-l07 (keyword-only `*`, копія `dict(x)`), `dict.pop(key, default)` з цього уроку.
+- q1-q4: кожен перевіряє матеріал свого розділу (кома і кортеж, ключі `1`/`True`/`1.0`, складність `in`, ключі JSON); нічого пізнішого не потребують.

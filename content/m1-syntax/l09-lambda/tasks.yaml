@@ -75,11 +75,14 @@
     []
   hints:
     - "Кортежі порівнюються поелементно. Щоб одне числове поле йшло за спаданням, а інше за зростанням, обертають знак числа. Відсутній ключ дає dict.get з другим аргументом."
-    - "key=lambda f: (-f.get(\"priority\", 0), f[\"label\"].lower()), потім витягнути id з кожного словника."
+    - "ordered = sorted(fields, key=lambda f: (-f.get(\"priority\", 0), f[\"label\"].lower())), потім звичайний for по ordered з ids.append(f[\"id\"])."
   solution: |
     def rank_fields(fields: list[dict]) -> list[str]:
         ordered = sorted(fields, key=lambda f: (-f.get("priority", 0), f["label"].lower()))
-        return [f["id"] for f in ordered]
+        ids = []
+        for f in ordered:
+            ids.append(f["id"])
+        return ids
   requires: []
   runtime: browser
 
@@ -131,14 +134,14 @@
     ValueError: invalid literal for int() with base 10: 'abc'
   hints:
     - "Значеннями словника можуть бути будь-які callable: вбудовані int і float, метод str.strip. Для bool потрібен raise, а raise це інструкція, тому lambda тут не підійде."
-    - "Окрема def parse_bool(raw) з двома множинами {\"true\", \"yes\", \"1\"} і {\"false\", \"no\", \"0\"}. У parse_value: converter = CONVERTERS.get(kind); якщо None, raise ValueError."
+    - "Окрема def parse_bool(raw) з перевіркою входження в кортежі (\"true\", \"yes\", \"1\") і (\"false\", \"no\", \"0\") через in. У parse_value: converter = CONVERTERS.get(kind); якщо None, raise ValueError."
     - "CONVERTERS = {\"int\": int, \"float\": float, \"bool\": parse_bool, \"str\": str.strip}; parse_value повертає converter(raw)."
   solution: |
     def parse_bool(raw: str) -> bool:
         value = raw.strip().lower()
-        if value in {"true", "yes", "1"}:
+        if value in ("true", "yes", "1"):
             return True
-        if value in {"false", "no", "0"}:
+        if value in ("false", "no", "0"):
             return False
         raise ValueError(f"not a bool: {raw!r}")
 
@@ -220,7 +223,7 @@
     []
   hints:
     - "partial(func, arg) фіксує перший позиційний параметр, а тут перший якраз параметр правила. Partial-об'єкт зберігає func і args, а в func є __name__."
-    - "build_checks: [partial(RULES[name], arg) for name, arg in rules]. Опис: f\"{check.func.__name__}({check.args[0]!r})\"."
+    - "build_checks: checks = []; for name, arg in rules: checks.append(partial(RULES[name], arg)). Опис: f\"{check.func.__name__}({check.args[0]!r})\"."
   solution: |
     from functools import partial
 
@@ -241,7 +244,10 @@
 
 
     def build_checks(rules: list[tuple[str, object]]) -> list[partial]:
-        return [partial(RULES[name], arg) for name, arg in rules]
+        checks = []
+        for name, arg in rules:
+            checks.append(partial(RULES[name], arg))
+        return checks
 
 
     def failed_rules(value: str, checks: list[partial]) -> list[str]:
@@ -326,7 +332,7 @@
     ['input', 'text']
   hints:
     - "Спершу відфільтруйте видимі елементи в окремий список, потім перевірте типи, потім відсортуйте. Стабільність sorted сама збереже порядок рівних елементів."
-    - "Невідомі типи: sorted({el[\"type\"] for el in visible if el[\"type\"] not in RENDERERS}). Ключ сортування: itemgetter(\"page\", \"order\")."
+    - "Один for по elements: hidden пропускається через continue, решта йде в visible, а тип без рендерера дописується в список unknown, якщо його там ще немає (if kind not in unknown). Потім sorted(unknown) і \", \".join. Ключ сортування: itemgetter(\"page\", \"order\")."
     - "Тему можна передати при кожному виклику RENDERERS[el[\"type\"]](el, theme=theme) або один раз зафіксувати через partial(RENDERERS[...], theme=theme)."
   solution: |
     from functools import partial
@@ -345,12 +351,82 @@
 
 
     def render_form(elements: list[dict], theme: str = "light") -> list[str]:
-        visible = [el for el in elements if not el.get("hidden", False)]
-        unknown = sorted({el["type"] for el in visible if el["type"] not in RENDERERS})
+        visible = []
+        unknown = []
+        for el in elements:
+            if el.get("hidden", False):
+                continue
+            visible.append(el)
+            kind = el["type"]
+            if kind not in RENDERERS and kind not in unknown:
+                unknown.append(kind)
         if unknown:
-            raise ValueError(f"unknown types: {', '.join(unknown)}")
-        themed = {kind: partial(render, theme=theme) for kind, render in RENDERERS.items()}
-        return [themed[el["type"]](el) for el in sorted(visible, key=itemgetter("page", "order"))]
+            raise ValueError(f"unknown types: {', '.join(sorted(unknown))}")
+        lines = []
+        for el in sorted(visible, key=itemgetter("page", "order")):
+            render = partial(RENDERERS[el["type"]], theme=theme)
+            lines.append(render(el))
+        return lines
+  requires: []
+  runtime: browser
+
+- id: t6
+  type: code
+  title: "Звіт по відповідях форми"
+  prompt: |
+    Напишіть `format_answers(answers)`, яка перетворює словник відповідей `{field_id: value}` на текстовий звіт:
+
+    - рядки впорядковані за ключем без урахування регістру;
+    - кожен рядок має вигляд `<key> : <value>`, де ключ доповнений пробілами справа до довжини найдовшого ключа;
+    - значення обрізаються від пробілів по краях; порожнє після цього значення виводиться як `<empty>`;
+    - значення довше за 12 символів скорочується до перших 9 символів плюс `...` (разом 12);
+    - рядки склеєні через `\n`, без переносу в кінці; для порожнього словника результат `""`.
+
+    ```python
+    print(format_answers({"email": " a@b.c ", "Name": "Bogdan", "age": ""}))
+    # age   : <empty>
+    # email : a@b.c
+    # Name  : Bogdan
+    ```
+  starter: |
+    def format_answers(answers: dict[str, str]) -> str:
+        ...
+  harness: |
+    answers = {
+        "email": " a@b.c ",
+        "Name": "Bogdan",
+        "comment": "Very long comment text here",
+        "age": "   ",
+        "Zip": "01001",
+    }
+    print(format_answers(answers))
+    print(format_answers({"id": "exactly12chr"}))
+    print(repr(format_answers({})))
+  expected: |
+    age     : <empty>
+    comment : Very long...
+    email   : a@b.c
+    Name    : Bogdan
+    Zip     : 01001
+    id : exactly12chr
+    ''
+  hints:
+    - "Три кроки: ширина колонки як найбільша довжина ключа (max з генераторним виразом з цього розділу), обхід ключів у порядку `sorted` з функцією ключа без lambda, і один рядок на поле з вкладеною шириною у специфікації формату (m1-l04). Порожній словник обробіть окремо до обчислення ширини: `max` від порожнього падає."
+    - "`width = max(len(key) for key in answers)`; `for key in sorted(answers, key=str.casefold)`; значення: `value = answers[key].strip()`, потім `\"<empty>\"` або `value[:9] + \"...\"` за довжиною; рядок `f\"{key:<{width}} : {value}\"` у список, наприкінці `\"\\n\".join(lines)`."
+  solution: |
+    def format_answers(answers: dict[str, str]) -> str:
+        if not answers:
+            return ""
+        width = max(len(key) for key in answers)
+        lines = []
+        for key in sorted(answers, key=str.casefold):
+            value = answers[key].strip()
+            if not value:
+                value = "<empty>"
+            elif len(value) > 12:
+                value = value[:9] + "..."
+            lines.append(f"{key:<{width}} : {value}")
+        return "\n".join(lines)
   requires: []
   runtime: browser
 

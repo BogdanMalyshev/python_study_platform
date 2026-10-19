@@ -124,7 +124,7 @@
     ['xs', 'xl'] True
     (None,)
   hints:
-    - "Значення за замовчуванням обчислюється один раз при def. Потрібен незмінний маркер \"аргумент не передали\", а список треба створювати всередині виклику."
+    - "Значення за замовчуванням обчислюється один раз при def. Потрібен незмінний маркер \"аргумент не передали\", а список треба створювати всередині виклику. Саме так ruff виправляє build_field у прикладі B006 вище."
     - "options: list[str] | None = None, а першим рядком тіла: if options is None: options = []"
   solution: |
     def add_option(label: str, options: list[str] | None = None) -> list[str]:
@@ -171,7 +171,8 @@
     False False
     is_filled
   hints:
-    - "None перевіряють через identity, а не рівність. Для чекбокса теж потрібна identity: True в Python існує в одному екземплярі, а 1 == True."
+    - "None перевіряють через identity, а не рівність. Для чекбокса теж потрібна identity: True в Python існує в одному екземплярі, а 1 == True. Lambda у змінній стає звичайним def, як normalize у прикладі E731."
+    - "Урок показує is None; заперечення пишеться is not None (одним оператором, а не not value is None). Для чекбокса value is True, як у прикладі E712."
     - "def is_filled(value: object) -> bool: return value is not None and value != \"\"; is_checked повертає value is True."
   solution: |
     def is_filled(value: object) -> bool:
@@ -228,7 +229,7 @@
     return list[str]
     False
   hints:
-    - "List, Dict, Set з typing замінюються вбудованими list, dict, set, а Optional[X] записом X | None. Імена всіх трьох рівнів (функція, аргумент, локальна змінна) переходять у snake_case."
+    - "List, Dict, Set з typing замінюються вбудованими list, dict, set, а Optional[X] записом X | None, як у прикладі old_types.py. Імена всіх трьох рівнів (функція, аргумент, локальна змінна) переходять у snake_case, як getFieldById у прикладі N802."
     - "def get_visible_ids(fields: list[dict], hidden_ids: set[str] | None = None) -> list[str]: і всередині hidden_ids is None замість == None."
   solution: |
     def get_visible_ids(

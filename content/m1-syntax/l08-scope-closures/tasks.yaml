@@ -156,11 +156,15 @@
     {'i': 2}
   hints:
     - "co_freevars і __closure__ ідуть паралельно: i-те ім'я відповідає i-му cell. Їх можна обійти разом."
-    - "dict(zip(fn.__code__.co_freevars, ...)) з cell.cell_contents для кожного cell; замість None підставте порожній кортеж: fn.__closure__ or ()."
+    - "Обійти дві послідовності разом дає zip з m1-l06, а словник наповнюється присвоєнням result[name] = .... Замість None підставте порожній кортеж: fn.__closure__ or ()."
+    - "cells = fn.__closure__ or (); result = {}; for name, cell in zip(fn.__code__.co_freevars, cells): result[name] = cell.cell_contents; return result."
   solution: |
     def closure_vars(fn) -> dict[str, object]:
         cells = fn.__closure__ or ()
-        return {name: cell.cell_contents for name, cell in zip(fn.__code__.co_freevars, cells)}
+        result = {}
+        for name, cell in zip(fn.__code__.co_freevars, cells):
+            result[name] = cell.cell_contents
+        return result
   requires: []
   runtime: browser
 
@@ -283,18 +287,18 @@
       input x-input-3
     []
   hints:
-    - "Два проходи. Перший збирає всі наявні id у множину. Другий будує нове дерево і видає id. Стан обох (множина зайнятих, лічильники по типах) живе всередині assign_ids, а не в модулі."
-    - "Внутрішня функція next_id(kind) мутує словник counters і множину taken з assign_ids; nonlocal не потрібен, бо це мутація, а не переприсвоєння. Рекурсивна walk(items) копіює кожен елемент через dict(el), ставить id до обходу дітей."
-    - "def next_id(kind): while True: counters[kind] = counters.get(kind, 0) + 1; candidate = f\"{prefix}-{kind}-{counters[kind]}\"; if candidate not in taken: taken.add(candidate); return candidate"
+    - "Два проходи. Перший збирає всі наявні id у список. Другий будує нове дерево і видає id. Стан обох (список зайнятих, лічильники по типах) живе всередині assign_ids, а не в модулі."
+    - "Внутрішня функція next_id(kind) мутує словник counters і список taken з assign_ids; nonlocal не потрібен, бо append і присвоєння за ключем це мутація, а не переприсвоєння. Рекурсивна walk(items) копіює кожен елемент через dict(el), ставить id до обходу дітей."
+    - "def next_id(kind): while True: counters[kind] = counters.get(kind, 0) + 1; candidate = f\"{prefix}-{kind}-{counters[kind]}\"; if candidate not in taken: taken.append(candidate); return candidate"
   solution: |
     def assign_ids(elements: list[dict], prefix: str) -> list[dict]:
-        taken: set[str] = set()
+        taken: list[str] = []
         counters: dict[str, int] = {}
 
         def collect(items: list[dict]) -> None:
             for el in items:
                 if "id" in el:
-                    taken.add(el["id"])
+                    taken.append(el["id"])
                 collect(el.get("children", []))
 
         def next_id(kind: str) -> str:
@@ -302,7 +306,7 @@
                 counters[kind] = counters.get(kind, 0) + 1
                 candidate = f"{prefix}-{kind}-{counters[kind]}"
                 if candidate not in taken:
-                    taken.add(candidate)
+                    taken.append(candidate)
                     return candidate
 
         def walk(items: list[dict]) -> list[dict]:

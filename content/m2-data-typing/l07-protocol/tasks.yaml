@@ -234,7 +234,8 @@
     Напишіть:
 
     - функцію `required(value, *, field_id)`: для порожнього рядка повертає `"<field_id>: required"`, інакше `None`;
-    - клас `MaxLength(limit)` з `__call__(value, *, field_id)`: для довшого за `limit` рядка повертає
+    - клас `MaxLength` як dataclass з полем `limit: int` (створюється як `MaxLength(5)`) і методом
+      `__call__(self, value, *, field_id)`: для довшого за `limit` рядка повертає
       `"<field_id>: max <limit> chars"`, інакше `None`;
     - функцію `validate(answers, rules)`: `rules` це `{field_id: [validator, ...]}`. Повертає словник
       `{field_id: [помилки]}` лише для полів, де є хоча б одна помилка, у порядку `rules`. Відсутня відповідь
@@ -245,6 +246,7 @@
     validate({"email": "toolong"}, rules)   # {'email': ['email: max 5 chars']}
     ```
   starter: |
+    from dataclasses import dataclass
     from typing import Protocol
 
 
@@ -280,10 +282,11 @@
     {}
     x: max 2 chars None
   hints:
-    - "MaxLength зберігає limit в __init__, а __call__ має ту саму сигнатуру, що й Validator.__call__, разом із зірочкою перед field_id."
+    - "MaxLength це звичайний dataclass з одним полем limit: конструктор MaxLength(5) згенерує decorator. Метод __call__ пишеться в тілі класу так само, як __post_init__ у m2-l05, і має ту саму сигнатуру, що й Validator.__call__, разом із зірочкою перед field_id."
     - "У validate: для кожного field_id з rules беріть value = answers.get(field_id, \"\"), збирайте помилки всіх валідаторів, що не None, і додавайте ключ лише якщо список непорожній."
     - "errors = [e for v in validators if (e := v(value, field_id=field_id)) is not None]"
   solution: |
+    from dataclasses import dataclass
     from typing import Protocol
 
 
@@ -295,9 +298,9 @@
         return f"{field_id}: required" if value == "" else None
 
 
+    @dataclass(frozen=True)
     class MaxLength:
-        def __init__(self, limit: int) -> None:
-            self.limit = limit
+        limit: int
 
         def __call__(self, value: str, *, field_id: str) -> str | None:
             if len(value) > self.limit:

@@ -142,15 +142,16 @@
     {'theme': {'color': '#333', 'font': {'family': 'Inter', 'size': 14}}, 'elements': [{'id': 'email'}]}
   hints:
     - "Рекурсія по шляху: на кожному рівні поверхнева копія поточного словника, а в неї під перший ключ кладеться результат рекурсивного виклику для решти шляху."
-    - "result = dict(data); якщо len(path) == 1: result[path[0]] = value; інакше result[path[0]] = set_in(data.get(path[0], {}), path[1:], value)."
+    - "Перший ключ і решту шляху відокремлює розпакування із зірочкою з m1-l01: key, *rest = path. Якщо rest порожній, це останній рівень."
+    - "key, *rest = path; result = dict(data); якщо not rest: result[key] = value; інакше result[key] = set_in(data.get(key, {}), rest, value)."
   solution: |
     def set_in(data: dict, path: list[str], value: object) -> dict:
-        key = path[0]
+        key, *rest = path
         result = dict(data)
-        if len(path) == 1:
+        if not rest:
             result[key] = value
         else:
-            result[key] = set_in(data.get(key, {}), path[1:], value)
+            result[key] = set_in(data.get(key, {}), rest, value)
         return result
   requires: []
   runtime: browser

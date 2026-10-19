@@ -142,7 +142,8 @@
     unknown command
     unknown command
   hints:
-    - "Патерн послідовності вимагає точну довжину, а *rest збирає хвіст. Порядок важливий: [\"remove\"] має стояти раніше за [\"remove\", *ids], інакше порожній ids теж потрапить у загальну гілку."
+    - "Патерн послідовності вимагає точну довжину, а зірочка збирає хвіст. Порядок важливий: remove без аргументів має стояти раніше за гілку remove з хвостом, інакше порожній хвіст теж потрапить у загальну гілку."
+    - "Для undo і redo потрібен патерн `as` з абзацу про патерни класів: як `\"input\" | \"textarea\" as kind` у прикладі `element_key`, він прив'язує ім'я до альтернативи, що збіглася. Рядок \"undo\" не збігається з патернами послідовностей і дійде до case _."
     - "case [\"remove\", *ids]: return \"remove \" + \", \".join(ids); case [\"undo\" | \"redo\" as action]: return action; рядок \"undo\" не збігається з патернами послідовностей і дійде до case _."
   solution: |
     def describe_command(cmd) -> str:
@@ -250,12 +251,18 @@
     - словник з рядковим `type`, що не підійшов вище, кидає `ValueError(f"unknown element type: {kind!r}")`;
     - усе інше кидає `ValueError("invalid element")`.
 
-    Обхід `children` це звичайний `for` (детально в m1-l06). Винятки кидаються через `raise`, як у guard clauses з уроку.
+    Циклів ще немає (вони в m1-l06), тому дітей обходить рекурсивна допоміжна `render_children(children)`:
+    порожній список дає `""`, а непорожній патерн послідовності розкладає на перший елемент і решту,
+    і результат це рендер першого плюс `render_children` решти. Винятки кидаються через `raise`, як у guard clauses з уроку.
 
     ```python
     render({"type": "block", "children": [{"type": "text", "content": "Hi"}]})   # '<div><p>Hi</p></div>'
     ```
   starter: |
+    def render_children(children: list) -> str:
+        ...
+
+
     def render(element: dict) -> str:
         ...
   harness: |
@@ -284,8 +291,17 @@
     ValueError: invalid element
   hints:
     - "Порядок case вирішує все: \"hidden\" має стояти першим, бо інакше прихований block з поламаними children впаде або зрендериться. Input без name не збігається з input-патернами і доходить до гілки з рядковим type."
-    - "case {\"hidden\": True}: return \"\"; case {\"type\": \"block\", \"children\": list(children)}: html = \"\"; for child in children: html += render(child); return f\"<div>{html}</div>\"; case {\"type\": str(kind)}: raise ValueError(f\"unknown element type: {kind!r}\")"
+    - "Обхід дітей без циклу: у render_children два case, порожній список і [first, *rest]. Функції можуть викликати одна одну в будь-якому порядку визначення, бо імена шукаються в момент виклику."
+    - "render_children: case []: return \"\"; case [first, *rest]: return render(first) + render_children(rest). У render: case {\"hidden\": True}: return \"\"; case {\"type\": \"block\", \"children\": list(children)}: return f\"<div>{render_children(children)}</div>\"; case {\"type\": str(kind)}: raise ValueError(f\"unknown element type: {kind!r}\")"
   solution: |
+    def render_children(children: list) -> str:
+        match children:
+            case []:
+                return ""
+            case [first, *rest]:
+                return render(first) + render_children(rest)
+
+
     def render(element: dict) -> str:
         match element:
             case {"hidden": True}:
@@ -297,10 +313,7 @@
             case {"type": "text", "content": str(content)}:
                 return f"<p>{content}</p>"
             case {"type": "block", "children": list(children)}:
-                html = ""
-                for child in children:
-                    html += render(child)
-                return f"<div>{html}</div>"
+                return f"<div>{render_children(children)}</div>"
             case {"type": str(kind)}:
                 raise ValueError(f"unknown element type: {kind!r}")
             case _:

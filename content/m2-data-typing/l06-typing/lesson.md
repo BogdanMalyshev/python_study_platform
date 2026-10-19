@@ -505,8 +505,6 @@ print(sorted(ElementPatch.__optional_keys__))
 
 <!-- task: q3 -->
 
-<!-- task: t3 -->
-
 ## Callable і generic-функції: `[T]` замість `<T>`
 
 Тип функції записується як `Callable[[аргументи], результат]` з `collections.abc` (`typing.Callable` теж deprecated alias). Це `(a: number, b: string) => boolean` без імен параметрів. `Callable[..., Any]` приймає будь-які аргументи, `Callable[[], None]` це `() => void`.
@@ -570,8 +568,6 @@ $ mypy --strict callables.py
 callables.py:14: error: Dict entry 1 has incompatible type "str": "Callable[[dict[str, str], int], str]"; expected "str": "Callable[[dict[str, str]], str]"  [dict-item]
 Found 1 error in 1 file (checked 1 source file)
 ```
-
-<!-- task: t4 -->
 
 Generic-функції в 3.12 оголошуються з параметром типу (type parameter, офіційний термін PEP 695) у квадратних дужках після імені: `def first[T](...)`. До 3.12 той самий тип писали через модульну змінну `T = TypeVar("T")`, і в більшості коду й бібліотек побачите саме її. Обмеження задаються після двокрапки: `T: Sized` це bound (офіційний термін, "верхня межа"), тобто `T extends Sized` з TS; `T: (int, str)` це constraints (теж офіційний), `T` дорівнює рівно одному з перелічених типів, і в TS такого немає. У старому синтаксисі це `TypeVar("T", bound=Sized)` і `TypeVar("T", int, str)`.
 
@@ -805,6 +801,8 @@ Found 2 errors in 1 file (checked 1 source file)
 
 <!-- task: q4 -->
 
+<!-- task: t3 -->
+
 ## Forward references, overload і власний narrowing
 
 У 3.12 анотації класу обчислюються в момент виконання тіла класу, а ім'я класу з'являється лише після. Тому рекурсивна анотація `children: list[Element]` падає з `NameError`, хоча в TS такий тип очевидний. Посилання на ще не визначене ім'я називається forward reference (офіційний термін).
@@ -931,6 +929,8 @@ Success: no issues found in 1 source file
 ```
 
 > **Пастка.** Тіло предиката ніхто не перевіряє: функція з `-> TypeIs[list[str]]`, яка повертає `True` для рядка, обдурить чекер так само, як `x is Foo` з неправильним тілом обдурює `tsc`. У рантаймі це звичайна функція, що повертає `bool`.
+
+<!-- task: t4 -->
 
 ## Для капстоуну
 

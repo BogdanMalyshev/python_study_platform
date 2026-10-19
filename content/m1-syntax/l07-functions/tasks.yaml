@@ -242,11 +242,14 @@
     len([1, 2]) -> 2
   hints:
     - "Виклик з тими самими аргументами це розгортання зібраного: fn(*args, **kwargs). Конфлікт імен з **kwargs знімає маркер / у сигнатурі."
-    - "def trace(fn, /, *args, **kwargs); parts = [repr(a) for a in args] + [f\"{k}={v!r}\" for k, v in kwargs.items()]; далі fn.__name__ і \", \".join(parts)."
+    - "Рядок аргументів збирається в список частин: спершу repr кожного позиційного аргументу, потім пари з kwargs.items(), і наприкінці \", \".join(parts). Ім'я функції дає атрибут __name__."
+    - "def trace(fn, /, *args, **kwargs): result = fn(*args, **kwargs); parts = []; for arg in args: parts.append(repr(arg)); for name, value in kwargs.items(): parts.append(f\"{name}={value!r}\"); return f\"{fn.__name__}({', '.join(parts)}) -> {result!r}\"."
   solution: |
     def trace(fn, /, *args, **kwargs) -> str:
         result = fn(*args, **kwargs)
-        parts = [repr(arg) for arg in args]
+        parts = []
+        for arg in args:
+            parts.append(repr(arg))
         for name, value in kwargs.items():
             parts.append(f"{name}={value!r}")
         return f"{fn.__name__}({', '.join(parts)}) -> {result!r}"
@@ -261,7 +264,7 @@
     Напишіть рекурсивну `collect_ids(element, *, types=None, found=None)`, яка повертає список `id`
     усіх елементів дерева в порядку обходу: спершу сам елемент, потім його діти зліва направо.
 
-    - `types`: множина типів, які потрапляють у результат; `None` означає всі типи.
+    - `types`: список типів, які потрапляють у результат; `None` означає всі типи.
     - `found`: список, у який дописуються `id`; якщо його не передали, створюється новий.
       Функція повертає саме цей список.
     - `types` і `found` передаються лише за ім'ям, обидва з `None` за замовчуванням.
@@ -270,10 +273,10 @@
     ```python
     form = {"id": "root", "type": "form", "children": [{"id": "email", "type": "input"}]}
     collect_ids(form)                    # ['root', 'email']
-    collect_ids(form, types={"input"})   # ['email']
+    collect_ids(form, types=["input"])   # ['email']
     ```
   starter: |
-    def collect_ids(element: dict, *, types: set[str] | None = None, found: list[str] | None = None) -> list[str]:
+    def collect_ids(element: dict, *, types: list[str] | None = None, found: list[str] | None = None) -> list[str]:
         ...
   harness: |
     form = {"id": "root", "type": "form", "children": [
@@ -284,15 +287,15 @@
         ]},
     ]}
     print(collect_ids(form))
-    print(collect_ids(form, types={"input"}))
-    print(collect_ids(form, types={"input"}))
-    print(collect_ids(form, types={"select", "fieldset"}))
+    print(collect_ids(form, types=["input"]))
+    print(collect_ids(form, types=["input"]))
+    print(collect_ids(form, types=["select", "fieldset"]))
     acc = ["existing"]
     result = collect_ids({"id": "solo", "type": "input"}, found=acc)
     print(result is acc, acc)
     print(collect_ids.__kwdefaults__)
     try:
-        collect_ids(form, {"input"})
+        collect_ids(form, ["input"])
     except TypeError:
         print("TypeError")
   expected: |
@@ -305,9 +308,9 @@
     TypeError
   hints:
     - "Накопичувач створюється лише на верхньому рівні рекурсії, а всі рекурсивні виклики отримують той самий список. Зміни списку видно викликачу, бо передається той самий об'єкт."
-    - "if found is None: found = []; додайте element['id'], якщо types is None or element['type'] in types; для кожної дитини collect_ids(child, types=types, found=found); return found."
+    - "if found is None: found = []; додайте element['id'], якщо types is None or element['type'] in types (in на списку з m1-l01); для кожної дитини collect_ids(child, types=types, found=found); return found."
   solution: |
-    def collect_ids(element: dict, *, types: set[str] | None = None, found: list[str] | None = None) -> list[str]:
+    def collect_ids(element: dict, *, types: list[str] | None = None, found: list[str] | None = None) -> list[str]:
         if found is None:
             found = []
         if types is None or element["type"] in types:

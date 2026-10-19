@@ -74,3 +74,18 @@
 
 - `verify` p1 переведено на `cd capstone && uv run pytest tests/test_domain.py -q`; у prompt `models.py` замінено на `config.py`.
 - Запропонована тут задача `to_domain` додана в m2-l09 як t6 (а функція лягає в `config.py`, p1 m2-l09).
+
+## Редакторська правка: відповідність завдань пройденому
+
+Правило: завдання використовує лише конструкції, пояснені в попередніх уроках або в цьому уроці до свого маркера.
+
+Що змінено: нічого. Аудит усіх завдань не знайшов конструкцій з пізніших уроків чи з цього уроку після маркера. Синтаксис класу вводиться саме тут, для dataclass; методи з `self` (`__post_init__`) теж.
+
+Завдання уроку:
+- t1 `Choice`/`make_choices`: `@dataclass`, default і `field(default_factory=list)` з розділу "Поля", m1-l10 (list comprehension), m1-l04 (`upper`).
+- t2 `Theme`, `unique_themes`, `dark_map`: `frozen=True`, `replace`, `FrozenInstanceError` з розділу до маркера; m2-l01 (set/dict як "уже бачене"). `Literal["light", "dark"]` у стартері показаний у прикладі на початку уроку з посиланням на m2-l06; на розв'язок не впливає.
+- t3 `Condition.__post_init__`: `__post_init__` і `object.__setattr__` з розділу до маркера, m1-l02 (`isinstance` з кортежем, `type(x).__name__`), m1-l11 (`raise ValueError`).
+- t4 `render`: m1-l05 (`match` з class patterns), позиційні підпатерни через `__match_args__` і рядкова анотація `"Element"` з розділу "Дерево елементів" до маркера, m1-l08 (рекурсія).
+- t5 `rename_field`: `replace`, `slots`/`kw_only`, `from __future__ import annotations` з цього уроку до маркера; m1-l07 (`**changes`), m1-l09 (`any` з generator expression), m1-l06 (`zip`). `walk` у стартері рекурсивний зі списком, без генераторів.
+- q1-q3: рівність dataclass різних класів, unhashable не-frozen dataclass, `order=True`; кожен після свого розділу.
+- p1 (проєкт, легка перевірка): згадує `with pytest.raises(...)` (with-блок у m4-l07, pytest у m3-l03); у тексті це подано як готовий рядок з посиланням, учню достатньо скопіювати. Не змінювалось.

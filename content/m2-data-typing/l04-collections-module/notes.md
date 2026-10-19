@@ -41,3 +41,17 @@
 
 - Спирається на m2-l01 (`dict`, `get`, `setdefault`, `pop`, злиття `|`, hashability), m1-l10 (generator expression у `Counter(...)`, межа comprehension/групування, де `Counter` і `defaultdict` вже анонсовані з посиланням сюди), m1-l06 (`while queue: queue.pop(0)` з того уроку тут прямо названо багом продуктивності).
 - Готує для m2-l05 (`NamedTuple` проти `dataclass`, рівність з кортежем), m2-l06 (`Counter[str]`, `defaultdict[int, list[str]]`, `deque[Job]` як generics), m4-l03 (дескриптори й `__slots__` згадані в "Під капотом" для namedtuple), m4-l02 (`__missing__` як перший приклад dunder-гачка), m5-l03 (`itertools.groupby`), m5-l05 (`asyncio.Queue` як асинхронна версія черги з `deque`), капстоун (статистика типів, елементи по сторінках, черга генерації, шари теми).
+
+## Редакторська правка: відповідність завдань пройденому
+
+Правило: завдання використовує лише конструкції, пояснені в попередніх уроках або в цьому уроці до свого маркера.
+
+Що змінено: нічого. Аудит усіх завдань не знайшов конструкцій з пізніших уроків чи з цього уроку після маркера.
+
+Завдання уроку:
+- t1 `top_types`: `Counter` з розділу до маркера, m1-l10 (generator expression), m1-l09 (`sorted(key=lambda)` з кортежем і `-x`), m2-l03 (зріз `[:n]`).
+- t2 `type_changes`: `Counter.subtract` з розділу "Арифметика лічильників", m1-l10 (dict comprehension з умовою), m1-l04 (`sorted`).
+- t3 `group_by_page`: `defaultdict(list)` з розділу до маркера, m1-l02 (`get`), m2-l01 (`dict(...)` з пар, `items()`).
+- t4 `run_queue`: `deque`/`popleft` з розділу до маркера, `NamedTuple` у формі класу з default і `_replace` з розділу namedtuple (раніше в уроці), m1-l06 (`while`), m1-l10 (generator expression).
+- t5 `resolve_theme`: `ChainMap` і `.maps` з розділу до маркера, `Counter`, `NamedTuple` (`_fields`) з цього уроку; m1-l06 (`zip`, `break`), m1-l04 (`sorted`).
+- q1-q4: арифметика `Counter`, побічний запис у `defaultdict`, рівність `NamedTuple` з кортежем, запис і видалення в `ChainMap`; усе пояснено до маркерів.

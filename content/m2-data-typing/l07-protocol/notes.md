@@ -42,3 +42,18 @@
 
 - p2 тепер створює пакет `src/formbuilder/renderers/` (`base.py` з Protocol, `html.py`, `text.py`, `__init__.py` з `RENDERERS` і `register()`), `Element`/`Theme` з `formbuilder.domain`. `testing.py` більше не використовується. Перевірено на чернетці пакета: `mypy --strict src/formbuilder/renderers` дає `Success: no issues found in 4 source files`.
 - `verify` p1 і p2 переведено на `cd capstone && uv run ...`; callout у розділі капстоуну оновлено під пакет.
+
+## Редакторська правка: відповідність завдань пройденому
+
+Правило: завдання використовує лише конструкції, пояснені в попередніх уроках або в цьому уроці до свого маркера.
+
+Що змінено: t4 "Callback protocol для валідаторів": клас `MaxLength` у рішенні мав рукописний `__init__`, а звичайні класи з `__init__` пояснюються лише в m4-l01. Тепер `MaxLength` це `@dataclass(frozen=True)` з полем `limit: int` і методом `__call__(self, value, *, field_id)`; стартер імпортує `dataclass`, умова каже "клас MaxLength як dataclass з полем limit", виклик `MaxLength(5)` той самий; перша підказка переписана. Expected без змін; рішення проходить `mypy --strict` разом з харнесом. t1, t2, t3, t5 без змін: класи з методами без `__init__`, що відповідають Protocol, це тема уроку, метод з `self` введено в m2-l05.
+
+Завдання уроку:
+- t1 `HtmlRenderer`/`PlainRenderer`/`render_all`: `Protocol` з розділу до маркера, m2-l05 (клас з методом `self`), m1-l10 (comprehension). `html.escape` імпортований у стартері й названий в умові.
+- t2 `load_renderers`: `@runtime_checkable` і `isinstance` з протоколом з розділу до маркера, m1-l09 (`callable`), m1-l02 (`isinstance`; "не клас, а екземпляр" пояснено в умові), m1-l06.
+- t3 `unique_ids`: `Iterable` з розділу "Вбудовані протоколи" до маркера, m2-l01 (`dict.fromkeys`), m1-l10 (generator expression), m1-l11 (`raise TypeError`).
+- t4 `required`/`MaxLength`/`validate`: callback protocol з `__call__` з розділу до маркера, m2-l05 (dataclass, frozen, метод з `self`), m1-l07 (keyword-only `*`), m1-l10 (comprehension з walrus).
+- t5 реєстр рендерерів: m2-l05 (frozen dataclass), m2-l06 (`Literal`), `runtime_checkable` Protocol і `Iterable` з цього уроку, m1-l05 (`match`), m1-l04 (`join`), m1-l11.
+- q1-q4: `runtime_checkable` і сигнатура, `Iterable` і рядок, read-only атрибут у Protocol, явне наслідування від Protocol; кожен після свого розділу.
+- p1, p2 (проєкти, легка перевірка): каркас p1 містить готовий клас `MutableField` з `__init__` у частині "нижче нічого не змінювати", учень його не пише; p2 згадує `__init__.py` пакета (m0-l06). Не змінювалось. Окремо: теоретичні приклади уроку (рядки ~61, 654, 702, 754, 874, 910) використовують рукописний `__init__` до m4-l01; теорію ця правка не чіпає.

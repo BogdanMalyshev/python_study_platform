@@ -322,6 +322,69 @@
   requires: []
   runtime: browser
 
+- id: t6
+  type: code
+  title: "Часткове оновлення поля через sentinel"
+  prompt: |
+    Напишіть `patch_field(field, *, label=..., placeholder=..., max_length=...)`, яка повертає новий словник
+    поля з такими правилами для кожного з трьох параметрів:
+
+    - параметр не передали: ключ не змінюється;
+    - передали `None`: ключ видаляється з результату (якщо його не було, нічого не відбувається);
+    - передали будь-яке інше значення, включно з `""` і `0`: ключ встановлюється в це значення.
+
+    Вхідний словник не змінювати. `None` тут не може означати "не передали", тому значенням за замовчуванням
+    має бути sentinel `MISSING` (m1-l03), і перевіряти його треба так, щоб чужий `__eq__` не міг підробити відповідь.
+    Для видалення знадобиться `pop(key, default)` з цього уроку: з `default` він прибирає ключ безпечно
+    і не кидає `KeyError`, якщо ключа немає.
+
+    ```python
+    field = {"id": "email", "label": "Email", "max_length": 255}
+    patch_field(field, label="")          # {'id': 'email', 'label': '', 'max_length': 255}
+    patch_field(field, max_length=None)   # {'id': 'email', 'label': 'Email'}
+    ```
+  starter: |
+    MISSING = object()
+
+
+    def patch_field(field: dict, *, label=MISSING, placeholder=MISSING, max_length=MISSING) -> dict:
+        ...
+  harness: |
+    field = {"id": "email", "label": "Email", "placeholder": "you@example.com", "max_length": 255}
+    print(patch_field(field))
+    print(patch_field(field, label="E-mail"))
+    print(patch_field(field, placeholder=None))
+    print(patch_field(field, label="", max_length=0))
+    print(patch_field({"id": "age"}, label=None, max_length=3))
+    print(field)
+  expected: |
+    {'id': 'email', 'label': 'Email', 'placeholder': 'you@example.com', 'max_length': 255}
+    {'id': 'email', 'label': 'E-mail', 'placeholder': 'you@example.com', 'max_length': 255}
+    {'id': 'email', 'label': 'Email', 'max_length': 255}
+    {'id': 'email', 'label': '', 'placeholder': 'you@example.com', 'max_length': 0}
+    {'id': 'age', 'max_length': 3}
+    {'id': 'email', 'label': 'Email', 'placeholder': 'you@example.com', 'max_length': 255}
+  hints:
+    - "Три стани на параметр: is MISSING, is None, усе інше. Truthiness тут не допоможе, бо \"\" і 0 це легальні значення. Почніть з копії dict(field), щоб не чіпати вхідний словник."
+    - "Пройдіть циклом по парах (ім'я ключа, значення параметра). Для None видаляйте через pop з default: звичайний pop або del на відсутньому ключі кинуть KeyError."
+    - "for key, value in ((\"label\", label), (\"placeholder\", placeholder), (\"max_length\", max_length)): if value is MISSING: continue; if value is None: updated.pop(key, None); else: updated[key] = value"
+  solution: |
+    MISSING = object()
+
+
+    def patch_field(field: dict, *, label=MISSING, placeholder=MISSING, max_length=MISSING) -> dict:
+        updated = dict(field)
+        for key, value in (("label", label), ("placeholder", placeholder), ("max_length", max_length)):
+            if value is MISSING:
+                continue
+            if value is None:
+                updated.pop(key, None)
+            else:
+                updated[key] = value
+        return updated
+  requires: []
+  runtime: browser
+
 - id: q1
   type: quiz
   question: |

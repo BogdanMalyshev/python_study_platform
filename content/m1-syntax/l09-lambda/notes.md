@@ -68,3 +68,24 @@
 - Готує для m1-l10 (map/filter → comprehension, генераторні вирази в `sum`/`any`/`all`), m2-l04 (`Counter`/`defaultdict`
   замість `reduce`), m4-l01 (bound methods, дескриптори), m4-l08 (Strategy як словник функцій), m5-l03 (`functools`),
   m5-l04 (реєстр через декоратор) і капстоуну (реєстр рендерерів, сортування за `itemgetter("page", "order")`).
+
+## Редакторська правка: відповідність завдань пройденому
+
+Правило: завдання використовує лише конструкції, пояснені в цьому уроці до його маркера або в попередніх уроках.
+
+Що змінено:
+- t1 залишено без змін.
+- t2 `rank_fields`: фінальну list comprehension замінено на `for` з `append`; `sorted` з lambda-ключем-кортежем лишився. Підказку оновлено.
+- t3 `parse_value`: множини-літерали `{"true", "yes", "1"}` (m1-l10) замінено кортежами `("true", "yes", "1")`, членство в кортежі з m1-l03; підказку оновлено.
+- t4 `build_checks`: list comprehension замінено на `for` з `append`; підказку оновлено.
+- t5 `render_form`: переписано без comprehension і множин. Видимі елементи й невідомі типи збираються одним `for`: `continue` для hidden, невідомий тип дописується в список, якщо його там ще немає, потім `sorted(unknown)`. Рендер у циклі по `sorted(visible, key=itemgetter("page", "order"))` з `partial(..., theme=theme)` на кожен елемент. Друга підказка переписана, `expected` той самий.
+- Додано t6 `format_answers`, перенесене з m1-l04 (там було t5): рішення рахує ширину колонки через `max(len(key) for key in answers)`, а generator expression в агрегаторах уперше пояснюється в розділі "`any`, `all`, `sum`, `max`, `min` замість ланцюжків" цього уроку; крім того, у m1-l04 ще немає `for`. Маркер стоїть у кінці цього розділу, перед "Для капстоуну", тому в тексті уроку t6 йде перед t5. Умова, рішення, харнес і `expected` збережені; перша підказка тепер посилається на генераторний вираз з цього розділу й попереджає, що `max` від порожнього падає.
+
+Завдання уроку:
+- t1 `sort_labels`: m1-l04 (`sorted`, `key=str.lower`, стабільність), цей урок (`key=` з unbound method).
+- t2 `rank_fields`: m1-l02 (`dict.get`), m1-l06 (`for`), цей урок (lambda, ключ-кортеж, `-x`).
+- t3 `parse_value`: m1-l03 (`in` на кортежі), m1-l04 (`strip`, `lower`, `!r`), m1-l05 (`raise ValueError`), цей урок (функції як значення словника, `str.strip` як функція, чому lambda не вміщує `raise`).
+- t4 `build_checks` / `failed_rules`: m1-l06 (`for`, розпакування в заголовку), цей урок (`partial`, `.func`, `.args`).
+- t5 `render_form`: m1-l02 (`dict.get`), m1-l04 (`join`), m1-l05 (`raise`), m1-l06 (`for`, `continue`), m1-l07 (keyword-only), цей урок (реєстр функцій, `itemgetter` з кількома ключами, `partial` з keyword, стабільний `sorted`).
+- t6 `format_answers` (перенесено з m1-l04): m1-l03 (`if not answers`), m1-l04 (`strip`, зрізи, `sorted(key=str.casefold)`, вкладена ширина у f-рядку, `join`), m1-l06 (`for`), цей урок (`max` з generator expression).
+- q1-q3: лише цей урок (`map` як ітератор, межі lambda, `sorted` з `reverse=True`); comprehension у q3 тільки читається.

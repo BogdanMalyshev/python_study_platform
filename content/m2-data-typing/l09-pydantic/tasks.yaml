@@ -286,7 +286,7 @@
       `element 'i1': visible_if references unknown field 'country'`.
     - Функція `field_names(form: FormConfig) -> list[str]`: імена всіх інпутів у порядку обходу в глибину.
   starter: |
-    from typing import Annotated, Iterator, Literal, Self
+    from typing import Annotated, Literal, Self
     from pydantic import BaseModel, ConfigDict, Field, model_validator
 
     Operator = Literal["eq", "neq", "in", "gt", "lt"]
@@ -381,11 +381,11 @@
     ('elements', 0, 'block', 'children', 0, 'input', 'validation', 'min_length') Input should be greater than or equal to 0
     ('elements', 0, 'block', 'children', 0, 'input', 'placeholder') Extra inputs are not permitted
   hints:
-    - "Обхід дерева це окремий генератор walk(elements), який віддає кожен елемент і рекурсивно заходить у children блоків. І field_names, і model_validator користуються ним."
+    - "Обхід дерева це окрема рекурсивна функція walk(elements), яка повертає плаский список: кожен елемент, а для блоку одразу за ним результат walk(children), як walk у t5 з m2-l05. І field_names, і model_validator користуються нею."
     - "Element = Annotated[InputElement | TextElement | ButtonElement | BlockElement, Field(discriminator=\"type\")]; у BlockElement пишіть list[\"Element\"] у лапках, бо Element визначений нижче."
     - "У валідаторі: names = set(field_names(self)); for el in walk(self.elements): if el.visible_if is not None and el.visible_if.field not in names: raise ValueError(f\"element {el.id!r}: visible_if references unknown field {el.visible_if.field!r}\")"
   solution: |
-    from typing import Annotated, Iterator, Literal, Self
+    from typing import Annotated, Literal, Self
     from pydantic import BaseModel, ConfigDict, Field, model_validator
 
     Operator = Literal["eq", "neq", "in", "gt", "lt"]
@@ -435,11 +435,13 @@
         mode: Literal["light", "dark"] = "light"
         primary_color: str = Field(default="#2563eb", pattern=r"^#[0-9a-fA-F]{6}$")
 
-    def walk(elements: list) -> Iterator[BaseElement]:
+    def walk(elements: list) -> list[BaseElement]:
+        result: list[BaseElement] = []
         for el in elements:
-            yield el
+            result.append(el)
             if isinstance(el, BlockElement):
-                yield from walk(el.children)
+                result.extend(walk(el.children))
+        return result
 
     class FormConfig(BaseModel):
         id: str = Field(min_length=1)

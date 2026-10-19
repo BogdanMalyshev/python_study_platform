@@ -78,46 +78,46 @@
 
 - id: t3
   type: code
-  title: "Розбір рядка key=value"
+  title: "Розбір пари key=value"
   prompt: |
-    Налаштування приходять одним рядком на кшталт `"theme=dark; lang = uk;; token=a=b; flag"`.
-    Напишіть `parse_pairs(raw)`, яка повертає словник `{key: value}` за правилами:
+    Налаштування приходять рядком на кшталт `"theme=dark; lang = uk; token=a=b; flag"`. Розбивати весь рядок
+    на частини будемо, коли з'являться цикли (m1-l06), а тут потрібна функція для однієї частини.
 
-    - пари розділені `;`, порожні частини (зокрема від `;;` і `;` у кінці) пропускаються;
+    Напишіть `parse_pair(raw)`, яка повертає кортеж `(key, value)` за правилами:
+
     - ключ і значення розділені першим `=`; решта `=` належать значенню;
     - пробіли навколо ключа і значення обрізаються;
     - частина без `=` дає ключ з порожнім значенням.
 
     ```python
-    parse_pairs("theme=dark; lang = uk")   # {'theme': 'dark', 'lang': 'uk'}
-    parse_pairs("token=a=b; flag")         # {'token': 'a=b', 'flag': ''}
+    parse_pair(" lang = uk ")   # ('lang', 'uk')
+    parse_pair("token=a=b")     # ('token', 'a=b')
+    parse_pair("flag")          # ('flag', '')
     ```
   starter: |
-    def parse_pairs(raw: str) -> dict[str, str]:
+    def parse_pair(raw: str) -> tuple[str, str]:
         ...
   harness: |
-    print(parse_pairs("theme=dark; lang = uk;; token=a=b; flag"))
-    print(parse_pairs("  a=1 ;b= 2;"))
-    print(parse_pairs(""))
-    print(parse_pairs(" ; ;"))
+    print(parse_pair(" lang = uk "))
+    print(parse_pair("theme=dark"))
+    print(parse_pair("token=a=b"))
+    print(parse_pair("flag"))
+    print(parse_pair(" url = https://x.io/?a=1 "))
+    print(parse_pair("=orphan"))
   expected: |
-    {'theme': 'dark', 'lang': 'uk', 'token': 'a=b', 'flag': ''}
-    {'a': '1', 'b': '2'}
-    {}
-    {}
+    ('lang', 'uk')
+    ('theme', 'dark')
+    ('token', 'a=b')
+    ('flag', '')
+    ('url', 'https://x.io/?a=1')
+    ('', 'orphan')
   hints:
-    - "Тут потрібен `split` з явним роздільником: він зберігає порожні частини, і їх треба пропустити після `strip`. Для пари є метод, який ділить по першому входженню і не падає без роздільника."
-    - "`for part in raw.split(\";\"):`, далі `part = part.strip()`, `if not part: continue`, `key, _, value = part.partition(\"=\")` і `result[key.strip()] = value.strip()`."
+    - "Розбиття по кожному знаку рівності розріже значення, яке теж його містить, а частина без нього дасть один елемент замість двох. Потрібен метод, який ділить по першому входженню і не падає без роздільника."
+    - "`key, _, value = raw.partition(\"=\")`, далі повернути `key.strip(), value.strip()`."
   solution: |
-    def parse_pairs(raw: str) -> dict[str, str]:
-        result = {}
-        for part in raw.split(";"):
-            part = part.strip()
-            if not part:
-                continue
-            key, _, value = part.partition("=")
-            result[key.strip()] = value.strip()
-        return result
+    def parse_pair(raw: str) -> tuple[str, str]:
+        key, _, value = raw.partition("=")
+        return key.strip(), value.strip()
   requires: []
   runtime: browser
 
@@ -128,8 +128,8 @@
     Напишіть `slugify(title)`, яка робить з підпису поля його `id`:
 
     - усі літери в нижньому регістрі;
-    - літери й цифри (будь-якої мови, зокрема кирилиця) зберігаються;
-    - кожен інший символ, включно з пробілами й розділовими знаками, вважається роздільником;
+    - роздільники слів це пробільні символи і символи `-`, `_`, `/`, `:`; будь-які інші символи у вхідних даних
+      це літери або цифри (будь-якої мови, зокрема кирилиця), і вони зберігаються;
     - слова склеюються через `-`, без дефісів на краях і без двох дефісів поспіль.
 
     ```python
@@ -143,84 +143,24 @@
   harness: |
     print(slugify("  Contact  Form: Step 1 "))
     print(slugify("Анкета / Крок 2"))
-    print(slugify("C++ & Python!!"))
     print(slugify("first_name"))
+    print(slugify("user-ID:main"))
+    print(slugify("2024/05/01"))
     print(repr(slugify("---")))
   expected: |
     contact-form-step-1
     анкета-крок-2
-    c-python
     first-name
+    user-id-main
+    2024-05-01
     ''
   hints:
-    - "Пройдіть по символах і замініть усе, що не літера й не цифра, на пробіл. Далі є режим `split`, який сам ігнорує будь-яку кількість пробілів і краї."
-    - "Зберіть символи в список: `ch if ch.isalnum() else \" \"` для кожного `ch` з `title.lower()`. Потім `\"-\".join(\"\".join(chars).split())`."
+    - "Якщо кожен роздільник замінити на пробіл, задача зводиться до розбиття на слова: `split` без аргументу сам ігнорує будь-яку кількість пробілів і краї."
+    - "Методи рядка повертають новий рядок, тож їх можна ланцюжити: `title.lower().replace(\"-\", \" \").replace(\"_\", \" \")...`, далі `\"-\".join(cleaned.split())`."
   solution: |
     def slugify(title: str) -> str:
-        chars = []
-        for ch in title.lower():
-            chars.append(ch if ch.isalnum() else " ")
-        return "-".join("".join(chars).split())
-  requires: []
-  runtime: browser
-
-- id: t5
-  type: code
-  title: "Звіт по відповідях форми"
-  prompt: |
-    Напишіть `format_answers(answers)`, яка перетворює словник відповідей `{field_id: value}` на текстовий звіт:
-
-    - рядки впорядковані за ключем без урахування регістру;
-    - кожен рядок має вигляд `<key> : <value>`, де ключ доповнений пробілами справа до довжини найдовшого ключа;
-    - значення обрізаються від пробілів по краях; порожнє після цього значення виводиться як `<empty>`;
-    - значення довше за 12 символів скорочується до перших 9 символів плюс `...` (разом 12);
-    - рядки склеєні через `\n`, без переносу в кінці; для порожнього словника результат `""`.
-
-    ```python
-    print(format_answers({"email": " a@b.c ", "Name": "Bogdan", "age": ""}))
-    # age   : <empty>
-    # email : a@b.c
-    # Name  : Bogdan
-    ```
-  starter: |
-    def format_answers(answers: dict[str, str]) -> str:
-        ...
-  harness: |
-    answers = {
-        "email": " a@b.c ",
-        "Name": "Bogdan",
-        "comment": "Very long comment text here",
-        "age": "   ",
-        "Zip": "01001",
-    }
-    print(format_answers(answers))
-    print(format_answers({"id": "exactly12chr"}))
-    print(repr(format_answers({})))
-  expected: |
-    age     : <empty>
-    comment : Very long...
-    email   : a@b.c
-    Name    : Bogdan
-    Zip     : 01001
-    id : exactly12chr
-    ''
-  hints:
-    - "Три кроки: ширина колонки як найбільша довжина ключа, обхід ключів у порядку `sorted` з функцією ключа, і один рядок на поле з вкладеною шириною у специфікації формату. Порожній словник обробіть окремо до обчислення ширини."
-    - "`width = max(len(key) for key in answers)`; `for key in sorted(answers, key=str.casefold)`; значення: `value = answers[key].strip()`, потім `\"<empty>\"` або `value[:9] + \"...\"` за довжиною; рядок `f\"{key:<{width}} : {value}\"` у список, наприкінці `\"\\n\".join(lines)`."
-  solution: |
-    def format_answers(answers: dict[str, str]) -> str:
-        if not answers:
-            return ""
-        width = max(len(key) for key in answers)
-        lines = []
-        for key in sorted(answers, key=str.casefold):
-            value = answers[key].strip()
-            if not value:
-                value = "<empty>"
-            elif len(value) > 12:
-                value = value[:9] + "..."
-            lines.append(f"{key:<{width}} : {value}")
-        return "\n".join(lines)
+        cleaned = title.lower().replace("-", " ").replace("_", " ").replace("/", " ").replace(":", " ")
+        return "-".join(cleaned.split())
   requires: []
   runtime: browser
 

@@ -42,3 +42,19 @@
 
 - Додано t6 `to_domain` (Pydantic → frozen dataclass з m2-l05, `requires: [pydantic]`, browser). Перевірено: `solution + harness` дає `expected`, стартер з harness падає з `AttributeError`, як і очікується від `...`.
 - p1: моделі кладуться в `src/formbuilder/config.py` (не `models.py`) разом з `to_domain`; тести лишаються в `tests/test_models.py`; `verify` `cd capstone && uv run pytest tests/test_models.py -q`.
+
+## Редакторська правка: відповідність завдань пройденому
+
+Правило: завдання використовує лише конструкції, пояснені в попередніх уроках або в цьому уроці до свого маркера.
+
+Що змінено: t5 "FormConfig: дерево елементів з discriminated union": допоміжна `walk` у рішенні була генератором (`yield`, `yield from`, `Iterator`), а генератори пояснюються лише в m5-l02. Тепер `walk(elements) -> list[BaseElement]` будує список рекурсивно через `append`/`extend`, як `walk` у t5 з m2-l05; `Iterator` прибрано з імпортів стартера й рішення; перша підказка переписана (замість "генератор" рекурсивна функція, що повертає список). Поведінка, харнес і expected ті самі. t1-t4, t6 без змін.
+
+Завдання уроку:
+- t1 `Theme`: `BaseModel`, `Field(pattern=, ge=, le=)` з першого розділу, m2-l06 (`Literal`).
+- t2 `safe_parse`: `model_validate`, `ValidationError`, `errors()` з розділу до маркера, m1-l11 (try/except), m1-l10 (comprehension, generator expression), m1-l04 (`join`).
+- t3 `Condition`: `field_validator` + `@classmethod`, `model_validator(mode="after")` і `Self` з розділу "Валідатори", m1-l04 (`strip`, `isidentifier` названо в умові), m1-l02 (`isinstance`, bool як int).
+- t4 `InputElement`/`roundtrip`: `model_config`, аліаси, `extra="forbid"`, `model_dump_json(exclude_none=True)` з розділу "Серіалізація" до маркера.
+- t5 `FormConfig`, `field_names`: вкладені моделі, discriminated union через `Annotated` і `Field(discriminator=)`, `model_validator` з цього уроку до маркера; m2-l06 (`Annotated`, `Literal`), m2-l05 (рекурсивний `walk` зі списком), m1-l10 (comprehension).
+- t6 `to_domain`: моделі з t5, frozen dataclass з `slots`/`kw_only` (m2-l05), m1-l05 (`match` з class patterns), m1-l07 (`**common`). Стартер і рішення тримають dataclass-и всередині класу-простору імен `class domain:`; коментар у коді пояснює, що в капстоуні це окремий модуль `domain.py`, а тут так розведено імена з моделями. Вкладення класу в клас окремо не пояснюється, але учень нічого подібного не пише сам: клас уже є в стартері. Залишено як є.
+- q1-q3: приведення `"42"` до `int` у звичайному режимі, зайві ключі за замовчуванням, змінюваний default `[]` у моделі; кожен після свого розділу.
+- p1 (проєкт, легка перевірка): моделі конфігу в капстоуні, спирається на цей урок. Не змінювалось.

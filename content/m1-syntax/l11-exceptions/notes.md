@@ -67,3 +67,21 @@
   m2-l09 і капстоун (ієрархія `ConfigError`, переклад `ValidationError` через `from e`), m3-l03 (голий `assert`
   у pytest), m4-l07 (`with` замість `try/finally`), m5-l01 (`StopIteration` як кінець ітерації), m5-l05
   (`CancelledError`, `ExceptionGroup`), m7-l02 (глобальний exception handler на межі API).
+
+## Редакторська правка: відповідність завдань пройденому
+
+Правило: завдання використовує лише конструкції, пояснені в цьому уроці до його маркера або в попередніх уроках.
+
+Що змінено:
+- t1, t2, t3, t5 залишено без змін (`KNOWN_TYPES` у t5 це множина-літерал лише для членства, вона пояснена в m1-l10).
+- t4 `check_elements`: `seen: set[str] = set()` з `.add` (API множин формально в m2-l01) замінено на `seen: list[str] = []` з `append` і `in`. Параметр `known_types` лишився множиною: харнес передає літерал, а членство в ньому пояснене в m1-l10. Підказку оновлено, `expected` той самий.
+- Додано t6 `coerce_answer`, перенесене з m1-l02 (там було t5): рішення спирається на `try`/`except ValueError`, а до цього уроку `try` немає. Маркер стоїть у розділі "Для капстоуну" одразу після t5. Умова, рішення, харнес і `expected` збережені; підказки тепер посилаються на EAFP з цього уроку і на `float("nan")`/`float("inf")` з m1-l02. `math.isinf` у m1-l02 прямо не показаний, тому підказка називає його парою до `math.isnan` і дає еквівалент `abs(x) == math.inf`.
+
+Завдання уроку:
+- t1 `safe_int`: m1-l02 (`int()`), цей урок (`except` з кортежем типів).
+- t2 `get_path`: m1-l06 (`for`), цей урок (`LookupError`, `else`).
+- t3 `run_step`: m1-l01 (append), m1-l04 (f-рядок), m1-l09 (`Callable`), цей урок (`except ... as e`, `else`, `finally`).
+- t4 `check_elements`: m1-l01 (`in` на списку, append), m1-l04 (`!r`), m1-l06 (`for`), m1-l10 (членство в множині), цей урок (власні винятки з `super().__init__`, `raise`).
+- t5 `parse_config` / `handle`: m1-l01 (`json.loads`), m1-l06 (`for`), m1-l10 (множина-літерал), цей урок (`raise ... from e`, `from None`, ієрархія, `else`).
+- t6 `coerce_answer` (перенесено з m1-l02): m1-l02 (`int()`, `float()`, `math.isnan`, nan/inf), m1-l04 (`strip`, `lower`, `!r`), m1-l05 (`raise ValueError`, guard clauses), цей урок (`try`/`except ValueError`).
+- q1-q4: лише цей урок.

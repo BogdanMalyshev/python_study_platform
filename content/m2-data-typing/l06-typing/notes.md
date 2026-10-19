@@ -78,3 +78,22 @@ pyright не встановлений і не запускався; у лекц�
 
 - p1 створює `src/formbuilder/config.py` замість `config_types.py`: ім'я файлу остаточне, у m2-l09 TypedDict у ньому замінять Pydantic-моделі. `Renderer`/`REGISTRY` тут тимчасові, у m2-l07 переїжджають у пакет `renderers/`.
 - `verify`: `cd capstone && uv run mypy --strict src/formbuilder/config.py`. У лекції команда `mypy --strict config_types.py` стала `config.py`; блок перезапущено (`Success: no issues found in 1 source file`, вивід скрипта той самий).
+
+## Редакторська правка: відповідність завдань пройденому
+
+Правило: завдання використовує лише конструкції, пояснені в попередніх уроках або в цьому уроці до свого маркера.
+
+Що змінено:
+- t4 `parse_element`: предикат з `TypeGuard` пояснюється лише в розділі "Forward references, overload і власний narrowing", а маркер стояв у розділі TypedDict. Маркер перенесено в кінець розділу про narrowing (після callout про тіло предиката, перед "Для капстоуну"). Текст завдання без змін.
+- t3 `with_label`/`render_all`: стартер анотує параметри `Iterable` і `Mapping` з `collections.abc`, а вони пояснюються лише в розділі "Any, object і широкі типи параметрів". Маркер перенесено з розділу Callable в кінець цього розділу (після q4). Текст завдання без змін.
+- Після перенесення маркерів id `parse_element` і `with_label`/`render_all` поміняно місцями, щоб у тексті уроку завдання йшли в порядку t1, t2, t3, t4, t5: тепер t3 це `with_label`/`render_all`, t4 це `parse_element`.
+- t1, t2, t5 без змін.
+
+Завдання уроку:
+- t1 `display_label`: `str | None` і default `None` з розділу до маркера, m1-l02 (`is None`), m1-l04 (`replace`, `capitalize`). `get_type_hints` лише в асертах.
+- t2 `type_errors`: `get_type_hints` (перший розділ), `Literal` і `get_args`, `isinstance` з `X | Y` (розділ "Вбудовані generics") до маркера. `get_origin` в уроці окремо не пояснено, але умова дає готовий вираз `typing.get_origin(hint) is Literal`, а стартер його імпортує.
+- t4 `parse_element`: TypedDict/`NotRequired`, `type`-alias і `.__value__`, `get_args`, `TypeGuard` (тепер до маркера); m1-l02 (`isinstance`), m1-l11 (`raise`).
+- t3 `with_label`/`render_all`: `Callable`, `type`-alias, `Iterable`/`Mapping` (тепер до маркера); m1-l08 (замикання), m2-l01 (`get`).
+- t5 `tree_map`/`flatten`/`count_by_type`: generic-функції `[T, U]` і `__type_params__` з розділу Callable, generic TypedDict `Node[T]` з розділу "Для капстоуну" до маркера; m1-l10 (comprehension), m1-l09 (`lambda`), m1-l07 (`extend`).
+- q1-q4: анотації не перевіряються, `X | None` без default, TypedDict у рантаймі, `cast`; кожен після свого розділу.
+- p1 (проєкт, легка перевірка): спирається на TypedDict, Literal, Callable з цього уроку. Не змінювалось.

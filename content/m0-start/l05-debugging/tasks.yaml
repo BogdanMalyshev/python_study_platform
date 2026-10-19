@@ -135,163 +135,6 @@
 
 - id: t1
   type: code
-  title: "Останній рядок traceback: тип і повідомлення"
-  prompt: |
-    Напишіть `exception_summary(tb)`, яка приймає текст traceback і повертає кортеж `(тип, повідомлення)`
-    з останнього непорожнього рядка. Тип це все до першого `": "`, повідомлення все після нього.
-    Якщо `": "` у рядку немає (виняток без повідомлення), повідомлення порожнє.
-
-    Пам'ятайте, що в ланцюжку винятків фінальний виняток стоїть у самому низу, а в повідомленні
-    може бути власне двокрапка.
-
-    ```python
-    exception_summary("Traceback (most recent call last):\n  ...\nKeyError: 'age'\n")
-    # ('KeyError', "'age'")
-    exception_summary("...\nbdb.BdbQuit")
-    # ('bdb.BdbQuit', '')
-    ```
-  starter: |
-    def exception_summary(tb: str) -> tuple[str, str]:
-        ...
-  harness: |
-    simple = '''Traceback (most recent call last):
-      File "main.py", line 9, in age_of
-        return int(answers["age"])
-                   ~~~~~~~^^^^^^^
-    KeyError: 'age'
-    '''
-    chained = '''Traceback (most recent call last):
-      File "chain.py", line 6, in load_config
-        return json.loads(raw)
-    json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 20 (char 19)
-
-    The above exception was the direct cause of the following exception:
-
-    Traceback (most recent call last):
-      File "chain.py", line 8, in load_config
-        raise ValueError("config is not valid JSON") from e
-    ValueError: config is not valid JSON
-
-
-    '''
-    quit_tb = '''Traceback (most recent call last):
-      File ".../lib/python3.12/bdb.py", line 125, in dispatch_line
-        if self.quitting: raise BdbQuit
-    bdb.BdbQuit'''
-    json_tb = '''  File ".../lib/python3.12/json/decoder.py", line 356, in raw_decode
-        raise JSONDecodeError("Expecting value", s, err.value) from None
-    json.decoder.JSONDecodeError: Expecting value: line 1 column 11 (char 10)'''
-    print(exception_summary(simple))
-    print(exception_summary(chained))
-    print(exception_summary(quit_tb))
-    print(exception_summary(json_tb))
-  expected: |
-    ('KeyError', "'age'")
-    ('ValueError', 'config is not valid JSON')
-    ('bdb.BdbQuit', '')
-    ('json.decoder.JSONDecodeError', 'Expecting value: line 1 column 11 (char 10)')
-  hints:
-    - "Порожні рядки в кінці треба відкинути до того, як брати останній; далі рядок ділиться лише по першому входженню роздільника."
-    - "tb.strip().splitlines()[-1] дає останній змістовний рядок, а str.partition(\": \") повертає три частини і не падає, коли роздільника немає."
-  solution: |
-    def exception_summary(tb: str) -> tuple[str, str]:
-        last = tb.strip().splitlines()[-1]
-        exc_type, _, message = last.partition(": ")
-        return exc_type, message
-  requires: []
-  runtime: browser
-
-- id: t2
-  type: code
-  title: "Кадри з вашого коду"
-  prompt: |
-    Напишіть `own_frames(tb, root)`, яка повертає кадри traceback, що належать вашому проєкту: список кортежів
-    `(path, line, func)`, де `path` це шлях відносно `root`, `line` це `int`.
-
-    Правила:
-    - кадр це рядок виду `  File "<шлях>", line <N>, in <функція>`;
-    - ваш кадр це той, чий шлях починається з `root + "/"`; кадри stdlib і сторонніх пакетів відкидаються;
-    - якщо traceback це ланцюжок, беруться кадри лише останнього блоку, того, що після останнього
-      `Traceback (most recent call last):`, бо саме він описує виняток, який зупинив програму;
-    - порядок той самий, що в traceback: від точки входу до найглибшого кадру.
-
-    ```python
-    own_frames(tb, "/app")
-    # [('main.py', 3, '<module>'), ('formbuilder/loader.py', 12, 'load_config')]
-    ```
-  starter: |
-    import re
-
-
-    def own_frames(tb: str, root: str) -> list[tuple[str, int, str]]:
-        ...
-  harness: |
-    tb = '''Traceback (most recent call last):
-      File "/app/main.py", line 3, in <module>
-        load_config(path)
-      File "/app/formbuilder/loader.py", line 12, in load_config
-        return json.loads(text)
-               ^^^^^^^^^^^^^^^^
-      File "/usr/lib/python3.12/json/__init__.py", line 346, in loads
-        return _default_decoder.decode(s)
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^
-      File "/usr/lib/python3.12/json/decoder.py", line 356, in raw_decode
-        raise JSONDecodeError("Expecting value", s, err.value) from None
-    json.decoder.JSONDecodeError: Expecting value: line 1 column 11 (char 10)
-    '''
-    chained = '''Traceback (most recent call last):
-      File "/app/formbuilder/widgets.py", line 6, in widget_for
-        return WIDGETS[field["type"]]
-               ~~~~~~~^^^^^^^^^^^^^^^
-    KeyError: 'date'
-
-    During handling of the above exception, another exception occurred:
-
-    Traceback (most recent call last):
-      File "/app/main.py", line 11, in <module>
-        widget_for({"id": "dob", "type": "date"})
-      File "/app/formbuilder/widgets.py", line 8, in widget_for
-        return WIDGETS[field["fallback"]]
-                       ~~~~~^^^^^^^^^^^^
-    KeyError: 'fallback'
-    '''
-    lib_only = '''Traceback (most recent call last):
-      File "/usr/lib/python3.12/runpy.py", line 198, in _run_module_as_main
-        return _run_code(code, main_globals, None,
-    ModuleNotFoundError: No module named 'formbuilder'
-    '''
-    print(own_frames(tb, "/app"))
-    print(own_frames(chained, "/app"))
-    print(own_frames(lib_only, "/app"))
-    print(own_frames(tb, "/app/formbuilder"))
-    print(own_frames(tb, "/ap"))
-  expected: |
-    [('main.py', 3, '<module>'), ('formbuilder/loader.py', 12, 'load_config')]
-    [('main.py', 11, '<module>'), ('formbuilder/widgets.py', 8, 'widget_for')]
-    []
-    [('loader.py', 12, 'load_config')]
-    []
-  hints:
-    - "Спершу відріжте все до останнього заголовка Traceback, потім знайдіть рядки кадрів регулярним виразом із трьома групами, а префікс перевіряйте разом зі слешем, щоб /ap не збігався з /app."
-    - "block = tb.rsplit(\"Traceback (most recent call last):\", 1)[-1]; re.finditer(r'^  File \"(.+?)\", line (\\d+), in (.+)$', block, re.M); далі path.startswith(root + \"/\") і path[len(root) + 1:]."
-  solution: |
-    import re
-
-
-    def own_frames(tb: str, root: str) -> list[tuple[str, int, str]]:
-        block = tb.rsplit("Traceback (most recent call last):", 1)[-1]
-        prefix = root + "/"
-        frames = []
-        for m in re.finditer(r'^  File "(.+?)", line (\d+), in (.+)$', block, re.M):
-            path, line, func = m.groups()
-            if path.startswith(prefix):
-                frames.append((path[len(prefix):], int(line), func))
-        return frames
-  requires: []
-  runtime: browser
-
-- id: t3
-  type: code
   title: "Баг вище за стек"
   prompt: |
     Цей код упав на одній із реальних відповідей форми:
@@ -361,84 +204,39 @@
   requires: []
   runtime: browser
 
-- id: t4
-  type: code
-  title: "Звіт перевірок без падіння"
-  prompt: |
-    Напишіть `run_checks(checks)`: словник `{назва: функція без аргументів}`. Функція викликає кожну перевірку
-    по черзі й повертає список рядків звіту. Програма не падає, навіть якщо всі перевірки кидають винятки.
-
-    - перевірка пройшла: `"<назва>: ok"`;
-    - перевірка кинула виняток (нащадок `Exception`): `"<назва>: FAIL <останній рядок traceback> (in <функція>)"`,
-      де останній рядок це те, що Python надрукував би внизу traceback (тип з модулем і повідомлення),
-      а `<функція>` це ім'я найглибшого кадру, в якому виник виняток.
-
-    Текст traceback руками не розбирати: модуль `traceback` уміє віддати і останній рядок, і кадри як об'єкти.
-
+- id: q5
+  type: quiz
+  question: |
+    Що надрукує цей код?
     ```python
-    run_checks({"zero": lambda: 1 / 0})
-    # ['zero: FAIL ZeroDivisionError: division by zero (in <lambda>)']
-    ```
-  starter: |
-    import traceback
-    from collections.abc import Callable
-
-
-    def run_checks(checks: dict[str, Callable[[], object]]) -> list[str]:
-        ...
-  harness: |
     import json
-
-
-    def parse_age(raw: str) -> int:
-        return int(raw)
+    import traceback
 
 
     def load_title(raw: str) -> str:
         return json.loads(raw)["title"]
 
 
-    checks = {
-        "age": lambda: parse_age("30"),
-        "bad age": lambda: parse_age("thirty"),
-        "title": lambda: load_title('{"title": "Signup"}'),
-        "no title": lambda: load_title('{"name": "Signup"}'),
-        "broken json": lambda: load_title('{"title": }'),
-        "zero": lambda: 1 / 0,
-    }
-    for line in run_checks(checks):
-        print(line)
-    print(run_checks({}))
-  expected: |
-    age: ok
-    bad age: FAIL ValueError: invalid literal for int() with base 10: 'thirty' (in parse_age)
-    title: ok
-    no title: FAIL KeyError: 'title' (in load_title)
-    broken json: FAIL json.decoder.JSONDecodeError: Expecting value: line 1 column 11 (char 10) (in raw_decode)
-    zero: FAIL ZeroDivisionError: division by zero (in <lambda>)
-    []
-  hints:
-    - "try / except Exception as e навколо виклику; рядок і кадр дістаються з самого об'єкта винятку, без print_exc."
-    - "traceback.format_exception_only(e)[-1].strip() дає останній рядок; traceback.extract_tb(e.__traceback__)[-1].name дає ім'я найглибшої функції."
-  solution: |
-    import traceback
-    from collections.abc import Callable
-
-
-    def run_checks(checks: dict[str, Callable[[], object]]) -> list[str]:
-        report = []
-        for name, check in checks.items():
-            try:
-                check()
-            except Exception as e:
-                last_line = traceback.format_exception_only(e)[-1].strip()
-                where = traceback.extract_tb(e.__traceback__)[-1].name
-                report.append(f"{name}: FAIL {last_line} (in {where})")
-            else:
-                report.append(f"{name}: ok")
-        return report
-  requires: []
-  runtime: browser
+    try:
+        load_title('{"name": "Signup"}')
+    except Exception as e:
+        print(traceback.format_exception_only(e))
+        print(traceback.extract_tb(e.__traceback__)[-1].name)
+    ```
+  options:
+    - "`[\"KeyError: 'title'\\n\"]`, потім `load_title`"
+    - "`[\"'title'\"]`, потім `load_title`"
+    - "`[\"KeyError: 'title'\\n\"]`, потім `loads`"
+    - "`[\"KeyError: 'title'\\n\"]`, потім `<module>`"
+  answer: 0
+  explain: |
+    `format_exception_only(e)` повертає список рядків з останнім рядком traceback, тобто тип винятку
+    і повідомлення з `\n` у кінці, як у прикладі з `JSONDecodeError`. Лише `'title'` без типу це `str(e)`:
+    для `KeyError` повідомлення це сам ключ, і саме тому в лог краще класти `format_exception_only`.
+    `extract_tb(...)[-1]` це найглибший кадр, де виник виняток. `json.loads` тут відпрацював успішно
+    і повернув словник, а `KeyError` кинула індексація `["title"]` у рядку функції `load_title`, тож
+    `loads` у кадрах стеку винятку немає зовсім. `<module>` це перший кадр списку (`[0]`), де виняток
+    перехопили, а не де він виник.
 
 - id: p1
   type: project

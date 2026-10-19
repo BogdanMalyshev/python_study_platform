@@ -76,165 +76,25 @@
     міграції через `uv add -r`, коли всі транзитивні стають прямими. Додатково freeze це знімок
     однієї платформи й версії Python, а `uv.lock` резолвиться для всіх одразу.
 
-- id: t1
-  type: code
-  title: "Що насправді означає ~="
-  prompt: |
-    Напишіть `compatible_bounds(version)`, яка перекладає compatible release `~=<version>` у пару
-    явних меж `(нижня, верхня)` за правилом PEP 440: нижня межа `>=version`, а верхня утворюється так:
-    відкинути останній компонент версії й збільшити на одиницю той, що став останнім.
-
-    Версія з одного компонента для `~=` недопустима: кидайте `ValueError` з текстом
-    `~= needs at least two components: '<version>'`.
-
-    ```python
-    compatible_bounds("2.1")      # ('>=2.1', '<3')
-    compatible_bounds("2.1.3")    # ('>=2.1.3', '<2.2')
-    compatible_bounds("2")        # ValueError
-    ```
-  starter: |
-    def compatible_bounds(version: str) -> tuple[str, str]:
-        ...
-  harness: |
-    print(compatible_bounds("2.1"))
-    print(compatible_bounds("2.1.3"))
-    print(compatible_bounds("0.28"))
-    print(compatible_bounds("1.4.5.2"))
-    try:
-        compatible_bounds("2")
-    except ValueError as e:
-        print("ValueError:", e)
-  expected: |
-    ('>=2.1', '<3')
-    ('>=2.1.3', '<2.2')
-    ('>=0.28', '<1')
-    ('>=1.4.5.2', '<1.4.6')
-    ValueError: ~= needs at least two components: '2'
-  hints:
-    - "Розбийте версію по крапках на числа. Верхня межа це всі компоненти, крім останнього, з інкрементом нового останнього."
-    - "parts = [int(p) for p in version.split('.')]; upper = parts[:-1]; upper[-1] += 1; потім '.'.join(str(p) for p in upper). Повідомлення помилки з !r дасть лапки навколо версії."
-  solution: |
-    def compatible_bounds(version: str) -> tuple[str, str]:
-        parts = [int(p) for p in version.split(".")]
-        if len(parts) < 2:
-            raise ValueError(f"~= needs at least two components: {version!r}")
-        upper = parts[:-1]
-        upper[-1] += 1
-        return f">={version}", "<" + ".".join(str(p) for p in upper)
-  requires: []
-  runtime: browser
-
-- id: t2
-  type: code
-  title: "Переклад npm-ного ^ у специфікатор PEP 440"
-  prompt: |
-    Ви переносите залежності з `package.json`-звички у `pyproject.toml`. Напишіть `caret_to_pep440(caret)`,
-    яка приймає npm-діапазон виду `^MAJOR.MINOR.PATCH` і повертає еквівалентний специфікатор PEP 440
-    у формі `>=нижня,<верхня`.
-
-    Правила `^` у npm: верхня межа це наступна версія, що змінює перший ненульовий компонент.
-    `^2.11.3` дозволяє все до `3.0.0`, `^0.28.1` лише до `0.29.0`, `^0.0.3` лише до `0.0.4`.
-    Версія у вхідному рядку завжди з трьох компонентів.
-
-    ```python
-    caret_to_pep440("^2.11.3")   # '>=2.11.3,<3.0.0'
-    caret_to_pep440("^0.28.1")   # '>=0.28.1,<0.29.0'
-    ```
-  starter: |
-    def caret_to_pep440(caret: str) -> str:
-        ...
-  harness: |
-    print(caret_to_pep440("^2.11.3"))
-    print(caret_to_pep440("^0.28.1"))
-    print(caret_to_pep440("^0.0.3"))
-    print(caret_to_pep440("^1.0.0"))
-  expected: |
-    >=2.11.3,<3.0.0
-    >=0.28.1,<0.29.0
-    >=0.0.3,<0.0.4
-    >=1.0.0,<2.0.0
-  hints:
-    - "Зріжте `^`, розберіть три числа й розгляньте три випадки: major > 0, major == 0 і minor > 0, обидва нулі."
-    - "major, minor, patch = (int(p) for p in caret.removeprefix('^').split('.')); далі if/elif/else, що будує верхню межу f'{major + 1}.0.0', f'0.{minor + 1}.0' або f'0.0.{patch + 1}'."
-  solution: |
-    def caret_to_pep440(caret: str) -> str:
-        major, minor, patch = (int(p) for p in caret.removeprefix("^").split("."))
-        if major > 0:
-            upper = f"{major + 1}.0.0"
-        elif minor > 0:
-            upper = f"0.{minor + 1}.0"
-        else:
-            upper = f"0.0.{patch + 1}"
-        return f">={major}.{minor}.{patch},<{upper}"
-  requires: []
-  runtime: browser
-
-- id: t3
-  type: code
-  title: "Імена залежностей з pyproject.toml через tomllib"
-  prompt: |
-    Напишіть `dependency_names(pyproject_text)`, яка читає вміст `pyproject.toml` через `tomllib`
-    і повертає словник: ключ `"project"` для `[project] dependencies`, далі по ключу на кожну групу
-    з `[dependency-groups]` у порядку з файлу. Значення це відсортований список імен пакетів без
-    специфікаторів версій, extras і маркерів, у нижньому регістрі.
-
-    Ім'я закінчується на першому з символів `[`, `<`, `>`, `=`, `!`, `~`, `;` або пробілі.
-    Якщо `dependencies` чи `[dependency-groups]` у файлі немає, `"project"` має бути порожнім списком,
-    а груп просто немає.
-
-    ```python
-    dependency_names('[project]\ndependencies = ["PyYAML==6.0.*", "pydantic[email]>=2.11"]\n')
-    # {'project': ['pydantic', 'pyyaml']}
-    ```
-  starter: |
-    import tomllib
-
-
-    def dependency_names(pyproject_text: str) -> dict[str, list[str]]:
-        ...
-  harness: |
-    PYPROJECT = '''
-    [project]
-    name = "forms-api"
-    version = "0.1.0"
-    requires-python = ">=3.12"
-    dependencies = [
-        "pydantic[email]>=2.11,<3",
-        "httpx~=0.28.1",
-        "PyYAML==6.0.*",
-    ]
-
-    [dependency-groups]
-    dev = ["ruff>=0.17", "pytest>=9.1.1", "mypy"]
-    docs = ["mkdocs ; python_version >= '3.12'"]
-
-    [tool.ruff]
-    line-length = 100
-    '''
-
-    print(dependency_names(PYPROJECT))
-    print(dependency_names('[project]\nname = "x"\nversion = "0"\n'))
-  expected: |
-    {'project': ['httpx', 'pydantic', 'pyyaml'], 'dev': ['mypy', 'pytest', 'ruff'], 'docs': ['mkdocs']}
-    {'project': []}
-  hints:
-    - "tomllib.loads дає звичайний словник; відсутні таблиці обробляйте через .get з порожнім значенням за замовчуванням."
-    - "Ім'я відрізається через re.split(r'[\\[<>=!~;\\s]', spec, maxsplit=1)[0]. Групи можна додати до словника з project оператором |=."
-  solution: |
-    import re
-    import tomllib
-
-
-    def dependency_names(pyproject_text: str) -> dict[str, list[str]]:
-        data = tomllib.loads(pyproject_text)
-        groups = {"project": data.get("project", {}).get("dependencies", [])}
-        groups |= data.get("dependency-groups", {})
-        return {
-            group: sorted(re.split(r"[\[<>=!~;\s]", spec, maxsplit=1)[0].lower() for spec in specs)
-            for group, specs in groups.items()
-        }
-  requires: []
-  runtime: browser
+- id: q5
+  type: quiz
+  question: |
+    У `package.json` записано `"httpx": "^0.28.1"`. Який рядок для `dependencies` у `pyproject.toml`
+    дозволяє рівно ті самі версії?
+  options:
+    - "`httpx~=0.28`"
+    - "`httpx>=0.28.1,<1.0.0`"
+    - "`httpx==0.28.*`"
+    - "`httpx>=0.28.1,<0.29.0`"
+  answer: 3
+  explain: |
+    У npm `^` на нуль-мажорній версії піднімає лише останній стабільний розряд: `^0.28.1` означає
+    `>=0.28.1 <0.29.0`, і явний діапазон через кому переносить це один до одного. `~=0.28` це пастка
+    з уроку: відкидається останній компонент, лишається `0.*`, тож пропускаються `0.29.0` і `0.99.0`.
+    `>=0.28.1,<1.0.0` це правило `^` для стабільних версій (до наступної мажорної), а для `0.x` npm його
+    не застосовує. `==0.28.*` має правильну верхню межу, але пускає `0.28.0`, нижчу за `0.28.1`.
+    Серед варіантів його немає, але `~=0.28.1` теж був би еквівалентом: відкидається `1`, лишається
+    `==0.28.*` разом з `>=0.28.1`, що й показує приклад з `packaging` в уроці.
 
 - id: p1
   type: project

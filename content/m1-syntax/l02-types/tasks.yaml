@@ -2,38 +2,45 @@
   type: code
   title: "Зсув часового поясу з від'ємними хвилинами"
   prompt: |
-    Напишіть `format_offset(minutes)`, яка перетворює зсув часового поясу у хвилинах на рядок `"+HH:MM"` або `"-HH:MM"`.
-    Нуль записується як `"+00:00"`. Двозначне число з нулем попереду дає f-рядок `f"{n:02d}"`.
+    Напишіть `offset_parts(minutes)`, яка розкладає зсув часового поясу у хвилинах на кортеж
+    `(знак, години, хвилини)`: знак це рядок `"+"` або `"-"`, години й хвилини невід'ємні цілі.
+    Нуль має знак `"+"`. Склеювати з цього рядок `"-05:30"` будемо в m1-l04, коли з'являться f-рядки.
 
     ```python
-    format_offset(345)    # '+05:45'
-    format_offset(-330)   # '-05:30'
-    format_offset(-30)    # '-00:30'
+    offset_parts(345)    # ('+', 5, 45)
+    offset_parts(-330)   # ('-', 5, 30)
+    offset_parts(0)      # ('+', 0, 0)
     ```
 
-    Перевірте себе на `-330`: `divmod(-330, 60)` дає не те, що підказує інтуїція з `Math.trunc`.
+    Перевірте себе на `-330`: `divmod(-330, 60)` дає `(-6, 30)`, а не `(-5, -30)`, як підказує інтуїція з `Math.trunc`.
   starter: |
-    def format_offset(minutes: int) -> str:
+    def offset_parts(minutes: int) -> tuple[str, int, int]:
         ...
   harness: |
-    for m in [0, 120, 345, -330, -30, -720, 59]:
-        print(m, format_offset(m))
+    print(offset_parts(0))
+    print(offset_parts(120))
+    print(offset_parts(345))
+    print(offset_parts(-330))
+    print(offset_parts(-30))
+    print(offset_parts(-720))
+    print(offset_parts(59))
   expected: |
-    0 +00:00
-    120 +02:00
-    345 +05:45
-    -330 -05:30
-    -30 -00:30
-    -720 -12:00
-    59 +00:59
+    ('+', 0, 0)
+    ('+', 2, 0)
+    ('+', 5, 45)
+    ('-', 5, 30)
+    ('-', 0, 30)
+    ('-', 12, 0)
+    ('+', 0, 59)
   hints:
-    - "`//` і `%` на від'ємному числі округлюють униз: `-330 // 60` це `-6`, а остача `30`. Знак варто відокремити від величини."
-    - "sign = \"-\" if minutes < 0 else \"+\"; hours, mins = divmod(abs(minutes), 60); далі f-рядок з `:02d` для обох."
+    - "Цілочисельне ділення й остача на від'ємному числі округлюють униз, а не до нуля. Знак варто відокремити від величини й ділити вже невід'ємне число."
+    - "Знак дає умовний вираз `\"-\" if minutes < 0 else \"+\"`, величину `-minutes if minutes < 0 else minutes`."
+    - "hours, mins = divmod(-minutes if minutes < 0 else minutes, 60); return sign, hours, mins."
   solution: |
-    def format_offset(minutes: int) -> str:
+    def offset_parts(minutes: int) -> tuple[str, int, int]:
         sign = "-" if minutes < 0 else "+"
-        hours, mins = divmod(abs(minutes), 60)
-        return f"{sign}{hours:02d}:{mins:02d}"
+        hours, mins = divmod(-minutes if minutes < 0 else minutes, 60)
+        return sign, hours, mins
   requires: []
   runtime: browser
 
@@ -52,25 +59,28 @@
     | `list` | `"array"` |
     | `dict` | `"object"` |
 
-    Для будь-якого іншого типу киньте `TypeError` з повідомленням `"unsupported type: <назва класу>"`,
-    де назву дає `type(value).__name__`.
+    Для будь-якого іншого типу (наприклад, кортежу) функція повертає `None`: такого значення JSON не дає.
 
     ```python
     json_type(True)     # 'boolean'
     json_type(2.5)      # 'number'
-    json_type((1, 2))   # TypeError: unsupported type: tuple
+    json_type((1, 2))   # None
     ```
   starter: |
-    def json_type(value) -> str:
+    def json_type(value):
         ...
   harness: |
-    for v in [None, True, False, 0, 2.5, 2 ** 70, "x", "", [1], {"a": 1}]:
-        print(repr(v), json_type(v))
-    for v in [(1, 2), {1, 2}]:
-        try:
-            json_type(v)
-        except TypeError as e:
-            print("TypeError:", e)
+    print(repr(None), json_type(None))
+    print(repr(True), json_type(True))
+    print(repr(False), json_type(False))
+    print(repr(0), json_type(0))
+    print(repr(2.5), json_type(2.5))
+    print(repr(2 ** 70), json_type(2 ** 70))
+    print(repr("x"), json_type("x"))
+    print(repr(""), json_type(""))
+    print(repr([1]), json_type([1]))
+    print(repr({"a": 1}), json_type({"a": 1}))
+    print(repr((1, 2)), json_type((1, 2)))
   expected: |
     None null
     True boolean
@@ -82,13 +92,12 @@
     '' string
     [1] array
     {'a': 1} object
-    TypeError: unsupported type: tuple
-    TypeError: unsupported type: set
+    (1, 2) None
   hints:
     - "`True` проходить `isinstance(value, int)`, бо `bool` підклас `int`. Порядок перевірок вирішує все."
-    - "Спершу `value is None`, потім `isinstance(value, bool)`, і лише потім `isinstance(value, (int, float))`. Наприкінці `raise TypeError(f\"unsupported type: {type(value).__name__}\")`."
+    - "Спершу `value is None`, потім `isinstance(value, bool)`, і лише потім `isinstance(value, (int, float))`. Після всіх перевірок `return None`."
   solution: |
-    def json_type(value) -> str:
+    def json_type(value):
         if value is None:
             return "null"
         if isinstance(value, bool):
@@ -101,7 +110,7 @@
             return "array"
         if isinstance(value, dict):
             return "object"
-        raise TypeError(f"unsupported type: {type(value).__name__}")
+        return None
   requires: []
   runtime: browser
 
@@ -109,42 +118,40 @@
   type: code
   title: "Optional chaining і ?? для вкладеного конфігу"
   prompt: |
-    Напишіть `get_in(data, path, default=None)`, Python-версію виразу `data?.[k1]?.[k2] ?? default` для вкладених словників.
-    `path` це список ключів. Функція повертає `default`, якщо:
+    Напишіть `get_in(data, key1, key2, default=None)`, Python-версію виразу `data?.[key1]?.[key2] ?? default`
+    рівно для двох рівнів вкладеності. Функція повертає `default`, якщо:
 
-    - якогось ключа на шляху немає;
-    - проміжне значення `None` або взагалі не словник (наприклад, рядок);
+    - ключа `key1` немає, або значення під ним `None` чи взагалі не словник (наприклад, рядок);
+    - ключа `key2` немає у вкладеному словнику;
     - кінцеве значення `None`.
 
     Хибні, але не `None` значення (`0`, `""`, `False`, `[]`) повертаються як є: це семантика `??`, а не `||`.
-    Порожній `path` повертає сам `data`.
 
     ```python
     config = {"validation": {"max": 100, "min": 0}, "options": None}
-    get_in(config, ["validation", "max"])        # 100
-    get_in(config, ["validation", "min"], 5)     # 0
-    get_in(config, ["options", "first"], "-")    # '-'
+    get_in(config, "validation", "max")        # 100
+    get_in(config, "validation", "min", 5)     # 0
+    get_in(config, "options", "first", "-")    # '-'
     ```
   starter: |
-    def get_in(data: dict, path: list[str], default=None):
+    def get_in(data: dict, key1: str, key2: str, default=None):
         ...
   harness: |
     config = {
         "id": "email",
-        "label": "",
-        "required": False,
         "options": None,
+        "flags": {"required": False, "label": ""},
         "validation": {"max": 100, "min": 0, "pattern": None},
     }
-    print(repr(get_in(config, ["validation", "max"])))
-    print(repr(get_in(config, ["validation", "min"], 5)))
-    print(repr(get_in(config, ["validation", "pattern"], ".*")))
-    print(repr(get_in(config, ["label"], "Email")))
-    print(repr(get_in(config, ["required"], True)))
-    print(repr(get_in(config, ["options", "first"], "-")))
-    print(repr(get_in(config, ["id", "length"], -1)))
-    print(repr(get_in(config, ["missing", "deep"])))
-    print(repr(get_in({"a": 1}, [])))
+    print(repr(get_in(config, "validation", "max")))
+    print(repr(get_in(config, "validation", "min", 5)))
+    print(repr(get_in(config, "validation", "pattern", ".*")))
+    print(repr(get_in(config, "flags", "label", "Email")))
+    print(repr(get_in(config, "flags", "required", True)))
+    print(repr(get_in(config, "options", "first", "-")))
+    print(repr(get_in(config, "id", "length", -1)))
+    print(repr(get_in(config, "missing", "deep")))
+    print(repr(get_in(config, "validation", "step", 1)))
   expected: |
     100
     0
@@ -154,18 +161,18 @@
     '-'
     -1
     None
-    {'a': 1}
+    1
   hints:
-    - "Ідіть по шляху змінною `current`. На кожному кроці спершу переконайтесь, що `current` це словник; `.get` на відсутньому ключі сам дасть `None`."
-    - "for key in path: if not isinstance(current, dict): return default; current = current.get(key). Після циклу `current if current is not None else default`, а не `current or default`."
+    - "Перший рівень читайте через `.get`: відсутній ключ сам дасть `None`. Перш ніж іти глибше, переконайтесь, що отримане значення це словник."
+    - "inner = data.get(key1); if not isinstance(inner, dict): return default. Наприкінці потрібен умовний вираз з `is not None`, а не `value or default`."
+    - "value = inner.get(key2); return value if value is not None else default."
   solution: |
-    def get_in(data: dict, path: list[str], default=None):
-        current = data
-        for key in path:
-            if not isinstance(current, dict):
-                return default
-            current = current.get(key)
-        return current if current is not None else default
+    def get_in(data: dict, key1: str, key2: str, default=None):
+        inner = data.get(key1)
+        if not isinstance(inner, dict):
+            return default
+        value = inner.get(key2)
+        return value if value is not None else default
   requires: []
   runtime: browser
 
@@ -201,111 +208,13 @@
     '123456789012345678.90' 12345678901234567890
   hints:
     - "`float` має 53 біти точності, тож через нього не можна ні множити, ні передавати великі суми. Потрібна десяткова арифметика або робота з рядком."
-    - "from decimal import Decimal; int(Decimal(price.strip()) * 100). Decimal створюється з рядка, а не з float."
+    - "from decimal import Decimal; int(Decimal(price) * 100). Decimal створюється з рядка, а не з float, і сам ігнорує пробіли навколо числа."
   solution: |
     from decimal import Decimal
 
 
     def to_cents(price: str) -> int:
-        return int(Decimal(price.strip()) * 100)
-  requires: []
-  runtime: browser
-
-- id: t5
-  type: code
-  title: "Типізація відповіді форми"
-  prompt: |
-    Відповіді форми приходять з браузера рядками або `None`. Напишіть `coerce_answer(raw, field_type)`,
-    яка перетворює відповідь на значення потрібного типу:
-
-    - `None` або рядок, порожній після `strip()`, дає `None` для будь-якого типу поля.
-    - `"text"`: рядок без пробілів по краях.
-    - `"number"`: `int`, якщо рядок це ціле число, інакше `float`. `"42"` дає `42`, `"42.5"` дає `42.5`, `"1e3"` дає `1000.0`.
-      NaN і нескінченність (`"nan"`, `"inf"`, `"-inf"`) не є відповіддю: `ValueError`. Нечисловий рядок теж `ValueError`.
-    - `"checkbox"`: `"true"` дає `True`, `"false"` дає `False`, без урахування регістру. Будь-що інше `ValueError`.
-    - Невідомий `field_type`: `ValueError`.
-
-    Текст повідомлення в `ValueError` довільний, харнес друкує лише тип винятку.
-
-    ```python
-    coerce_answer(" 42 ", "number")      # 42
-    coerce_answer("false", "checkbox")   # False
-    coerce_answer("nan", "number")       # ValueError
-    ```
-  starter: |
-    def coerce_answer(raw: str | None, field_type: str) -> str | int | float | bool | None:
-        ...
-  harness: |
-    cases = [
-        ("42", "number"),
-        (" 42.5 ", "number"),
-        ("1e3", "number"),
-        ("007", "number"),
-        ("-3", "number"),
-        ("", "number"),
-        (None, "text"),
-        ("  Ann  ", "text"),
-        ("false", "checkbox"),
-        ("TRUE", "checkbox"),
-        ("   ", "checkbox"),
-    ]
-    for raw, field_type in cases:
-        value = coerce_answer(raw, field_type)
-        print(repr(raw), field_type, "->", repr(value), type(value).__name__)
-
-    for raw, field_type in [("nan", "number"), ("-inf", "number"), ("abc", "number"), ("yes", "checkbox"), ("1", "date")]:
-        try:
-            coerce_answer(raw, field_type)
-            print(repr(raw), field_type, "-> no error")
-        except ValueError:
-            print(repr(raw), field_type, "-> ValueError")
-  expected: |
-    '42' number -> 42 int
-    ' 42.5 ' number -> 42.5 float
-    '1e3' number -> 1000.0 float
-    '007' number -> 7 int
-    '-3' number -> -3 int
-    '' number -> None NoneType
-    None text -> None NoneType
-    '  Ann  ' text -> 'Ann' str
-    'false' checkbox -> False bool
-    'TRUE' checkbox -> True bool
-    '   ' checkbox -> None NoneType
-    'nan' number -> ValueError
-    '-inf' number -> ValueError
-    'abc' number -> ValueError
-    'yes' checkbox -> ValueError
-    '1' date -> ValueError
-  hints:
-    - "Спершу обробіть `None` і порожній рядок, потім розгалужуйтесь за типом поля. `bool(\"false\")` тут не допоможе: це `True`."
-    - "Для числа: спробувати `int(s)`, і якщо `ValueError`, тоді `float(s)`. `float(\"nan\")` і `float(\"inf\")` не падають, тому після `float` потрібна перевірка `math.isnan(x) or math.isinf(x)`."
-    - "try: return int(s) / except ValueError: x = float(s); if math.isnan(x) or math.isinf(x): raise ValueError(...); return x. Для checkbox: s.lower() == \"true\" / \"false\", інакше raise ValueError(...)."
-  solution: |
-    import math
-
-
-    def coerce_answer(raw: str | None, field_type: str) -> str | int | float | bool | None:
-        if raw is None or raw.strip() == "":
-            return None
-        s = raw.strip()
-        if field_type == "text":
-            return s
-        if field_type == "number":
-            try:
-                return int(s)
-            except ValueError:
-                x = float(s)
-            if math.isnan(x) or math.isinf(x):
-                raise ValueError(f"not a finite number: {raw!r}")
-            return x
-        if field_type == "checkbox":
-            lowered = s.lower()
-            if lowered == "true":
-                return True
-            if lowered == "false":
-                return False
-            raise ValueError(f"not a checkbox value: {raw!r}")
-        raise ValueError(f"unknown field type: {field_type!r}")
+        return int(Decimal(price) * 100)
   requires: []
   runtime: browser
 

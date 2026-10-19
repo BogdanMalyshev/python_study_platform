@@ -38,52 +38,42 @@
 
 - id: t2
   type: code
-  title: "Помилки окремо від попереджень"
+  title: "Порожній звіт валідатора"
   prompt: |
-    Функція `split_messages(messages)` розкладає повідомлення валідатора на два списки: з префіксом `E:`
-    у помилки, решту в попередження, без префікса. Повертає кортеж `(errors, warnings)`.
+    Функція `new_report()` повертає порожній звіт валідатора: словник з ключами `"errors"` і `"warnings"`,
+    кожен ключ має власний порожній список. Далі валідатор додає повідомлення в потрібний список через `append`.
 
-    У стартовому коді вже є реалізація, але вона повертає однакові списки. Знайдіть причину й виправте,
-    не міняючи логіку циклу.
+    У стартовому коді звіт уже збирається, але помилка, додана в `errors`, з'являється і серед попереджень.
+    Знайдіть причину й виправте, не міняючи форму словника.
 
     ```python
-    split_messages(["E:email is required", "W:phone looks short"])
-    # (['email is required'], ['phone looks short'])
+    report = new_report()
+    report["errors"].append("email is required")
+    print(report)   # {'errors': ['email is required'], 'warnings': []}
     ```
   starter: |
-    def split_messages(messages: list[str]) -> tuple[list[str], list[str]]:
+    def new_report() -> dict:
         errors = warnings = []
-        for message in messages:
-            if message.startswith("E:"):
-                errors.append(message[2:])
-            else:
-                warnings.append(message[2:])
-        return errors, warnings
+        return {"errors": errors, "warnings": warnings}
   harness: |
-    errors, warnings = split_messages(
-        ["E:email is required", "W:phone looks short", "E:age must be a number"]
-    )
-    print(errors)
-    print(warnings)
-    print(errors is warnings)
-    print(split_messages([]))
+    report = new_report()
+    report["errors"].append("email is required")
+    report["warnings"].append("phone looks short")
+    print(report)
+    print(report["errors"] is report["warnings"])
+    print(new_report())
   expected: |
-    ['email is required', 'age must be a number']
-    ['phone looks short']
+    {'errors': ['email is required'], 'warnings': ['phone looks short']}
     False
-    ([], [])
+    {'errors': [], 'warnings': []}
   hints:
-    - "Скільки списків створює перший рядок функції? Порахуйте не імена, а виклики []."
-    - "Ланцюжкове присвоєння прив'язує обидва імені до одного об'єкта. Потрібно два окремі: errors, warnings = [], []."
+    - "Скільки списків створює перший рядок функції? Порахуйте не імена, а літерали []."
+    - "Ланцюжкове присвоєння прив'язує обидва імені до одного об'єкта. Потрібні два окремі присвоєння, кожне зі своїм []: errors = [] і на наступному рядку warnings = []."
   solution: |
-    def split_messages(messages: list[str]) -> tuple[list[str], list[str]]:
-        errors, warnings = [], []
-        for message in messages:
-            if message.startswith("E:"):
-                errors.append(message[2:])
-            else:
-                warnings.append(message[2:])
-        return errors, warnings
+    def new_report() -> dict:
+        errors = []
+        warnings = []
+        return {"errors": errors, "warnings": warnings}
   requires: []
   runtime: browser
 
@@ -94,6 +84,9 @@
     Стартовий код це модуль, переписаний з JS: camelCase-імена й реєстр обробників угорі файлу,
     як це працювало б завдяки hoisting. У Python він падає ще до перевірки.
 
+    Тег рендерери збирають оператором `+`: для рядків він склеює їх, як у JS
+    (`'<input name="' + name + '">'`). Порожній тип поля означає тип за замовчуванням.
+
     Приведіть модуль до робочого стану:
     - імена за PEP 8: `render_field`, `render_text`, `render_email`, параметр `field_type`, константа `DEFAULT_TYPE`;
     - порядок визначень такий, щоб модуль виконувався зверху вниз без `NameError`;
@@ -103,7 +96,7 @@
 
     ```python
     render_field("email", "contact")   # '<input type="email" name="contact">'
-    render_field("phone", "mobile")    # невідомий тип -> рендерер за замовчуванням
+    render_field("", "mobile")         # порожній тип -> рендерер за замовчуванням
     ```
   starter: |
     defaultType = "text"
@@ -112,44 +105,46 @@
 
 
     def renderField(fieldType, name):
-        renderer = RENDERERS.get(fieldType, RENDERERS[defaultType])
-        return renderer(name)
+        if fieldType == "":
+            fieldType = defaultType
+        return RENDERERS[fieldType](name)
 
 
     def renderText(name):
-        return f'<input type="text" name="{name}">'
+        return '<input type="text" name="' + name + '">'
 
 
     def renderEmail(name):
-        return f'<input type="email" name="{name}">'
+        return '<input type="email" name="' + name + '">'
   harness: |
     print(render_field("email", "contact"))
-    print(render_field("phone", "mobile"))
+    print(render_field("", "mobile"))
     print(render_text("note"))
-    print(DEFAULT_TYPE, sorted(RENDERERS))
+    print(DEFAULT_TYPE, len(RENDERERS))
   expected: |
     <input type="email" name="contact">
     <input type="text" name="mobile">
     <input type="text" name="note">
-    text ['email', 'text']
+    text 2
   hints:
     - "Словник обчислюється в момент виконання свого рядка, тож усі функції, які він згадує, мусять бути визначені вище. Функція render_field може стояти будь-де: RENDERERS вона читає лише при виклику."
-    - "Порядок: DEFAULT_TYPE угорі, потім def render_text, def render_email, def render_field, і RENDERERS = {\"text\": render_text, \"email\": render_email} у самому низу."
+    - "Порядок: DEFAULT_TYPE угорі, потім def render_text, def render_email, def render_field (усередині if field_type == \"\": field_type = DEFAULT_TYPE і return RENDERERS[field_type](name)), і RENDERERS = {\"text\": render_text, \"email\": render_email} у самому низу."
   solution: |
     DEFAULT_TYPE = "text"
 
 
     def render_text(name):
-        return f'<input type="text" name="{name}">'
+        return '<input type="text" name="' + name + '">'
 
 
     def render_email(name):
-        return f'<input type="email" name="{name}">'
+        return '<input type="email" name="' + name + '">'
 
 
     def render_field(field_type, name):
-        renderer = RENDERERS.get(field_type, RENDERERS[DEFAULT_TYPE])
-        return renderer(name)
+        if field_type == "":
+            field_type = DEFAULT_TYPE
+        return RENDERERS[field_type](name)
 
 
     RENDERERS = {"text": render_text, "email": render_email}
@@ -200,69 +195,6 @@
 
     def page_count(total: int, page_size: int) -> int:
         return -(-total // page_size)
-  requires: []
-  runtime: browser
-
-- id: t5
-  type: code
-  title: "camelCase-ключі конфігу в snake_case"
-  prompt: |
-    Фронтенд надсилає конфіг поля з camelCase-ключами. Напишіть дві функції.
-
-    `camel_to_snake(name)` перетворює одне ім'я: кожна велика літера стає `_` плюс мала, але якщо велика
-    літера перша, підкреслення перед нею не ставиться. Абревіатур на кшталт `URL` у вхідних даних немає.
-
-    `to_snake_keys(payload)` повертає **новий** словник з перетвореними ключами й тими самими значеннями,
-    у тому самому порядку. Вхідний словник не змінюється. Ключі, що починаються з `_`, це службові поля
-    редактора (за тією самою конвенцією, що й `_name` у Python), у результат вони не потрапляють.
-
-    ```python
-    camel_to_snake("isRequired")   # 'is_required'
-    camel_to_snake("Label")        # 'label'
-    to_snake_keys({"fieldId": "email", "_editorState": {}})   # {'field_id': 'email'}
-    ```
-  starter: |
-    def camel_to_snake(name: str) -> str:
-        ...
-
-
-    def to_snake_keys(payload: dict) -> dict:
-        ...
-  harness: |
-    print(camel_to_snake("fieldId"), camel_to_snake("isRequired"), camel_to_snake("id"), camel_to_snake("Label"))
-    print(camel_to_snake("maxLengthInChars"))
-    payload = {"fieldId": "email", "isRequired": True, "_editorState": {"x": 1}, "maxLength": None}
-    converted = to_snake_keys(payload)
-    print(converted)
-    print(payload)
-    print(converted is payload, to_snake_keys({}))
-  expected: |
-    field_id is_required id label
-    max_length_in_chars
-    {'field_id': 'email', 'is_required': True, 'max_length': None}
-    {'fieldId': 'email', 'isRequired': True, '_editorState': {'x': 1}, 'maxLength': None}
-    False {}
-  hints:
-    - "Ім'я обходиться посимвольно циклом for; індекс символу дає enumerate, а перевірку регістру методи рядка isupper і lower. Для словника: новий порожній dict і цикл по payload.items()."
-    - "У camel_to_snake: if ch.isupper() and i > 0: result += \"_\" + ch.lower(), інакше result += ch.lower(). У to_snake_keys: if key.startswith(\"_\"): continue, інакше result[camel_to_snake(key)] = value."
-  solution: |
-    def camel_to_snake(name: str) -> str:
-        result = ""
-        for i, ch in enumerate(name):
-            if ch.isupper() and i > 0:
-                result += "_" + ch.lower()
-            else:
-                result += ch.lower()
-        return result
-
-
-    def to_snake_keys(payload: dict) -> dict:
-        result = {}
-        for key, value in payload.items():
-            if key.startswith("_"):
-                continue
-            result[camel_to_snake(key)] = value
-        return result
   requires: []
   runtime: browser
 

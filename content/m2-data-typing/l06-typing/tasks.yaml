@@ -181,6 +181,105 @@
 
 - id: t3
   type: code
+  title: "Реєстр рендерерів і функція, що повертає функцію"
+  prompt: |
+    Рендерер це функція `ElementConfig -> str`, у стартері це alias `Renderer`. Напишіть дві функції.
+
+    1. `with_label(render)` повертає **новий** рендерер: якщо в елемента є ключ `label`, результат
+       це `<label for="<id>"><label></label>` і одразу за ним те, що повернув `render`; якщо ключа
+       немає, результат `render` без змін.
+    2. `render_all(elements, registry)` рендерить кожен елемент рендерером з `registry` за його `type`
+       і повертає список рядків. Якщо рендерера для типу немає, замість винятку в список іде
+       `<!-- no renderer: <type> -->`. `elements` може бути будь-яким iterable, зокрема генератором.
+
+    ```python
+    render_input = lambda el: f'<input name="{el["id"]}">'
+    with_label(render_input)({"id": "email", "type": "input", "label": "E-mail"})
+    # '<label for="email">E-mail</label><input name="email">'
+    ```
+  starter: |
+    from collections.abc import Callable, Iterable, Mapping
+    from typing import Literal, NotRequired, TypedDict
+
+    type ElementType = Literal["input", "text", "select"]
+
+    class ElementConfig(TypedDict):
+        id: str
+        type: ElementType
+        label: NotRequired[str]
+
+    type Renderer = Callable[[ElementConfig], str]
+
+    def with_label(render: Renderer) -> Renderer:
+        ...
+
+    def render_all(elements: Iterable[ElementConfig], registry: Mapping[ElementType, Renderer]) -> list[str]:
+        ...
+  harness: |
+    def render_input(el: ElementConfig) -> str:
+        return f'<input name="{el["id"]}">'
+
+    def render_text(el: ElementConfig) -> str:
+        return f'<textarea name="{el["id"]}"></textarea>'
+
+    registry: dict[ElementType, Renderer] = {"input": with_label(render_input), "text": render_text}
+    elements: list[ElementConfig] = [
+        {"id": "email", "type": "input", "label": "E-mail"},
+        {"id": "phone", "type": "input"},
+        {"id": "bio", "type": "text", "label": "About"},
+        {"id": "country", "type": "select"},
+    ]
+    for html in render_all(elements, registry):
+        print(html)
+    print(render_all((), registry))
+    print(render_all((el for el in elements if el["type"] == "text"), {"text": with_label(render_text)}))
+    print(with_label(render_input) is render_input)
+  expected: |
+    <label for="email">E-mail</label><input name="email">
+    <input name="phone">
+    <textarea name="bio"></textarea>
+    <!-- no renderer: select -->
+    []
+    ['<label for="bio">About</label><textarea name="bio"></textarea>']
+    False
+  hints:
+    - "with_label визначає всередині себе нову функцію з тією самою сигнатурою, що й Renderer, і повертає її, не викликаючи. Вона бачить `render` через замикання."
+    - "Усередині: `label = el.get(\"label\")`; якщо `label is None`, повернути `render(el)`, інакше префікс з `<label>`. У render_all: `renderer = registry.get(el[\"type\"])` і перевірка на None."
+  solution: |
+    from collections.abc import Callable, Iterable, Mapping
+    from typing import Literal, NotRequired, TypedDict
+
+    type ElementType = Literal["input", "text", "select"]
+
+    class ElementConfig(TypedDict):
+        id: str
+        type: ElementType
+        label: NotRequired[str]
+
+    type Renderer = Callable[[ElementConfig], str]
+
+    def with_label(render: Renderer) -> Renderer:
+        def wrapped(el: ElementConfig) -> str:
+            label = el.get("label")
+            if label is None:
+                return render(el)
+            return f'<label for="{el["id"]}">{label}</label>' + render(el)
+        return wrapped
+
+    def render_all(elements: Iterable[ElementConfig], registry: Mapping[ElementType, Renderer]) -> list[str]:
+        result: list[str] = []
+        for el in elements:
+            renderer = registry.get(el["type"])
+            if renderer is None:
+                result.append(f"<!-- no renderer: {el['type']} -->")
+            else:
+                result.append(renderer(el))
+        return result
+  requires: []
+  runtime: browser
+
+- id: t4
+  type: code
   title: "Сирий JSON елемента в TypedDict з Literal"
   prompt: |
     Елемент форми приходить з `json.loads` як `dict[str, object]`. Напишіть `parse_element(raw)`, яка
@@ -276,105 +375,6 @@
             if not isinstance(label, str):
                 raise ValueError("label: expected string")
             result["label"] = label
-        return result
-  requires: []
-  runtime: browser
-
-- id: t4
-  type: code
-  title: "Реєстр рендерерів і функція, що повертає функцію"
-  prompt: |
-    Рендерер це функція `ElementConfig -> str`, у стартері це alias `Renderer`. Напишіть дві функції.
-
-    1. `with_label(render)` повертає **новий** рендерер: якщо в елемента є ключ `label`, результат
-       це `<label for="<id>"><label></label>` і одразу за ним те, що повернув `render`; якщо ключа
-       немає, результат `render` без змін.
-    2. `render_all(elements, registry)` рендерить кожен елемент рендерером з `registry` за його `type`
-       і повертає список рядків. Якщо рендерера для типу немає, замість винятку в список іде
-       `<!-- no renderer: <type> -->`. `elements` може бути будь-яким iterable, зокрема генератором.
-
-    ```python
-    render_input = lambda el: f'<input name="{el["id"]}">'
-    with_label(render_input)({"id": "email", "type": "input", "label": "E-mail"})
-    # '<label for="email">E-mail</label><input name="email">'
-    ```
-  starter: |
-    from collections.abc import Callable, Iterable, Mapping
-    from typing import Literal, NotRequired, TypedDict
-
-    type ElementType = Literal["input", "text", "select"]
-
-    class ElementConfig(TypedDict):
-        id: str
-        type: ElementType
-        label: NotRequired[str]
-
-    type Renderer = Callable[[ElementConfig], str]
-
-    def with_label(render: Renderer) -> Renderer:
-        ...
-
-    def render_all(elements: Iterable[ElementConfig], registry: Mapping[ElementType, Renderer]) -> list[str]:
-        ...
-  harness: |
-    def render_input(el: ElementConfig) -> str:
-        return f'<input name="{el["id"]}">'
-
-    def render_text(el: ElementConfig) -> str:
-        return f'<textarea name="{el["id"]}"></textarea>'
-
-    registry: dict[ElementType, Renderer] = {"input": with_label(render_input), "text": render_text}
-    elements: list[ElementConfig] = [
-        {"id": "email", "type": "input", "label": "E-mail"},
-        {"id": "phone", "type": "input"},
-        {"id": "bio", "type": "text", "label": "About"},
-        {"id": "country", "type": "select"},
-    ]
-    for html in render_all(elements, registry):
-        print(html)
-    print(render_all((), registry))
-    print(render_all((el for el in elements if el["type"] == "text"), {"text": with_label(render_text)}))
-    print(with_label(render_input) is render_input)
-  expected: |
-    <label for="email">E-mail</label><input name="email">
-    <input name="phone">
-    <textarea name="bio"></textarea>
-    <!-- no renderer: select -->
-    []
-    ['<label for="bio">About</label><textarea name="bio"></textarea>']
-    False
-  hints:
-    - "with_label визначає всередині себе нову функцію з тією самою сигнатурою, що й Renderer, і повертає її, не викликаючи. Вона бачить `render` через замикання."
-    - "Усередині: `label = el.get(\"label\")`; якщо `label is None`, повернути `render(el)`, інакше префікс з `<label>`. У render_all: `renderer = registry.get(el[\"type\"])` і перевірка на None."
-  solution: |
-    from collections.abc import Callable, Iterable, Mapping
-    from typing import Literal, NotRequired, TypedDict
-
-    type ElementType = Literal["input", "text", "select"]
-
-    class ElementConfig(TypedDict):
-        id: str
-        type: ElementType
-        label: NotRequired[str]
-
-    type Renderer = Callable[[ElementConfig], str]
-
-    def with_label(render: Renderer) -> Renderer:
-        def wrapped(el: ElementConfig) -> str:
-            label = el.get("label")
-            if label is None:
-                return render(el)
-            return f'<label for="{el["id"]}">{label}</label>' + render(el)
-        return wrapped
-
-    def render_all(elements: Iterable[ElementConfig], registry: Mapping[ElementType, Renderer]) -> list[str]:
-        result: list[str] = []
-        for el in elements:
-            renderer = registry.get(el["type"])
-            if renderer is None:
-                result.append(f"<!-- no renderer: {el['type']} -->")
-            else:
-                result.append(renderer(el))
         return result
   requires: []
   runtime: browser

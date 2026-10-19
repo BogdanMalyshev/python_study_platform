@@ -7,7 +7,8 @@
     а якщо аргументів немає, повертає `default`. Решту аргументів ігнорувати.
 
     Нагадування: у Python `argv[0]` це ім'я скрипта (або `-c`, або повний шлях при `-m`),
-    шляху до інтерпретатора в списку немає.
+    шляху до інтерпретатора в списку немає. Усе потрібне є в `check.py` вище: перевірка `len(argv)`,
+    `argv[1]` і ранній `return` з функції.
 
     ```python
     target_from_argv(["check.py", "contact.json"])   # 'contact.json'
@@ -29,191 +30,14 @@
     x.json
     none
   hints:
-    - "Аргументи користувача починаються з індексу 1, а не 2: інтерпретатора в sys.argv немає."
-    - "if len(argv) > 1: return argv[1], інакше default. Або через зріз: (argv[1:] or [default])[0]."
+    - "Аргументи користувача починаються з індексу 1, а не 2: інтерпретатора в sys.argv немає. Згадайте, як check.py перевіряє кількість аргументів."
+    - "check.py пише if len(argv) != 2: ... return 2. Тут умова інша: аргумент є, якщо len(argv) > 1."
+    - "if len(argv) > 1: return argv[1], а після if рядком нижче return default."
   solution: |
     def target_from_argv(argv: list[str], default: str = "form.json") -> str:
         if len(argv) > 1:
             return argv[1]
         return default
-  requires: []
-  runtime: browser
-
-- id: t2
-  type: code
-  title: "Розбір прапорців без argparse"
-  prompt: |
-    Напишіть `parse_argv(argv)`, яка розбирає список у форматі `sys.argv` на позиційні аргументи й опції
-    і повертає словник `{"args": [...], "options": {...}}`. Правила:
-
-    - `argv[0]` це ім'я скрипта, у результат не потрапляє;
-    - `--name=value` дає `options["name"] = "value"` (значення завжди рядок, навіть порожній);
-    - `--name` без `=` дає `options["name"] = True`;
-    - дефіси в імені опції замінюються на підкреслення: `--dry-run` стає `dry_run`, як це робить argparse;
-    - `--` окремим аргументом означає "далі лише позиційні", навіть якщо вони починаються з `--`;
-    - усе інше це позиційні аргументи в тому порядку, в якому прийшли.
-
-    ```python
-    parse_argv(["build.py", "form.json", "--out=dist", "--dry-run"])
-    # {'args': ['form.json'], 'options': {'out': 'dist', 'dry_run': True}}
-    ```
-
-    У реальному CLI це робить argparse (m6-l06); тут вправа на те, що саме лежить у `sys.argv`.
-  starter: |
-    def parse_argv(argv: list[str]) -> dict:
-        ...
-  harness: |
-    print(parse_argv(["build.py", "form.json", "--out=dist", "--dry-run"]))
-    print(parse_argv(["build.py"]))
-    print(parse_argv(["build.py", "--title=", "a.json", "b.json"]))
-    print(parse_argv(["build.py", "--level=a=b", "--", "--not-an-option", "c.json"]))
-    print(parse_argv(["-c", "--verbose", "x"]))
-  expected: |
-    {'args': ['form.json'], 'options': {'out': 'dist', 'dry_run': True}}
-    {'args': [], 'options': {}}
-    {'args': ['a.json', 'b.json'], 'options': {'title': ''}}
-    {'args': ['--not-an-option', 'c.json'], 'options': {'level': 'a=b'}}
-    {'args': ['x'], 'options': {'verbose': True}}
-  hints:
-    - "Ідіть по argv[1:] одним for і тримайте прапорець 'після --'. Опція це рядок, що починається з '--' і довший за два символи."
-    - "str.partition('=') розбиває лише по першому '=' і каже, чи він був: name, sep, value = arg[2:].partition('='). Якщо sep порожній, значення True."
-  solution: |
-    def parse_argv(argv: list[str]) -> dict:
-        args: list[str] = []
-        options: dict[str, str | bool] = {}
-        only_positional = False
-        for arg in argv[1:]:
-            if only_positional:
-                args.append(arg)
-            elif arg == "--":
-                only_positional = True
-            elif arg.startswith("--"):
-                name, sep, value = arg[2:].partition("=")
-                options[name.replace("-", "_")] = value if sep else True
-            else:
-                args.append(arg)
-        return {"args": args, "options": options}
-  requires: []
-  runtime: browser
-
-- id: t3
-  type: code
-  title: "main(argv) і коди завершення"
-  prompt: |
-    Напишіть `main(argv)` для скрипта `checkids.py FIELD_ID...`, який перевіряє ідентифікатори полів FormBuilder.
-    Функція нічого не викликає сама і не робить `sys.exit`: вона повертає код завершення, а `sys.exit(main(sys.argv))`
-    стоїть під `if __name__ == "__main__"` (у харнесі його імітує цикл з `except SystemExit`).
-
-    - Немає жодного id після імені скрипта: надрукувати в `sys.stderr` рядок `usage: <argv[0]> FIELD_ID...` і повернути `2`.
-    - Id валідний, якщо це ідентифікатор Python у нижньому регістрі: `"email"`, `"phone_2"`. Невалідні: `"Email"`, `"2phone"`, `"first-name"`.
-    - Для кожного невалідного id надрукувати в `sys.stderr` рядок `invalid: <id>`; перевірити всі, а не зупинитися на першому.
-    - Повернути `1`, якщо був хоч один невалідний, інакше `0`.
-
-    Харнес порівнює лише stdout, тобто коди завершення; що саме ви пишете в stderr, видно в консолі, але не перевіряється.
-  starter: |
-    import sys
-
-
-    def main(argv: list[str]) -> int:
-        ...
-  harness: |
-    import sys
-
-    for argv in [
-        ["checkids.py", "email", "phone_2"],
-        ["checkids.py"],
-        ["checkids.py", "email", "Email", "first-name"],
-        ["checkids.py", "2phone"],
-    ]:
-        try:
-            sys.exit(main(argv))
-        except SystemExit as e:
-            print(argv[1:], "->", e.code)
-  expected: |
-    ['email', 'phone_2'] -> 0
-    [] -> 2
-    ['email', 'Email', 'first-name'] -> 1
-    ['2phone'] -> 1
-  hints:
-    - "Спершу перевірка кількості аргументів з раннім return 2, потім цикл по argv[1:] з лічильником або списком помилок."
-    - "Валідність: field_id.isidentifier() and field_id == field_id.lower(). Друк у stderr: print(..., file=sys.stderr)."
-  solution: |
-    import sys
-
-
-    def main(argv: list[str]) -> int:
-        if len(argv) < 2:
-            print(f"usage: {argv[0]} FIELD_ID...", file=sys.stderr)
-            return 2
-        invalid = [fid for fid in argv[1:] if not (fid.isidentifier() and fid == fid.lower())]
-        for fid in invalid:
-            print(f"invalid: {fid}", file=sys.stderr)
-        return 1 if invalid else 0
-  requires: []
-  runtime: browser
-
-- id: t4
-  type: code
-  title: "Що потрапить у sys.path[0]"
-  prompt: |
-    Напишіть `first_path_entry(command, cwd)`, яка за командою запуску інтерпретатора і поточною директорією
-    повертає, яким буде `sys.path[0]` у CPython 3.12. Команда приходить як список, `command[0]` це `"python"`.
-    Правила з уроку:
-
-    - `python path/to/script.py ...`: абсолютний шлях до директорії скрипта. Відносний шлях скрипта
-      відраховується від `cwd`; результат нормалізований (без `..`, `.` і кінцевого `/`).
-    - `python -m pkg.module ...`: `cwd`.
-    - `python -c "code" ...` і просто `python` (REPL): порожній рядок `""`.
-    - Перед режимом можуть стояти прапорці без значень: `-u`, `-O`, `-B`, `-i`. Їх пропустити.
-      `python -i script.py` поводиться як запуск скрипта.
-
-    Використовуйте `posixpath` (це `os.path` для POSIX-шляхів), щоб результат не залежав від ОС.
-
-    ```python
-    first_path_entry(["python", "src/app/main.py"], "/proj")   # '/proj/src/app'
-    first_path_entry(["python", "-m", "app.main"], "/proj/src")  # '/proj/src'
-    ```
-  starter: |
-    import posixpath
-
-
-    def first_path_entry(command: list[str], cwd: str) -> str:
-        ...
-  harness: |
-    print(repr(first_path_entry(["python", "src/app/main.py"], "/proj")))
-    print(repr(first_path_entry(["python", "-m", "app.main"], "/proj/src")))
-    print(repr(first_path_entry(["python", "-c", "print(1)"], "/proj")))
-    print(repr(first_path_entry(["python"], "/proj")))
-    print(repr(first_path_entry(["python", "-u", "-O", "tools/../check.py", "form.json"], "/proj")))
-    print(repr(first_path_entry(["python", "-i", "/opt/tools/build.py"], "/proj")))
-    print(repr(first_path_entry(["python", "-B", "-m", "pytest", "-q"], "/proj")))
-    print(repr(first_path_entry(["python", "main.py"], "/proj/src/app/")))
-  expected: |
-    '/proj/src/app'
-    '/proj/src'
-    ''
-    ''
-    '/proj'
-    '/opt/tools'
-    '/proj'
-    '/proj/src/app'
-  hints:
-    - "Пропустіть command[0], потім ідіть по аргументах: прапорці з множини {'-u', '-O', '-B', '-i'} пропускаєте, перший інший аргумент визначає режим."
-    - "Для скрипта: posixpath.normpath(posixpath.join(cwd, posixpath.dirname(script))). join з абсолютним другим аргументом сам відкидає cwd."
-  solution: |
-    import posixpath
-
-
-    def first_path_entry(command: list[str], cwd: str) -> str:
-        for arg in command[1:]:
-            if arg in {"-u", "-O", "-B", "-i"}:
-                continue
-            if arg == "-m":
-                return posixpath.normpath(cwd)
-            if arg == "-c":
-                return ""
-            return posixpath.normpath(posixpath.join(cwd, posixpath.dirname(arg)))
-        return ""
   requires: []
   runtime: browser
 
@@ -307,6 +131,29 @@
     і виглядає як штатне завершення, але будь-який аргумент, крім `None` і цілого числа, означає помилку з кодом 1.
     `255` це плутанина з `exit(-1)` у C і shell. Рядок як аргумент документований: `SystemExit` приймає будь-який об'єкт,
     і саме так зручно завершувати CLI з повідомленням.
+
+- id: q5
+  type: quiz
+  question: |
+    Проєкт лежить у `/proj`, файл `/proj/src/app/main.py` друкує `sys.path[0]`. Його запускають двома способами:
+    ```bash
+    cd /proj/src && python -m app.main
+    cd /proj && python src/app/main.py
+    ```
+    Що надрукують ці два запуски, по черзі?
+  options:
+    - "`/proj/src`, потім `/proj/src/app`"
+    - "`/proj/src/app` в обох випадках"
+    - "`/proj/src`, потім `/proj`"
+    - "порожній рядок, потім `/proj/src/app`"
+  answer: 0
+  explain: |
+    `sys.path[0]` залежить від способу запуску. При `python -m` це поточна директорія, тобто `/proj/src`,
+    і саме тому там знаходиться пакет `app`. При `python file.py` це директорія скрипта, незалежно від
+    того, звідки його запустили: `/proj/src/app`. Варіант з `/proj/src/app` двічі це інтуїція Node, де
+    пошук іде від файлу з імпортом, але для `-m` Python дивиться на поточну директорію. Варіант з `/proj`
+    для другого запуску переносить правило `-m` на запуск шляхом. Порожній рядок дають лише `-c` і REPL,
+    а не `-m`.
 
 - id: p1
   type: project

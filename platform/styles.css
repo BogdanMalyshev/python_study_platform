@@ -113,7 +113,6 @@ code,pre,kbd{font-family:var(--font-mono)}
 
 /* ---------- Lesson ---------- */
 .lesson{max-width:1060px;margin:0 auto;padding:28px max(24px,env(safe-area-inset-right,0px)) 80px max(24px,env(safe-area-inset-left,0px))}
-.lesson > *, .lesson-body > *{max-width:760px}
 .lesson-body > .pair{max-width:none}
 .lesson-body > pre, .lesson-body > .code-block{max-width:860px}
 .eyebrow{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap}

@@ -1202,6 +1202,8 @@ ValidationError
 
 <!-- task: t5 -->
 
+<!-- task: t6 -->
+
 ## Типові помилки JS-розробника
 
 1. **`try { } catch (e) { }` як голий `except:`.** Переносять "ловити все" з JS, де інакше неможливо. У Python це ковтає `SystemExit`, Ctrl+C і `CancelledError`, а також ваші `NameError` і `TypeError`. Правильно: конкретний тип або кортеж типів; `except Exception` лише на межі з логуванням.

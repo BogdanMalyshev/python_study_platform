@@ -204,6 +204,70 @@
   requires: []
   runtime: browser
 
+- id: t6
+  type: code
+  title: "camelCase-ключі конфігу в snake_case"
+  prompt: |
+    Фронтенд надсилає конфіг поля з camelCase-ключами. Напишіть дві функції.
+
+    `camel_to_snake(name)` перетворює одне ім'я: кожна велика літера стає `_` плюс мала, але якщо велика
+    літера перша, підкреслення перед нею не ставиться. Абревіатур на кшталт `URL` у вхідних даних немає.
+
+    `to_snake_keys(payload)` повертає **новий** словник з перетвореними ключами й тими самими значеннями,
+    у тому самому порядку. Вхідний словник не змінюється. Ключі, що починаються з `_`, це службові поля
+    редактора (за тією самою конвенцією, що й `_name` у Python), у результат вони не потрапляють.
+
+    ```python
+    camel_to_snake("isRequired")   # 'is_required'
+    camel_to_snake("Label")        # 'label'
+    to_snake_keys({"fieldId": "email", "_editorState": {}})   # {'field_id': 'email'}
+    ```
+  starter: |
+    def camel_to_snake(name: str) -> str:
+        ...
+
+
+    def to_snake_keys(payload: dict) -> dict:
+        ...
+  harness: |
+    print(camel_to_snake("fieldId"), camel_to_snake("isRequired"), camel_to_snake("id"), camel_to_snake("Label"))
+    print(camel_to_snake("maxLengthInChars"))
+    payload = {"fieldId": "email", "isRequired": True, "_editorState": {"x": 1}, "maxLength": None}
+    converted = to_snake_keys(payload)
+    print(converted)
+    print(payload)
+    print(converted is payload, to_snake_keys({}))
+  expected: |
+    field_id is_required id label
+    max_length_in_chars
+    {'field_id': 'email', 'is_required': True, 'max_length': None}
+    {'fieldId': 'email', 'isRequired': True, '_editorState': {'x': 1}, 'maxLength': None}
+    False {}
+  hints:
+    - "Ім'я обходиться посимвольно циклом for, а позицію символу дає enumerate з цього уроку, без ручного лічильника. Регістр перевіряє предикат isupper (та сама родина, що isalpha і isdigit з m1-l04). Словник будується новий: порожній dict і цикл по payload.items(), службові ключі пропускаються через continue."
+    - "У camel_to_snake: for i, ch in enumerate(name): і if ch.isupper() and i > 0: result += \"_\" + ch.lower(), інакше result += ch.lower()."
+    - "У to_snake_keys: for key, value in payload.items(): if key.startswith(\"_\"): continue, інакше result[camel_to_snake(key)] = value. Наприкінці return result."
+  solution: |
+    def camel_to_snake(name: str) -> str:
+        result = ""
+        for i, ch in enumerate(name):
+            if ch.isupper() and i > 0:
+                result += "_" + ch.lower()
+            else:
+                result += ch.lower()
+        return result
+
+
+    def to_snake_keys(payload: dict) -> dict:
+        result = {}
+        for key, value in payload.items():
+            if key.startswith("_"):
+                continue
+            result[camel_to_snake(key)] = value
+        return result
+  requires: []
+  runtime: browser
+
 - id: q1
   type: quiz
   question: |

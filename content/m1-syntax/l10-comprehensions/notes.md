@@ -36,3 +36,18 @@
 
 - Спирається на m1-l03 (truthiness: `is not None` у walrus-прикладах і `t5`), m1-l06 (iterable, змінна циклу живе після `for`, межа цикл/comprehension), m1-l07 (`*` у виклику `zip(*matrix)`), m1-l09 (`map`, `filter`, `key=`, `reduce`).
 - Готує для m1-l11 (функція-обгортка, що повертає `None` замість винятку, бо `try` у comprehension не вставити), m2-l02 (aliasing у `[[0] * n] * m`), m2-l04 (`Counter`, `defaultdict`), m2-l09 і капстоуну (індекс елементів, перевірка унікальності імен, умовна видимість), m5-l02 (generator expression як найпростіший генератор).
+
+## Редакторська правка: відповідність завдань пройденому
+
+Правило: завдання використовує лише конструкції, пояснені в цьому уроці до його маркера або в попередніх уроках.
+
+Що змінено: нічого, усі завдання відповідають правилу.
+
+Завдання уроку:
+- t1 `visible_specs`: m1-l02 (`dict.get`), m1-l04 (f-рядок), цей урок (list comprehension з фільтром).
+- t2 `make_grid`: m1-l06 (`range`, `_`), цей урок (вкладена comprehension, `[x] * n` і пастка спільних рядків).
+- t3 `field_types`: m1-l01 (`in` на словнику), цей урок (dict comprehension з двома `for`).
+- t4 `form_stats`: m1-l02 (`dict.get`), m1-l04 (`join`), m1-l09 (`sum`/`max`/`all` з generator expression, `default=`), цей урок (generator expression).
+- t5 `parse_ages`: m1-l04 (`strip`, `isdigit`), m1-l05 (walrus), цей урок (walrus у comprehension, `is not None`).
+- t6 `all_elements` / `field_names` / `build_index` / `conditional_fields`: m1-l03 (`or`), m1-l07 (рекурсія, список `+`), цей урок (list/dict comprehension з кількома `for`, умовний вираз).
+- q1-q3: лише цей урок.

@@ -75,3 +75,22 @@ build backend `uv_build` (>=0.9.28,<0.10.0). Python-приклади й завд
   `__init__.py`, `__all__`), m3-l03 (`testpaths`, `importlib` mode, smoke-тест як перший тест), m6-l06 (заглушка
   `cli.py` замінюється справжньою CLI), модуль 7 (той самий пакет отримує FastAPI-застосунок).
 - Еталонний скелет: `capstone/` у корені курсу (`.venv/` лишено, він у `.gitignore`).
+
+## Редакторська правка: відповідність завдань пройденому
+
+Правило: завдання може спиратися лише на те, що пояснено в цьому уроці до його маркера, або в попередніх уроках. Модуль 0 іде до будь-якого уроку синтаксису (учень до m1-l01 Python не знає), тому `type: code` у модулі 0 лишається лише там, де розв'язок складається з того, що буквально показують приклади цього ж уроку; решту прибрано або перетворено на тести на розуміння. Інших code-завдань у модулі 0 немає.
+
+Що змінено:
+- t1 `module_name` перетворено на q5 (маркер на місці t1, кінець розділу "Мінімальний скелет проєкту"): яке ім'я модуля мають `src/formbuilder/cli.py` і `src/formbuilder/config/__init__.py`. Відповідь `formbuilder.cli` і `formbuilder.config`; перевірено імпортом у scratch-пакеті (`__name__`).
+- t2 `load_entry_point`, t3 `main` зі stdout/stderr, t5 `check_skeleton` прибрано: потребували рядкових методів, циклів, словників і винятків, яких ще не пояснено.
+- t4 (збір pytest) перетворено на q6 (маркер на місці t4, розділ "Тести в `tests/` і перший smoke-тест"): які node id збере pytest з `tests/test_smoke.py`, `tests/conftest.py`, `tests/helpers.py`, `tests/render_test.py`. Відповідь перевірено `.venv/bin/pytest --collect-only -q` на scratch-проєкті з `testpaths = ["tests"]` і `--import-mode=importlib`: `tests/render_test.py::test_render`, `tests/test_smoke.py::test_package_is_installed_and_cli_runs`.
+- Code-завдань в уроці не лишилось.
+
+Завдання уроку після правки:
+- q1: flat проти src layout, цей урок.
+- q5: правило "шлях у src/ -> ім'я модуля" з цього уроку плюс `__name__` з m0-l03.
+- q2: editable install і `importlib.metadata`, цей урок.
+- q3: `[project.scripts]` і `sys.exit(main())`, цей урок плюс коди завершення з m0-l03.
+- q6: правила збору pytest з цього уроку.
+- q4: відносні імпорти й запуск файлу шляхом, цей урок.
+- p1: проєктне, скелет капстоуну.

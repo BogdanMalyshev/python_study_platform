@@ -256,7 +256,7 @@
     True False
   hints:
     - "Базовому класу достатньо docstring або pass. Нащадки викликають super().__init__(message) і лише потім присвоюють self.<атрибут>."
-    - "def __init__(self, element_id, type_name): super().__init__(f\"element {element_id!r}: unknown type {type_name!r}\"); self.element_id = element_id; self.type_name = type_name. У check_elements множина seen і raise замість return."
+    - "def __init__(self, element_id, type_name): super().__init__(f\"element {element_id!r}: unknown type {type_name!r}\"); self.element_id = element_id; self.type_name = type_name. У check_elements список уже побачених id seen = [] з перевіркою in і append, а при порушенні raise замість return."
   solution: |
     class ConfigError(Exception):
         """Base class for form config errors."""
@@ -276,13 +276,13 @@
 
 
     def check_elements(elements: list[dict], known_types: set[str]) -> None:
-        seen: set[str] = set()
+        seen: list[str] = []
         for element in elements:
             if element["type"] not in known_types:
                 raise UnknownElementType(element["id"], element["type"])
             if element["id"] in seen:
                 raise DuplicateElementId(element["id"])
-            seen.add(element["id"])
+            seen.append(element["id"])
   requires: []
   runtime: browser
 
@@ -413,6 +413,104 @@
             return {"status": 422, "kind": type(e).__name__, "error": str(e)}
         else:
             return {"status": 200, "elements": len(config["elements"])}
+  requires: []
+  runtime: browser
+
+- id: t6
+  type: code
+  title: "Типізація відповіді форми"
+  prompt: |
+    Відповіді форми приходять з браузера рядками або `None`. Напишіть `coerce_answer(raw, field_type)`,
+    яка перетворює відповідь на значення потрібного типу:
+
+    - `None` або рядок, порожній після `strip()`, дає `None` для будь-якого типу поля.
+    - `"text"`: рядок без пробілів по краях.
+    - `"number"`: `int`, якщо рядок це ціле число, інакше `float`. `"42"` дає `42`, `"42.5"` дає `42.5`, `"1e3"` дає `1000.0`.
+      NaN і нескінченність (`"nan"`, `"inf"`, `"-inf"`) не є відповіддю: `ValueError`. Нечисловий рядок теж `ValueError`.
+    - `"checkbox"`: `"true"` дає `True`, `"false"` дає `False`, без урахування регістру. Будь-що інше `ValueError`.
+    - Невідомий `field_type`: `ValueError`.
+
+    Текст повідомлення в `ValueError` довільний, харнес друкує лише тип винятку.
+
+    ```python
+    coerce_answer(" 42 ", "number")      # 42
+    coerce_answer("false", "checkbox")   # False
+    coerce_answer("nan", "number")       # ValueError
+    ```
+  starter: |
+    def coerce_answer(raw: str | None, field_type: str) -> str | int | float | bool | None:
+        ...
+  harness: |
+    cases = [
+        ("42", "number"),
+        (" 42.5 ", "number"),
+        ("1e3", "number"),
+        ("007", "number"),
+        ("-3", "number"),
+        ("", "number"),
+        (None, "text"),
+        ("  Ann  ", "text"),
+        ("false", "checkbox"),
+        ("TRUE", "checkbox"),
+        ("   ", "checkbox"),
+    ]
+    for raw, field_type in cases:
+        value = coerce_answer(raw, field_type)
+        print(repr(raw), field_type, "->", repr(value), type(value).__name__)
+
+    for raw, field_type in [("nan", "number"), ("-inf", "number"), ("abc", "number"), ("yes", "checkbox"), ("1", "date")]:
+        try:
+            coerce_answer(raw, field_type)
+            print(repr(raw), field_type, "-> no error")
+        except ValueError:
+            print(repr(raw), field_type, "-> ValueError")
+  expected: |
+    '42' number -> 42 int
+    ' 42.5 ' number -> 42.5 float
+    '1e3' number -> 1000.0 float
+    '007' number -> 7 int
+    '-3' number -> -3 int
+    '' number -> None NoneType
+    None text -> None NoneType
+    '  Ann  ' text -> 'Ann' str
+    'false' checkbox -> False bool
+    'TRUE' checkbox -> True bool
+    '   ' checkbox -> None NoneType
+    'nan' number -> ValueError
+    '-inf' number -> ValueError
+    'abc' number -> ValueError
+    'yes' checkbox -> ValueError
+    '1' date -> ValueError
+  hints:
+    - "Спершу обробіть `None` і порожній рядок, потім розгалужуйтесь за типом поля. `bool(\"false\")` тут не допоможе: це `True` (truthiness непорожнього рядка, m1-l03)."
+    - "Для числа це EAFP з цього уроку: спробувати `int(s)` у `try`, а в `except ValueError` перейти до `float(s)`. Нечисловий рядок упаде вже в `float` і сам дасть потрібний `ValueError`. Але `float(\"nan\")` і `float(\"inf\")` не падають (m1-l02), тому після `float` потрібна перевірка `math.isnan(x) or math.isinf(x)`; `math.isinf` це пара до `math.isnan`, те саме дає `abs(x) == math.inf`."
+    - "try: return int(s) / except ValueError: x = float(s); if math.isnan(x) or math.isinf(x): raise ValueError(...); return x. Для checkbox: s.lower() == \"true\" / \"false\", інакше raise ValueError(...)."
+  solution: |
+    import math
+
+
+    def coerce_answer(raw: str | None, field_type: str) -> str | int | float | bool | None:
+        if raw is None or raw.strip() == "":
+            return None
+        s = raw.strip()
+        if field_type == "text":
+            return s
+        if field_type == "number":
+            try:
+                return int(s)
+            except ValueError:
+                x = float(s)
+            if math.isnan(x) or math.isinf(x):
+                raise ValueError(f"not a finite number: {raw!r}")
+            return x
+        if field_type == "checkbox":
+            lowered = s.lower()
+            if lowered == "true":
+                return True
+            if lowered == "false":
+                return False
+            raise ValueError(f"not a checkbox value: {raw!r}")
+        raise ValueError(f"unknown field type: {field_type!r}")
   requires: []
   runtime: browser
 

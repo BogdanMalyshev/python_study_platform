@@ -91,130 +91,6 @@
 
 - id: t3
   type: code
-  title: "Список помилок, який сам знає, чи він порожній"
-  prompt: |
-    Клас `Errors` збирає повідомлення валідації. Допишіть його так, щоб:
-
-    - `len(errors)` повертав кількість повідомлень;
-    - `if errors:` був істинним, коли є хоч одна помилка, і хибним для порожнього. Метод `__bool__` не писати:
-      truthiness має випливати з довжини;
-    - `Errors(["a"]) == Errors(["a"])` був `True`: два об'єкти рівні, якщо в них однакові повідомлення в тому
-      самому порядку. Порівняння з будь-чим, що не `Errors`, дає `False`.
-
-    ```python
-    errors = Errors()
-    bool(errors)                       # False
-    errors.add("email: required")
-    bool(errors), len(errors)          # (True, 1)
-    Errors(["a"]) == Errors(["a"])     # True
-    Errors() == []                     # False
-    ```
-  starter: |
-    class Errors:
-        def __init__(self, items: list[str] | None = None):
-            self.items = list(items) if items is not None else []
-
-        def add(self, message: str) -> None:
-            self.items.append(message)
-  harness: |
-    errors = Errors()
-    print(bool(errors), len(errors))
-    errors.add("email: required")
-    print(bool(errors), len(errors))
-    print(Errors(["a"]) == Errors(["a"]), Errors(["a"]) == Errors(["b"]))
-    print(Errors() == [], Errors() == None)
-    print(Errors(["a"]) != Errors(["a"]))
-    print("ok" if not Errors() else "has errors")
-    print("__bool__" in Errors.__dict__)
-  expected: |
-    False 0
-    True 1
-    True False
-    False False
-    False
-    ok
-    False
-  hints:
-    - "Потрібні два dunder-методи: один дає довжину, другий рівність. Truthiness і != Python виведе з них сам."
-    - "def __len__(self) -> int: return len(self.items); def __eq__(self, other): return isinstance(other, Errors) and self.items == other.items"
-  solution: |
-    class Errors:
-        def __init__(self, items: list[str] | None = None):
-            self.items = list(items) if items is not None else []
-
-        def add(self, message: str) -> None:
-            self.items.append(message)
-
-        def __len__(self) -> int:
-            return len(self.items)
-
-        def __eq__(self, other: object) -> bool:
-            return isinstance(other, Errors) and self.items == other.items
-  requires: []
-  runtime: browser
-
-- id: t4
-  type: code
-  title: "Часткове оновлення поля через sentinel"
-  prompt: |
-    Напишіть `patch_field(field, *, label=..., placeholder=..., max_length=...)`, яка повертає новий словник
-    поля з такими правилами для кожного з трьох параметрів:
-
-    - параметр не передали: ключ не змінюється;
-    - передали `None`: ключ видаляється з результату (якщо його не було, нічого не відбувається);
-    - передали будь-яке інше значення, включно з `""` і `0`: ключ встановлюється в це значення.
-
-    Вхідний словник не змінювати. `None` тут не може означати "не передали", тому значенням за замовчуванням
-    має бути sentinel `MISSING`, і перевіряти його треба так, щоб чужий `__eq__` не міг підробити відповідь.
-
-    ```python
-    field = {"id": "email", "label": "Email", "max_length": 255}
-    patch_field(field, label="")          # {'id': 'email', 'label': '', 'max_length': 255}
-    patch_field(field, max_length=None)   # {'id': 'email', 'label': 'Email'}
-    ```
-  starter: |
-    MISSING = object()
-
-
-    def patch_field(field: dict, *, label=MISSING, placeholder=MISSING, max_length=MISSING) -> dict:
-        ...
-  harness: |
-    field = {"id": "email", "label": "Email", "placeholder": "you@example.com", "max_length": 255}
-    print(patch_field(field))
-    print(patch_field(field, label="E-mail"))
-    print(patch_field(field, placeholder=None))
-    print(patch_field(field, label="", max_length=0))
-    print(patch_field({"id": "age"}, label=None, max_length=3))
-    print(field)
-  expected: |
-    {'id': 'email', 'label': 'Email', 'placeholder': 'you@example.com', 'max_length': 255}
-    {'id': 'email', 'label': 'E-mail', 'placeholder': 'you@example.com', 'max_length': 255}
-    {'id': 'email', 'label': 'Email', 'max_length': 255}
-    {'id': 'email', 'label': '', 'placeholder': 'you@example.com', 'max_length': 0}
-    {'id': 'age', 'max_length': 3}
-    {'id': 'email', 'label': 'Email', 'placeholder': 'you@example.com', 'max_length': 255}
-  hints:
-    - "Три стани на параметр: is MISSING, is None, усе інше. Truthiness тут не допоможе, бо \"\" і 0 це легальні значення. Почніть з копії dict(field)."
-    - "for key, value in ((\"label\", label), (\"placeholder\", placeholder), (\"max_length\", max_length)): if value is MISSING: continue; if value is None: updated.pop(key, None); else: updated[key] = value"
-  solution: |
-    MISSING = object()
-
-
-    def patch_field(field: dict, *, label=MISSING, placeholder=MISSING, max_length=MISSING) -> dict:
-        updated = dict(field)
-        for key, value in (("label", label), ("placeholder", placeholder), ("max_length", max_length)):
-            if value is MISSING:
-                continue
-            if value is None:
-                updated.pop(key, None)
-            else:
-                updated[key] = value
-        return updated
-  requires: []
-  runtime: browser
-
-- id: t5
-  type: code
   title: "Валідація відповіді за конфігом поля"
   prompt: |
     Напишіть `validate_answer(field, value)`, яка повертає рядок з помилкою або `None`, якщо відповідь валідна.
@@ -350,3 +226,29 @@
     операнд, число `2`. `False` це прочитання "x дорівнює 1 або 2", яке Python не підтримує; правильна форма
     `x in (1, 2)`. `True` вийшло б, якби `or` повертав `bool`. `SyntaxError` ні: вираз легальний,
     і саме тому пастка небезпечна, в `if` він завжди істинний.
+
+- id: q5
+  type: quiz
+  question: |
+    Що надрукує цей код?
+    ```python
+    class Errors:
+        def __init__(self, items):
+            self.items = items
+
+        def __len__(self):
+            return len(self.items)
+
+
+    empty = Errors([])
+    print(bool(empty), bool(Errors(["required"])), empty == Errors([]))
+    ```
+  options: ["False True False", "True True False", "False True True", "True True True"]
+  answer: 0
+  explain: |
+    `__bool__` у класі немає, тож `bool()` питає `__len__`: довжина `0` дає `False`, довжина `1` дає `True`.
+    Власного `__eq__` теж немає, і `==` успадковано від `object`, де рівність означає identity: два окремі
+    екземпляри не рівні, навіть з однаковим вмістом, тому `False`.
+    `True True False` це JS-інтуїція "будь-який об'єкт істинний"; у Python truthiness вирішує сам клас.
+    `False True True` вважає, що `==` порівнює вміст автоматично, як у списків; це правда лише для типів,
+    які визначили `__eq__`. `True True True` поєднує обидві помилки.
